@@ -1,0 +1,18 @@
+[package]
+name = "codegen"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Generates Rust protocol types from packages/schemas (A-DX-3). Run `just codegen`."
+
+[lints]
+workspace = true
+
+[dependencies]
+typify = { version = "0.10.1", default-features = false }
+schemars = "0.8.22"
+serde_json = "1"
+syn = { version = "2", features = ["full"] }
+prettyplease = "0.2"

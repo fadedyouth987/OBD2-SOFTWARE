@@ -1,0 +1,8 @@
+{
+  "code": "VERSION_UNSUPPORTED",
+  "detail_json": null,
+  "hint": "The app and edge daemon versions are incompatible; update the edge daemon.",
+  "message": "Protocol 2.0.0 is not supported by this daemon (1.x).",
+  "request_id": null,
+  "type": "ErrorResponse"
+}

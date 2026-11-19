@@ -1,0 +1,10 @@
+{
+  "payload_hex": "2F0B2A0301",
+  "protocol": "UDS",
+  "request_id": "req-1",
+  "rx_id": 2024,
+  "service_id": 47,
+  "tx_id": 2016,
+  "type": "SafetyConfirmRequest",
+  "user_ack_text": "Run the idle-speed actuator test on the DME. The engine speed will change."
+}

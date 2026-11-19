@@ -1,0 +1,10 @@
+{
+  "payload_hex": "14FFFF",
+  "protocol": "KWP2000",
+  "request_id": "web_05",
+  "rx_id": 1554,
+  "service_id": 20,
+  "tx_id": 1777,
+  "type": "SafetyConfirmRequest",
+  "user_ack_text": "Clear all fault memory on the DSC. Stored freeze-frame data will be lost."
+}

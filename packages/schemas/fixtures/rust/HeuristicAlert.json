@@ -1,0 +1,17 @@
+{
+  "evidence_json": {
+    "idle": {
+      "ltft_pct": 6.3,
+      "stft_pct": 9.4
+    },
+    "rpm_2500": {
+      "ltft_pct": 2.0,
+      "stft_pct": 1.2
+    }
+  },
+  "recommended_test": "Smoke-test the intake between the MAF and the throttle body.",
+  "rule_id": "fuel_trim.vacuum_leak",
+  "severity": "AMBER",
+  "title": "Lean at idle, normal under load: likely vacuum leak",
+  "type": "HeuristicAlert"
+}

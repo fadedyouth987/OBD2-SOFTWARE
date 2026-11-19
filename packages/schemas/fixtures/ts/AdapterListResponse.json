@@ -1,0 +1,18 @@
+{
+  "adapters": [
+    {
+      "adapter_id": "j2534-0",
+      "display_name": "Mongoose Pro",
+      "kind": "J2534",
+      "path": "C:\\Windows\\SysWOW64\\mongoose.dll"
+    },
+    {
+      "adapter_id": "can0",
+      "display_name": "can0",
+      "kind": "SOCKETCAN",
+      "path": "can0"
+    }
+  ],
+  "request_id": "web_02",
+  "type": "AdapterListResponse"
+}

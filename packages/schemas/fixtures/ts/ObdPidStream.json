@@ -1,0 +1,19 @@
+{
+  "samples": [
+    {
+      "name": "Coolant temp",
+      "pid": 5,
+      "timestamp_us": 1795000000001000,
+      "unit": "°C",
+      "value": -12.5
+    },
+    {
+      "name": "Vehicle speed",
+      "pid": 13,
+      "timestamp_us": 1795000000001000,
+      "unit": "km/h",
+      "value": 0
+    }
+  ],
+  "type": "ObdPidStream"
+}

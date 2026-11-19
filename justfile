@@ -33,15 +33,26 @@ dev: infra-up
     (cd apps/web && pnpm dev) &
     wait
 
+# Regenerate Rust types, Zod validators and docs/protocol.md from packages/schemas (A-DX-3)
+codegen:
+    cargo run -q -p codegen --locked
+    pnpm --filter @obd2/schemas codegen
+
+# Fail if any generated file is out of date with packages/schemas (CI drift gate)
+codegen-check:
+    cargo run -q -p codegen --locked -- --check
+    pnpm --filter @obd2/schemas codegen:check
+
 # Run every test suite
 test:
     cargo test --workspace --locked
     cd services/cloud-api && uv run pytest -q
     cd services/ai-worker && uv run pytest -q
     cd apps/web && pnpm typecheck
+    cd apps/web && pnpm test
 
-# Lint and format checks across all languages
-lint:
+# Lint and format checks across all languages, plus generated-code drift
+lint: codegen-check
     cargo fmt --all --check
     cargo clippy --workspace --all-targets --locked -- -D warnings
     cd services/cloud-api && uv run ruff check . && uv run ruff format --check .
