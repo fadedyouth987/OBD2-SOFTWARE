@@ -8,6 +8,7 @@ Progress through [`PLAN.md`](PLAN.md), in Rule 1 order. A task is done when its 
 | 0.2 Wire schemas and safety policy | Done | 52 parity tests (Rust + vitest), `just codegen-check` drift gate. |
 | 1.1 HAL and virtual vehicles | Done, with hardware items open | See below. |
 | 1.2 Transports, clients, safety interlock | Done | See below. |
+| 1.3 Edge heuristics, CAN RE, ring buffer | Done | See below. |
 
 ## Task 1.1 detail
 
@@ -53,8 +54,27 @@ Assumptions to confirm on hardware:
 - After NRC 0x36/0x37 the interlock halts SecurityAccess for 10 s (`DEFAULT_SECURITY_DELAY`), since ECUs do not report their delay. NRC 0x35 halts it for the rest of the session.
 - A plain ELM327 only listens while a command runs, so a final answer that comes long after NRC 0x78 can be missed on CAN; STN chips and the other adapters are not affected.
 
+## Task 1.3 detail
+
+Gate:
+
+- Exact `HeuristicAlert`s from fixtures (`apps/edge-daemon/fixtures/heuristics/`, expected alerts written by hand from the rules): vacuum leak, odometer mismatch, recently cleared ECU, unsupported vehicle, plus cold-soak divergence. `tests/heuristics_gate.rs::fixtures_produce_exact_alerts`; every alert also passes the wire schema.
+- The same audit end to end on the virtual vehicles: rolled-back cluster and freshly cleared codes on the Falcon, a VIN-swapped CAS on the D-CAN E90.
+- Window-switch toggle log: `analytics::can_re::tests::window_switch_toggle_log`. On the generic vehicle's broadcast frames it finds the switch as a boolean, both rolling counters, the CRC byte (block score 0.88), RPM as continuous and the rest static; baseline-vs-action isolates exactly the switch bit.
+
+A-ENG-2: each vehicle map names its speed source. On the K-line E90 a DSC session has no speed without re-initializing to the DME, so gated requests get `PRECONDITION_UNKNOWN` (`kline_speed_source_refuses_without_fresh_speed`); a DME session reads PID 0x0D itself.
+
+A-ENG-9: the SQLite WAL ring buffer evicts the oldest synced rows at the cap (default 2 GB) and never unsynced ones; with only unsynced data left it refuses the write (`storage::ring_buffer::tests::cap_evicts_oldest_synced_never_unsynced`). Timescale compression and tier retention are the Task 2.1 half.
+
+Notes:
+
+- READ's magnitude rule can split one physical signal into adjacent fields (RPM shows as two continuous fields); the Task 4.2 studio should let the technician merge them.
+- The ByCAN block score θ = b × u uses our own concrete definitions of b (edge sharpness) and u (flip-rate uniformity), documented in `can_re.rs`.
+- VIN and odometer identifiers in `did_maps` follow the simulator's convention (0xF190, 0xDD01); real per-make identifiers replace them as vehicles are added (A-ENG-10 captures).
+- Bundled SQLite needs the MSVC compiler to build for Windows, so the Windows type-check of the daemon now runs only on the Windows CI job; the bridge is still checked locally.
+
 Deviations from the Task 1.1 target paths, on purpose:
 
-- `tokio-tungstenite`, `rusqlite`, `ed25519-dalek` and `jsonwebtoken` are added by the tasks that use them (1.3, 1.4), not in 1.1, so no unused dependencies ship.
+- `tokio-tungstenite`, `rusqlite`, `ed25519-dalek` and `jsonwebtoken` are added by the tasks that use them (`rusqlite` in 1.3; the rest in 1.4), not in 1.1, so no unused dependencies ship.
 - The Windows `j2534` dependency lives in `apps/j2534-bridge` (as the maintained fork `j2534-mrw`; `j2534` 0.3.1 no longer compiles), because A-ENG-1 moves DLL loading out of the daemon. `hal/j2534_win.rs` is the daemon's bridge client and builds on every OS.
 - `serialport` is built without libudev, so the daemon needs no system packages; USB details for discovery may be missing on Linux.

@@ -6,3 +6,4 @@ pub mod protocol;
 pub mod protocols;
 pub mod safety;
 pub mod sim;
+pub mod storage;
