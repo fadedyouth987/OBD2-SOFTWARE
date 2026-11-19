@@ -1,0 +1,13 @@
+[package]
+name = "edge-daemon"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Local edge daemon: vehicle adapters, diagnostic protocols, safety interlock, loopback WebSocket"
+
+[lints]
+workspace = true
+
+# Dependencies arrive with Phase 1 tasks (1.1 onward).
+[dependencies]

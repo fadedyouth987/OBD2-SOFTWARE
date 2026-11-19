@@ -32,3 +32,9 @@ Node.js and blocks when it cannot run. If a skill is blocked with "node: not
 found", tell the user to install Node.js (https://nodejs.org); if it is blocked
 with "Cannot find module ... check-gstack.cjs", the hook file is missing from
 this checkout. Do not work around either block.
+
+## Project
+
+- Build plan: `docs/PLAN.md`. Execute tasks strictly in the order in Rule 1; a task is done only when its Verification Gate and its review amendments pass.
+- Commands: `just bootstrap`, `just test`, `just lint`, `just infra-gate`, `just dev`.
+- No Docker? `docs/dev/no-docker.md`.

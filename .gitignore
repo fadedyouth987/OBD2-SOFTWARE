@@ -1,0 +1,28 @@
+# Rust
+/target/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+
+# Local config and secrets
+.env
+.env.*
+!.env.example
+
+# gstack local state
+.gstack/tmp/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
