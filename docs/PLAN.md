@@ -8,7 +8,11 @@ Source of truth: the "Agentic Build Plan v2" doc in the OBD2 SOFTWARE project. T
 
 This is a deterministic build spec for an autonomous coding agent. Each task lists Target Paths, an Implementation Contract and a Verification Gate.
 
-1. Execute phases strictly in order, Phase 0 to Phase 5. Do not start the next task until the current Verification Gate passes with zero errors.
+1. Execute tasks strictly one at a time, in this order (uc1, approved 2026-11-19):
+   - **Release 1 (scan and audit):** Phase 0 → Phase 1 → Tasks 2.1, 2.2 → Task 4.1 → Tasks 5.1, 5.2.
+   - **Then:** Task 2.3 → Task 4.2.
+   - **AI copilot (Phase 3, then Task 4.3)** starts only when the data gate is met: at least 200 resolved cases in `resolved_cases` [estimated threshold], or at least one tenant with ingested schematics.
+   Do not start the next task until the current Verification Gate passes with zero errors.
 2. Never mock hardware protocols inside production adapters. Use the dedicated `VirtualBusAdapter` (vcan0 or in-memory loopback) for deterministic CI tests.
 3. Every adapter starts in `SILENT` (read-only) mode. Any request matching `packages/schemas/safety_policy.json` must pass through `SafetyInterlock`. That file is the only list of gated services; code, UI and tests load it rather than copying it.
 4. The local WebSocket is a privileged interface that can actuate a vehicle. The daemon processes no message except `HelloRequest` until the connection passes the Origin, Host and pairing-token checks in Task 1.4.
@@ -19,7 +23,7 @@ This is a deterministic build spec for an autonomous coding agent. Each task lis
 
 ### Review amendments (gstack /autoplan, 2026-11-19)
 
-Accepted from the CEO, design, DX and engineering reviews in `docs/reviews/2026-11-19-autoplan-review.md`. Three further changes (uc1–uc3) are waiting on Brooke's decision and are not applied.
+Accepted from the CEO, design, DX and engineering reviews in `docs/reviews/2026-11-19-autoplan-review.md`. Brooke approved uc1 (Release 1 before the AI copilot, now in Rule 1) and declined uc2 (Tier B stays gated, not refused) and uc3 (tasks stay strictly sequential).
 
 | ID | Task | Amendment | Added to the gate |
 | --- | --- | --- | --- |
@@ -35,7 +39,7 @@ Accepted from the CEO, design, DX and engineering reviews in `docs/reviews/2026-
 | A-ENG-2 | 1.3 | Each profile's `did_maps` names its speed source. K-line is half-duplex with one ECU session at a time, so it reads speed from the target ECU, or re-initializes to the DME | Refuses with `PRECONDITION_UNKNOWN` on the virtual pre-03/2007 E90 when no fresh speed is available |
 | A-ENG-9 | 1.3, 2.1 | Ring buffer capped (default 2 GB), evicting oldest synced rows and never unsynced ones; Timescale compression after 7 days, retention by tier | Cap and eviction test |
 | A-CEO-2 | 2.2 | Idempotent sync: `batch_id` plus watermark; transactional outbox so a partial failure leaves the batch to retry | Duplicate and partial-failure tests |
-| A-CEO-6 | 2.2, 4.3 | Case capture: the tech marks the actual fix, which feeds `cases/publish` | E2E: mark fix → anonymized case stored |
+| A-CEO-6 | 2.2, 4.1 | Case capture ships in Release 1: from the session overview the tech marks the actual fix, which feeds `cases/publish`. This is how the Phase 3 data gate fills | E2E: mark fix → anonymized case stored |
 | A-ENG-5 | 2.1 | `FORCE ROW LEVEL SECURITY` on all tenant tables; app connects as a non-owner role; tenant set with `SET LOCAL` per transaction | One pooled connection reused across two tenants leaks nothing |
 | A-CEO-3 | 2.3 | Stripe webhook signature verification and event-ID idempotency | Bad-signature and replay tests |
 | A-ENG-6 | 3.1 | All Cypher goes through one repository module that adds the tenant filter; raw driver use elsewhere fails lint | Lint rule + cross-tenant test |
@@ -345,4 +349,4 @@ Headless background service; a tray app would be its own task.
 
 ## Review record
 
-gstack `/autoplan` ran on 2026-11-19 (CEO, design, DX, engineering). Full record: `docs/reviews/2026-11-19-autoplan-review.md`. Accepted amendments are in the table under the operating rules. Pending decisions: uc1 (ship scan-and-audit before the AI copilot), uc2 (refuse Tier B services in v1), uc3 (parallel lanes after Phase 0).
+gstack `/autoplan` ran on 2026-11-19 (CEO, design, DX, engineering). Full record: `docs/reviews/2026-11-19-autoplan-review.md`. Accepted amendments are in the table under the operating rules. Gate result (2026-11-19): uc1 approved; uc2 and uc3 declined.

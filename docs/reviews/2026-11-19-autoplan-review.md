@@ -381,3 +381,12 @@ uc1, uc2, uc3 (owner: Brooke).
 **Taste decisions (auto-decided, shown for visibility):** d1 case-capture flow added; d2 session-centric IA; d3 JSON Schema as the source; d4 keep web + daemon architecture.
 
 Reply `rec` to take all recommendations (uc1–uc3 approved), `as-is` to keep the plan unchanged apart from the accepted amendments, or pick per item (for example `uc1 yes, uc2 yes, uc3 no`).
+
+---
+
+## Gate result (2026-11-19)
+
+- uc1 **approved**: Release 1 = Phase 0, Phase 1, Tasks 2.1–2.2, 4.1, 5.1–5.2; then 2.3, 4.2; Phase 3 and 4.3 behind the data gate. A-CEO-6 (case capture) moved into Task 4.1 so the gate can fill.
+- uc2 **declined**: Tier B services stay gated (token + Tier B preconditions), not refused.
+- uc3 **declined**: tasks stay strictly sequential.
+- Taste decisions d1–d4 stand as auto-decided.
