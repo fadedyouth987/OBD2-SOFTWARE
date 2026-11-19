@@ -1,0 +1,559 @@
+{
+  "kind": "fuel_trim",
+  "input": [
+    {
+      "timestamp_us": 1000000,
+      "pid": 12,
+      "name": "Engine speed",
+      "value": 760,
+      "unit": "rpm"
+    },
+    {
+      "timestamp_us": 1000000,
+      "pid": 6,
+      "name": "Short-term fuel trim B1",
+      "value": 9.4,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 1000000,
+      "pid": 7,
+      "name": "Long-term fuel trim B1",
+      "value": 6.3,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 1000000,
+      "pid": 8,
+      "name": "Short-term fuel trim B2",
+      "value": 8.6,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 1000000,
+      "pid": 9,
+      "name": "Long-term fuel trim B2",
+      "value": 6.3,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 1200000,
+      "pid": 12,
+      "name": "Engine speed",
+      "value": 760,
+      "unit": "rpm"
+    },
+    {
+      "timestamp_us": 1200000,
+      "pid": 6,
+      "name": "Short-term fuel trim B1",
+      "value": 9.4,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 1200000,
+      "pid": 7,
+      "name": "Long-term fuel trim B1",
+      "value": 6.3,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 1200000,
+      "pid": 8,
+      "name": "Short-term fuel trim B2",
+      "value": 8.6,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 1200000,
+      "pid": 9,
+      "name": "Long-term fuel trim B2",
+      "value": 6.3,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 1400000,
+      "pid": 12,
+      "name": "Engine speed",
+      "value": 760,
+      "unit": "rpm"
+    },
+    {
+      "timestamp_us": 1400000,
+      "pid": 6,
+      "name": "Short-term fuel trim B1",
+      "value": 9.4,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 1400000,
+      "pid": 7,
+      "name": "Long-term fuel trim B1",
+      "value": 6.3,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 1400000,
+      "pid": 8,
+      "name": "Short-term fuel trim B2",
+      "value": 8.6,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 1400000,
+      "pid": 9,
+      "name": "Long-term fuel trim B2",
+      "value": 6.3,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 1600000,
+      "pid": 12,
+      "name": "Engine speed",
+      "value": 760,
+      "unit": "rpm"
+    },
+    {
+      "timestamp_us": 1600000,
+      "pid": 6,
+      "name": "Short-term fuel trim B1",
+      "value": 9.4,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 1600000,
+      "pid": 7,
+      "name": "Long-term fuel trim B1",
+      "value": 6.3,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 1600000,
+      "pid": 8,
+      "name": "Short-term fuel trim B2",
+      "value": 8.6,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 1600000,
+      "pid": 9,
+      "name": "Long-term fuel trim B2",
+      "value": 6.3,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 1800000,
+      "pid": 12,
+      "name": "Engine speed",
+      "value": 760,
+      "unit": "rpm"
+    },
+    {
+      "timestamp_us": 1800000,
+      "pid": 6,
+      "name": "Short-term fuel trim B1",
+      "value": 9.4,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 1800000,
+      "pid": 7,
+      "name": "Long-term fuel trim B1",
+      "value": 6.3,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 1800000,
+      "pid": 8,
+      "name": "Short-term fuel trim B2",
+      "value": 8.6,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 1800000,
+      "pid": 9,
+      "name": "Long-term fuel trim B2",
+      "value": 6.3,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 2000000,
+      "pid": 12,
+      "name": "Engine speed",
+      "value": 760,
+      "unit": "rpm"
+    },
+    {
+      "timestamp_us": 2000000,
+      "pid": 6,
+      "name": "Short-term fuel trim B1",
+      "value": 9.4,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 2000000,
+      "pid": 7,
+      "name": "Long-term fuel trim B1",
+      "value": 6.3,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 2000000,
+      "pid": 8,
+      "name": "Short-term fuel trim B2",
+      "value": 8.6,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 2000000,
+      "pid": 9,
+      "name": "Long-term fuel trim B2",
+      "value": 6.3,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 2400000,
+      "pid": 12,
+      "name": "Engine speed",
+      "value": 1700,
+      "unit": "rpm"
+    },
+    {
+      "timestamp_us": 2400000,
+      "pid": 6,
+      "name": "Short-term fuel trim B1",
+      "value": 5.0,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 2400000,
+      "pid": 7,
+      "name": "Long-term fuel trim B1",
+      "value": 6.3,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 2400000,
+      "pid": 8,
+      "name": "Short-term fuel trim B2",
+      "value": 5.0,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 2400000,
+      "pid": 9,
+      "name": "Long-term fuel trim B2",
+      "value": 6.3,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 2600000,
+      "pid": 12,
+      "name": "Engine speed",
+      "value": 1700,
+      "unit": "rpm"
+    },
+    {
+      "timestamp_us": 2600000,
+      "pid": 6,
+      "name": "Short-term fuel trim B1",
+      "value": 5.0,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 2600000,
+      "pid": 7,
+      "name": "Long-term fuel trim B1",
+      "value": 6.3,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 2600000,
+      "pid": 8,
+      "name": "Short-term fuel trim B2",
+      "value": 5.0,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 2600000,
+      "pid": 9,
+      "name": "Long-term fuel trim B2",
+      "value": 6.3,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 2800000,
+      "pid": 12,
+      "name": "Engine speed",
+      "value": 1700,
+      "unit": "rpm"
+    },
+    {
+      "timestamp_us": 2800000,
+      "pid": 6,
+      "name": "Short-term fuel trim B1",
+      "value": 5.0,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 2800000,
+      "pid": 7,
+      "name": "Long-term fuel trim B1",
+      "value": 6.3,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 2800000,
+      "pid": 8,
+      "name": "Short-term fuel trim B2",
+      "value": 5.0,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 2800000,
+      "pid": 9,
+      "name": "Long-term fuel trim B2",
+      "value": 6.3,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 4000000,
+      "pid": 12,
+      "name": "Engine speed",
+      "value": 2500,
+      "unit": "rpm"
+    },
+    {
+      "timestamp_us": 4000000,
+      "pid": 6,
+      "name": "Short-term fuel trim B1",
+      "value": 1.2,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 4000000,
+      "pid": 7,
+      "name": "Long-term fuel trim B1",
+      "value": 2.0,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 4000000,
+      "pid": 8,
+      "name": "Short-term fuel trim B2",
+      "value": 1.6,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 4000000,
+      "pid": 9,
+      "name": "Long-term fuel trim B2",
+      "value": 2.0,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 4200000,
+      "pid": 12,
+      "name": "Engine speed",
+      "value": 2500,
+      "unit": "rpm"
+    },
+    {
+      "timestamp_us": 4200000,
+      "pid": 6,
+      "name": "Short-term fuel trim B1",
+      "value": 1.2,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 4200000,
+      "pid": 7,
+      "name": "Long-term fuel trim B1",
+      "value": 2.0,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 4200000,
+      "pid": 8,
+      "name": "Short-term fuel trim B2",
+      "value": 1.6,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 4200000,
+      "pid": 9,
+      "name": "Long-term fuel trim B2",
+      "value": 2.0,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 4400000,
+      "pid": 12,
+      "name": "Engine speed",
+      "value": 2500,
+      "unit": "rpm"
+    },
+    {
+      "timestamp_us": 4400000,
+      "pid": 6,
+      "name": "Short-term fuel trim B1",
+      "value": 1.2,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 4400000,
+      "pid": 7,
+      "name": "Long-term fuel trim B1",
+      "value": 2.0,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 4400000,
+      "pid": 8,
+      "name": "Short-term fuel trim B2",
+      "value": 1.6,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 4400000,
+      "pid": 9,
+      "name": "Long-term fuel trim B2",
+      "value": 2.0,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 4600000,
+      "pid": 12,
+      "name": "Engine speed",
+      "value": 2500,
+      "unit": "rpm"
+    },
+    {
+      "timestamp_us": 4600000,
+      "pid": 6,
+      "name": "Short-term fuel trim B1",
+      "value": 1.2,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 4600000,
+      "pid": 7,
+      "name": "Long-term fuel trim B1",
+      "value": 2.0,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 4600000,
+      "pid": 8,
+      "name": "Short-term fuel trim B2",
+      "value": 1.6,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 4600000,
+      "pid": 9,
+      "name": "Long-term fuel trim B2",
+      "value": 2.0,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 4800000,
+      "pid": 12,
+      "name": "Engine speed",
+      "value": 2500,
+      "unit": "rpm"
+    },
+    {
+      "timestamp_us": 4800000,
+      "pid": 6,
+      "name": "Short-term fuel trim B1",
+      "value": 1.2,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 4800000,
+      "pid": 7,
+      "name": "Long-term fuel trim B1",
+      "value": 2.0,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 4800000,
+      "pid": 8,
+      "name": "Short-term fuel trim B2",
+      "value": 1.6,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 4800000,
+      "pid": 9,
+      "name": "Long-term fuel trim B2",
+      "value": 2.0,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 5000000,
+      "pid": 12,
+      "name": "Engine speed",
+      "value": 2500,
+      "unit": "rpm"
+    },
+    {
+      "timestamp_us": 5000000,
+      "pid": 6,
+      "name": "Short-term fuel trim B1",
+      "value": 1.2,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 5000000,
+      "pid": 7,
+      "name": "Long-term fuel trim B1",
+      "value": 2.0,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 5000000,
+      "pid": 8,
+      "name": "Short-term fuel trim B2",
+      "value": 1.6,
+      "unit": "%"
+    },
+    {
+      "timestamp_us": 5000000,
+      "pid": 9,
+      "name": "Long-term fuel trim B2",
+      "value": 2.0,
+      "unit": "%"
+    }
+  ],
+  "expected": [
+    {
+      "type": "HeuristicAlert",
+      "rule_id": "fuel_trim.vacuum_leak",
+      "severity": "AMBER",
+      "title": "Lean at idle, normal at 2,500 rpm: likely vacuum or intake leak",
+      "evidence_json": {
+        "bank1": {
+          "idle_total_pct": 15.7,
+          "load_total_pct": 3.2,
+          "idle_samples": 6,
+          "load_samples": 6
+        },
+        "bank2": {
+          "idle_total_pct": 14.9,
+          "load_total_pct": 3.6,
+          "idle_samples": 6,
+          "load_samples": 6
+        },
+        "banks": [
+          1,
+          2
+        ],
+        "rule": "idle > +12% total trim, within ±5% at 2,500 rpm",
+        "lean_threshold_pct": 12.0
+      },
+      "recommended_test": "Smoke-test the intake between the MAF and the cylinder head; check the PCV valve and brake booster hose."
+    }
+  ]
+}

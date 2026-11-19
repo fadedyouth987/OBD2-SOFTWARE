@@ -1,0 +1,42 @@
+{
+  "kind": "audit",
+  "input": {
+    "supported": true,
+    "modules": [
+      {
+        "module": "PCM",
+        "vin": "6FPAAAJGSW8B12345",
+        "odometer_km": 214500
+      },
+      {
+        "module": "IC",
+        "vin": "6FPAAAJGSW8B12345",
+        "odometer_km": 98000
+      },
+      {
+        "module": "ABS",
+        "vin": "6FPAAAJGSW8B12345",
+        "odometer_km": null
+      }
+    ],
+    "distance_since_clear_km": 1500,
+    "incomplete_monitors": 0
+  },
+  "expected": [
+    {
+      "type": "HeuristicAlert",
+      "rule_id": "audit.odometer_mismatch",
+      "severity": "RED",
+      "title": "Odometer readings differ between modules: possible rollback",
+      "evidence_json": {
+        "odometer_km": {
+          "PCM": 214500,
+          "IC": 98000
+        },
+        "spread_km": 116500,
+        "tolerance_km": 50
+      },
+      "recommended_test": "Compare with service records and registration history; the lowest module reading may have been altered."
+    }
+  ]
+}

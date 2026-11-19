@@ -1,0 +1,49 @@
+{
+  "kind": "cold_soak",
+  "input": [
+    {
+      "timestamp_us": 0,
+      "pid": 12,
+      "name": "Engine speed",
+      "value": 0,
+      "unit": "rpm"
+    },
+    {
+      "timestamp_us": 0,
+      "pid": 5,
+      "name": "Coolant temperature",
+      "value": 31.0,
+      "unit": "°C"
+    },
+    {
+      "timestamp_us": 0,
+      "pid": 15,
+      "name": "Intake air temperature",
+      "value": 19.0,
+      "unit": "°C"
+    },
+    {
+      "timestamp_us": 500000,
+      "pid": 12,
+      "name": "Engine speed",
+      "value": 850,
+      "unit": "rpm"
+    }
+  ],
+  "expected": [
+    {
+      "type": "HeuristicAlert",
+      "rule_id": "thermal.cold_soak_divergence",
+      "severity": "AMBER",
+      "title": "Coolant and intake air temperatures disagree at key-on",
+      "evidence_json": {
+        "ect_c": 31.0,
+        "iat_c": 19.0,
+        "divergence_c": 12.0,
+        "limit_c": 6.0,
+        "false_positive_note": "A car parked in direct sun, or driven within the last few hours (heat soak), can show this without a fault. Only trust it after the engine has sat for 6+ hours in the shade."
+      },
+      "recommended_test": "Compare both sensors with an infrared thermometer on a cold engine; measure each sensor's resistance against its temperature chart."
+    }
+  ]
+}

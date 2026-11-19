@@ -1,0 +1,21 @@
+{
+  "kind": "audit",
+  "input": {
+    "supported": false,
+    "modules": [],
+    "distance_since_clear_km": null,
+    "incomplete_monitors": null
+  },
+  "expected": [
+    {
+      "type": "HeuristicAlert",
+      "rule_id": "audit.not_supported",
+      "severity": "INFO",
+      "title": "VIN and odometer audit not supported for this vehicle",
+      "evidence_json": {
+        "reason": "no module identifier map for this vehicle"
+      },
+      "recommended_test": ""
+    }
+  ]
+}
