@@ -9,6 +9,7 @@ Progress through [`PLAN.md`](PLAN.md), in Rule 1 order. A task is done when its 
 | 1.1 HAL and virtual vehicles | Done, with hardware items open | See below. |
 | 1.2 Transports, clients, safety interlock | Done | See below. |
 | 1.3 Edge heuristics, CAN RE, ring buffer | Done | See below. |
+| 1.4 Secured WebSocket server, lease verifier | Done | See below. Phase 1 complete. |
 
 ## Task 1.1 detail
 
@@ -73,8 +74,30 @@ Notes:
 - VIN and odometer identifiers in `did_maps` follow the simulator's convention (0xF190, 0xDD01); real per-make identifiers replace them as vehicles are added (A-ENG-10 captures).
 - Bundled SQLite needs the MSVC compiler to build for Windows, so the Windows type-check of the daemon now runs only on the Windows CI job; the bridge is still checked locally.
 
+## Task 1.4 detail
+
+Gate (`apps/edge-daemon/tests/ws_gate.rs`, real WebSocket clients against the server on a loopback port):
+
+- Pair a client, list adapters, connect to the virtual bus, receive `ObdPidStream` and `CanFrameBatch` at ≥ 20 Hz each: `pair_list_connect_and_stream_at_20hz` (also runs an ungated read and a SAFETY_BLOCKED gated command over the socket).
+- Rejected: disallowed `Origin` and wrong `Host` (HTTP 403 at upgrade), no Hello in time and `DiagCommandRequest` before Hello (`UNAUTHENTICATED` then close; the default timeout is 5 s), reused pairing code, lease signed by an unknown key, expired lease (`auth::lease` unit tests, and at the server: such a lease leaves the session at COMMUNITY).
+
+Also covered: cloud pairing JWTs bound to the page's origin (native clients must use local codes), 1 MiB message limit, 20 `DiagCommandRequest`/s, `service_id` must match the payload's first byte, `LEASE_REQUIRED` for `ACTIVE_CONFIRMED` without `UDS_ACTIVE`, and A-ENG-3 on the daemon side (`VERSION_UNSUPPORTED` with an update hint for older and newer majors). The web-side update banner is Task 4.1.
+
+The PID poll that feeds `ObdPidStream` also feeds the interlock its speed, RPM and battery readings, so Rule 5's freshness check runs on live data.
+
+Found and fixed while building this: functional OBD requests (0x7DF) sent ISO-TP Flow Control to 0x7DF instead of the responder's physical id, so multi-frame functional answers stalled. `CanAddressing::Functional` now sends it to response id − 8 (ISO 15765-4), with a regression test.
+
+Open items:
+
+- **Cloud keys are not pinned yet.** `auth/cloud_keys.rs` is empty until Task 2.2's `signing.py` exports the production key, so leases and cloud pairing tokens cannot verify: the daemon runs at COMMUNITY tier with local pairing codes only. That is the safe default.
+- Live sessions run on the virtual vehicles. Physical adapters need one bus shared between streaming and diagnostics; that lands with Task 4.1, and until then `ConnectRequest` to a physical adapter returns `ADAPTER_ERROR` with that explanation. K-line live view is in the same bucket.
+- `DiagCommandRequest` channels use normal 11-bit addressing from `tx_id`/`rx_id`; BMW extended addressing over the socket comes with Task 4.1's vehicle-session flow.
+- The ring buffer is not yet fed from live sessions; Task 2.2's sync wires it up.
+
+Deviation: the plan lists `jsonwebtoken`. Its v12 needs a crypto backend that pulls in RSA for keys the daemon never uses, so leases and pairing tokens are checked by a small Ed25519-only JWS verifier (`auth/jws.rs`) on `ed25519-dalek`: one algorithm, pinned keys by `kid`, `alg: none` and HS/RS tokens refused.
+
 Deviations from the Task 1.1 target paths, on purpose:
 
-- `tokio-tungstenite`, `rusqlite`, `ed25519-dalek` and `jsonwebtoken` are added by the tasks that use them (`rusqlite` in 1.3; the rest in 1.4), not in 1.1, so no unused dependencies ship.
+- `tokio-tungstenite`, `rusqlite` and `ed25519-dalek` were added by the tasks that use them (1.3, 1.4), not in 1.1, so no unused dependencies ship; `jsonwebtoken` was replaced (see Task 1.4).
 - The Windows `j2534` dependency lives in `apps/j2534-bridge` (as the maintained fork `j2534-mrw`; `j2534` 0.3.1 no longer compiles), because A-ENG-1 moves DLL loading out of the daemon. `hal/j2534_win.rs` is the daemon's bridge client and builds on every OS.
 - `serialport` is built without libudev, so the daemon needs no system packages; USB details for discovery may be missing on Linux.

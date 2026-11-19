@@ -23,6 +23,15 @@ Target: a fresh checkout reaches a passing `just infra-gate` within 15 minutes. 
 
 No Docker? See [`docs/dev/no-docker.md`](docs/dev/no-docker.md).
 
+### Edge daemon
+
+```bash
+cargo run -p edge-daemon             # serves ws://127.0.0.1:8765 (loopback only)
+cargo run -p edge-daemon -- pair     # prints a 6-digit pairing code (single use, 2 minutes)
+```
+
+Settings: `EDGE_ALLOWED_ORIGINS` (default `http://localhost:3000`), `EDGE_PORT`, `EDGE_DATA_DIR`. Clients send the code in `HelloRequest`; see [`docs/protocol.md`](docs/protocol.md). The virtual vehicles (`virtual-generic-uds` and friends) stream live data with no hardware attached.
+
 ## Layout
 
 | Path | What | Stack |
