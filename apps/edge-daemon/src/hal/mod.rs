@@ -20,6 +20,7 @@ use std::{fmt, time::Duration};
 use async_trait::async_trait;
 
 pub mod discovery;
+pub mod j2534_win;
 pub mod kline_ftdi;
 pub mod serial;
 pub mod slcan_serial;
@@ -27,8 +28,6 @@ pub mod stn_elm;
 pub mod virtual_bus;
 pub mod virtual_kline;
 
-#[cfg(windows)]
-pub mod j2534_win;
 #[cfg(target_os = "linux")]
 pub mod socketcan_linux;
 
@@ -222,7 +221,7 @@ pub const SLCAN_BITRATES: [(u32, char); 9] = [
 /// Parses hex with optional whitespace, e.g. "02 10 03" or "021003".
 pub fn parse_hex(text: &str) -> Result<Vec<u8>> {
     let digits: Vec<u8> = text.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
-    if digits.len() % 2 != 0 {
+    if !digits.len().is_multiple_of(2) {
         return Err(HalError::Protocol(format!("odd-length hex {text:?}")));
     }
     digits

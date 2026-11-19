@@ -5,7 +5,8 @@ Some environments (sandboxed coding agents, locked-down machines) can't run Dock
 ## What still works without Docker
 
 - `just bootstrap`, `just lint`, `just test` and `pnpm build`: none of these need infrastructure today.
-- Unit tests for the Rust daemon run against the in-memory `VirtualBusAdapter` (from Task 1.1), never real hardware or containers.
+- Unit tests for the Rust daemon run against the in-memory `VirtualBusAdapter` and `VirtualKLineAdapter` (Task 1.1) and recorded serial byte streams (`apps/edge-daemon/fixtures/hal/`), never real hardware or containers.
+- The SocketCAN test needs a `vcan0` interface and is `#[ignore]`d by default: `sudo ip link add dev vcan0 type vcan && sudo ip link set vcan0 up`, then `cargo test -p edge-daemon -- --ignored socketcan`.
 
 ## Gates that need infrastructure
 

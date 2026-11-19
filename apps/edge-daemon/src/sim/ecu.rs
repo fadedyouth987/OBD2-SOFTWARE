@@ -223,11 +223,10 @@ impl EcuSim {
         if self.spec.obd && (0x01..=0x0A).contains(&sid) {
             return self.obd(req, vehicle);
         }
-        let data = match self.spec.dialect {
+        match self.spec.dialect {
             Dialect::Uds => self.uds(now_ms, req, vehicle),
             Dialect::Kwp2000 => self.kwp(now_ms, req, vehicle),
-        };
-        data
+        }
     }
 
     fn require_session(&self, sid: u8) -> Option<Vec<Reply>> {
@@ -305,7 +304,7 @@ impl EcuSim {
     fn read_dids(&self, req: &[u8], vehicle: &VehicleState) -> Vec<Reply> {
         let sid = req[0];
         let ids = &req[1..];
-        if ids.is_empty() || ids.len() % 2 != 0 {
+        if ids.is_empty() || !ids.len().is_multiple_of(2) {
             return self.now_reply(negative(sid, nrc::INCORRECT_LENGTH));
         }
         let mut rest = Vec::new();

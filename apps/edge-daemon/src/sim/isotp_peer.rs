@@ -141,8 +141,7 @@ impl IsoTpPeer {
         let gap = stmin_us(st);
         let mut out = Vec::new();
         let mut sent = 0usize;
-        loop {
-            let Some(tx) = self.tx.as_mut() else { break };
+        while let Some(tx) = self.tx.as_mut() {
             if tx.offset >= tx.data.len() || (block_size != 0 && sent == usize::from(block_size)) {
                 break;
             }
