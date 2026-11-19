@@ -29,15 +29,18 @@ services:
     image: neo4j:5-community
     environment:
       NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-diag-dev-password}
-      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-diag-dev-password}
       NEO4J_PLUGINS: '["apoc"]'
+      # Only for the health check. Must not start with NEO4J_: the image turns
+      # every NEO4J_* variable into a config setting and strict validation
+      # refuses unknown ones.
+      HEALTHCHECK_PASSWORD: ${NEO4J_PASSWORD:-diag-dev-password}
     ports:
       - "127.0.0.1:7474:7474"
       - "127.0.0.1:7687:7687"
     volumes:
       - neo4jdata:/data
     healthcheck:
-      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$$NEO4J_PASSWORD\" 'RETURN 1' >/dev/null"]
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$$HEALTHCHECK_PASSWORD\" 'RETURN 1' >/dev/null"]
       interval: 10s
       timeout: 10s
       retries: 30
