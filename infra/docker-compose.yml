@@ -1,0 +1,86 @@
+# Local development infrastructure (Task 0.1).
+# Ports bind to 127.0.0.1 only. Credentials are dev defaults from .env; never reuse them elsewhere.
+#
+# Object storage: SeaweedFS stands in for S3. The plan originally named MinIO, but MinIO
+# stopped publishing community images in October 2025 and removed minio/minio from Docker Hub.
+# Code talks to a generic S3 endpoint (S3_ENDPOINT_URL), so the stand-in is swappable.
+name: obd2-diag
+
+services:
+  postgres:
+    image: timescale/timescaledb-ha:pg16 # bundles TimescaleDB and pgvector
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-diag}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-diag}
+      POSTGRES_DB: ${POSTGRES_DB:-diag}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/home/postgres/pgdata
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-diag} -d ${POSTGRES_DB:-diag}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  neo4j:
+    image: neo4j:5-community
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-diag-dev-password}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-diag-dev-password}
+      NEO4J_PLUGINS: '["apoc"]'
+    ports:
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
+    volumes:
+      - neo4jdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$$NEO4J_PASSWORD\" 'RETURN 1' >/dev/null"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s # APOC is fetched on first start
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  s3:
+    image: ${SEAWEEDFS_IMAGE:-chrislusf/seaweedfs:4.48}
+    command: server -dir=/data -s3 -s3.config=/etc/seaweedfs/s3.json # master 9333, filer 8888, S3 8333
+    ports:
+      - "127.0.0.1:8333:8333"
+    volumes:
+      - s3data:/data
+      - ./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9333/cluster/status >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  s3-init: # one-shot: creates the trace bucket, then exits
+    image: ${SEAWEEDFS_IMAGE:-chrislusf/seaweedfs:4.48}
+    depends_on:
+      s3:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: # idempotent: creates the bucket only if it is missing
+      - >-
+        echo "s3.bucket.list" | weed shell -master=s3:9333 -filer=s3:8888 | grep -q "${S3_BUCKET:-automotive-traces-au}"
+        || echo "s3.bucket.create -name ${S3_BUCKET:-automotive-traces-au}" | weed shell -master=s3:9333 -filer=s3:8888
+    restart: "no"
+
+volumes:
+  pgdata:
+  neo4jdata:
+  s3data:

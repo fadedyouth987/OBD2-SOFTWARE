@@ -70,11 +70,11 @@ Accepted from the CEO, design, DX and engineering reviews in `docs/reviews/2026-
 - `infra/docker-compose.yml`
 
 **Implementation contract**
-- `infra/docker-compose.yml` runs: postgres `timescale/timescaledb-ha:pg16` (TimescaleDB and pgvector); neo4j `neo4j:5-community` with APOC; redis `redis:7-alpine`; minio (S3-compatible, bucket `automotive-traces-au`).
+- `infra/docker-compose.yml` runs: postgres `timescale/timescaledb-ha:pg16` (TimescaleDB and pgvector); neo4j `neo4j:5-community` with APOC; redis `redis:7-alpine`; S3-compatible object storage, bucket `automotive-traces-au` (SeaweedFS 4.48 locally: MinIO withdrew its community images in October 2025; code uses a generic `S3_ENDPOINT_URL`).
 - `.env.example` enforces `AWS_REGION=ap-southeast-2` and `DATA_RESIDENCY_ENFORCE=true`, and adds `LEASE_SIGNING_KEY_REF` (secret-manager reference, never a key in the repo), `LEASE_SIGNING_KID`, `VIN_HMAC_KEY_REF`, `EDGE_ALLOWED_ORIGINS` (production app origin, plus `http://localhost:3000` in dev only), `EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2`.
 
 **Verification gate**
-- `docker compose -f infra/docker-compose.yml up -d` brings postgres, neo4j, redis and minio to healthy. `SELECT extname FROM pg_extension;` shows `timescaledb` and `vector`.
+- `docker compose -f infra/docker-compose.yml up -d` (run as `just infra-gate`) brings postgres, neo4j, redis and S3 storage to healthy. `SELECT extname FROM pg_extension;` shows `timescaledb` and `vector`.
 
 #### Task 0.2: Canonical wire schemas and safety policy
 
@@ -237,7 +237,7 @@ Tagged-union envelopes over `ws://127.0.0.1:8765`. Every request carries a clien
 - `signing.py`: Ed25519 key from secret manager, `kid` in every JWT header; public key + `kid` exported at build time into `cloud_keys.rs`.
 - `POST /api/v1/auth/edge-lease`: 72 h JWT, `aud=edge-daemon`, `tenant_id`, `tier`, `aasra_verified`, feature flags.
 - `POST /api/v1/auth/edge-pairing`: 5 min JWT, `aud=edge-ws`, `user_id`, `tenant_id`, requesting `origin`.
-- `POST /api/v1/sessions/sync`: compressed telemetry/DTC batches → TimescaleDB; raw CAN traces → MinIO/S3 ap-southeast-2.
+- `POST /api/v1/sessions/sync`: compressed telemetry/DTC batches → TimescaleDB; raw CAN traces → S3 ap-southeast-2 (SeaweedFS locally).
 - `POST /api/v1/cases/publish`: strip PII, workshop IDs, VIN positions 10–17; keep `wmi_vds`, DTCs, feature vector, canonical summary.
 
 **Verification gate**
