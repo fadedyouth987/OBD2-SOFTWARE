@@ -4,7 +4,7 @@ Progress through [`PLAN.md`](PLAN.md), in Rule 1 order. A task is done when its 
 
 | Task | Status | Evidence |
 | --- | --- | --- |
-| 0.1 Scaffold and local infrastructure | Done, except the infra gate | `just lint`, `just test`, web build pass. **Deferred:** `just infra-gate` has not run anywhere (no Docker in the agent sandbox; GitHub Actions is not starting jobs on this account). Must pass before Task 2.1. |
+| 0.1 Scaffold and local infrastructure | Done | `just infra-gate` passed on 2026-11-19 (Docker in the agent sandbox): Postgres with timescaledb 2.32.0 and vector 0.8.7, Neo4j with APOC, Redis, S3 bucket. The run caught a real bug, fixed in the same change: the Neo4j image turned the health-check `NEO4J_PASSWORD` variable into an unknown config setting and refused to start. The `quickstart` CI job still has not run (GitHub Actions is not starting jobs on this account). |
 | 0.2 Wire schemas and safety policy | Done | 52 parity tests (Rust + vitest), `just codegen-check` drift gate. |
 | 1.1 HAL and virtual vehicles | Done, with hardware items open | See below. |
 | 1.2 Transports, clients, safety interlock | Done | See below. |

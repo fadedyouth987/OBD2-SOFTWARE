@@ -8,6 +8,20 @@ Some environments (sandboxed coding agents, locked-down machines) can't run Dock
 - Unit tests for the Rust daemon run against the in-memory `VirtualBusAdapter` and `VirtualKLineAdapter` (Task 1.1) and recorded serial byte streams (`apps/edge-daemon/fixtures/hal/`), never real hardware or containers.
 - The SocketCAN test needs a `vcan0` interface and is `#[ignore]`d by default: `sudo ip link add dev vcan0 type vcan && sudo ip link set vcan0 up`, then `cargo test -p edge-daemon -- --ignored socketcan`.
 
+## Docker installed but no daemon running
+
+Some sandboxes ship the Docker CLI and daemon without starting the daemon (`failed to connect to the docker API at unix:///var/run/docker.sock`). As root, start it in the background and check it answers:
+
+```bash
+dockerd > /tmp/dockerd.log 2>&1 &
+```
+
+```bash
+docker info --format '{{.ServerVersion}}'
+```
+
+Then `just infra-gate` works as usual.
+
 ## Gates that need infrastructure
 
 | Gate | No-Docker path |
