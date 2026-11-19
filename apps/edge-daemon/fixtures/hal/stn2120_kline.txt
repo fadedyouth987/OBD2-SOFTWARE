@@ -1,0 +1,33 @@
+# OBDLink EX (STN2120) on K-line, ISO 14230 fast init (ATSP5), BMW E90 DME at 0x12.
+# Headers on: the chip shows format, target, source, data and checksum bytes.
+# Hand-built from the ELM327/STN command set, not a hardware capture; real
+# captures replace this under A-ENG-10.
+> ATZ\r
+< ATZ\r\r\rELM327 v1.4b\r\r>
+> ATE0\r
+< ATE0\rOK\r\r>
+> ATL0\r
+< OK\r\r>
+> ATS1\r
+< OK\r\r>
+> ATH1\r
+< OK\r\r>
+> STI\r
+< STN2120 v5.6.19\r\r>
+> ATSP5\r
+< OK\r\r>
+# StartCommunication: the first request triggers the fast init.
+> ATSH8012F1\r
+< OK\r\r>
+> 81\r
+< BUS INIT: ...OK\r83 F1 12 C1 EF 8F C5\r\r>
+# ReadECUIdentification 0x80.
+> ATSH8012F1\r
+< OK\r\r>
+> 1A80\r
+< 97 F1 12 5A 80 37 35 35 38 30 39 31 20 4D 53 56 37 30 20 45 39 30 20 4E 35 32 07\r\r>
+# ReadDataByLocalIdentifier 0x01 with a corrupted checksum (line noise).
+> ATSH8012F1\r
+< OK\r\r>
+> 2101\r
+< 85 F1 12 61 01 0C 80 5A D1\r\r>

@@ -1,0 +1,34 @@
+# OBDLink EX (STN2120) on HS-CAN 500 kbit/s, 11-bit, raw frames (ATCAF0).
+# Hand-built from the ELM327/STN command set, not a hardware capture; real
+# captures replace this under A-ENG-10.
+> ATZ\r
+< ATZ\r\r\rELM327 v1.4b\r\r>
+> ATE0\r
+< ATE0\rOK\r\r>
+> ATL0\r
+< OK\r\r>
+> ATS1\r
+< OK\r\r>
+> ATH1\r
+< OK\r\r>
+> STI\r
+< STN2120 v5.6.19\r\r>
+> ATSP6\r
+< OK\r\r>
+> ATCAF0\r
+< OK\r\r>
+# Mode 01 PID 0D, functional.
+> ATSH7DF\r
+< OK\r\r>
+> 02010D0000000000\r
+< 7E8 03 41 0D 00 00 00 00 00\r\r>
+# Mode 09 PID 02 (VIN), physical: First Frame, tester sends Flow Control, two Consecutive Frames.
+> ATSH7E0\r
+< OK\r\r>
+> 0209020000000000\r
+< 7E8 10 14 49 02 01 31 48 47\r\r>
+> 3000000000000000\r
+< 7E8 21 43 4D 38 32 36 33 33\r7E8 22 41 30 30 34 33 35 32\r\r>
+# Unsupported PID: the chip prints NO DATA.
+> 0201A60000000000\r
+< NO DATA\r\r>

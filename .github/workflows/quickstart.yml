@@ -34,3 +34,18 @@ jobs:
           NEXT_TELEMETRY_DISABLED: "1"
       - name: Infrastructure gate (Task 0.1)
         run: just infra-gate --down
+
+  # A-ENG-1: the J2534 bridge is a 32-bit Windows process. Build it for
+  # i686-pc-windows-msvc and run its round trip through the daemon's adapter.
+  # The hardware variant (real vendor DLL) is on the A-ENG-10 release checklist.
+  j2534-bridge-windows:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust toolchain with the 32-bit Windows target
+        run: |
+          rustup toolchain install
+          rustup target add i686-pc-windows-msvc
+      - name: Bridge round trip (32-bit)
+        run: cargo test -p j2534-bridge --locked --target i686-pc-windows-msvc
