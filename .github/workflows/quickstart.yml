@@ -26,14 +26,19 @@ jobs:
         run: just bootstrap
       - name: Lint
         run: just lint
+      # Infrastructure first, so the database tests (Task 2.1 RLS gate) run
+      # instead of skipping.
+      - name: Infrastructure gate (Task 0.1)
+        run: just infra-gate
       - name: Test
         run: just test
+      - name: Stop infrastructure
+        if: always()
+        run: just infra-down -v
       - name: Build web
         run: cd apps/web && pnpm build
         env:
           NEXT_TELEMETRY_DISABLED: "1"
-      - name: Infrastructure gate (Task 0.1)
-        run: just infra-gate --down
 
   # A-ENG-1: the J2534 bridge is a 32-bit Windows process. Build it for
   # i686-pc-windows-msvc and run its round trip through the daemon's adapter.
