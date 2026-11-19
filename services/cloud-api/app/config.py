@@ -17,7 +17,13 @@ class Settings(BaseSettings):
 
     aws_region: str = REQUIRED_REGION
     data_residency_enforce: bool = True
-    database_url: str = "postgresql+psycopg://diag:diag@localhost:5432/diag"
+    # The API connects as the non-owner app role (A-ENG-5); RLS applies to it.
+    database_url: str = "postgresql+psycopg://diag_app:diag_app@localhost:5432/diag"
+    # Migrations and maintenance run as the owner (superuser or BYPASSRLS).
+    migration_database_url: str = "postgresql+psycopg://diag:diag@localhost:5432/diag"
+    # Secret-manager reference for the VIN HMAC key: env://VAR, file:///path, or
+    # secretsmanager://... (resolved in production).
+    vin_hmac_key_ref: str = "env://VIN_HMAC_KEY"
     redis_url: str = "redis://localhost:6379/0"
     s3_endpoint_url: str = "http://localhost:8333"
     s3_bucket: str = "automotive-traces-au"

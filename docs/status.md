@@ -10,6 +10,7 @@ Progress through [`PLAN.md`](PLAN.md), in Rule 1 order. A task is done when its 
 | 1.2 Transports, clients, safety interlock | Done | See below. |
 | 1.3 Edge heuristics, CAN RE, ring buffer | Done | See below. |
 | 1.4 Secured WebSocket server, lease verifier | Done | See below. Phase 1 complete. |
+| 2.1 Multi-tenant schema with RLS | Done | See below. |
 
 ## Task 1.1 detail
 
@@ -95,6 +96,25 @@ Open items:
 - The ring buffer is not yet fed from live sessions; Task 2.2's sync wires it up.
 
 Deviation: the plan lists `jsonwebtoken`. Its v12 needs a crypto backend that pulls in RSA for keys the daemon never uses, so leases and pairing tokens are checked by a small Ed25519-only JWS verifier (`auth/jws.rs`) on `ed25519-dalek`: one algorithm, pinned keys by `kid`, `alg: none` and HS/RS tokens refused.
+
+## Task 2.1 detail
+
+Gate (`services/cloud-api/tests/test_rls.py`, real Postgres: a throwaway database migrated as the owner, every check as the app role):
+
+- Tenant A's vehicle is invisible to tenant B: `test_gate_tenant_a_vehicle_invisible_to_tenant_b`.
+- A-ENG-5: `diag_app` is not the owner, not a superuser and has no BYPASSRLS; RLS is enabled and forced on every tenant table; the tenant is set per transaction (`set_config(..., true)`), and one pooled connection reused for two tenants leaks nothing, with no tenant left behind after the transaction (`test_pooled_connection_reused_across_tenants_leaks_nothing`). No tenant set means no rows and no writes.
+- Every tenant table checked both ways, plus users (visible only to their tenants) and the shared case corpus (vector search through the cosine HNSW index).
+- A-ENG-9: telemetry compressed after 7 days; `prune_telemetry_by_tier` (daily job) keeps 30 days for COMMUNITY, 365 for PRO, 730 for WORKSHOP [estimated defaults in `tier_retention`].
+- A-CEO-4: `audit_log` holds one row per attempt (re-syncing a record is a no-op) and is append-only for the app role.
+- A mutation check (migration without the RLS policies) fails six of the tests; the migration also downgrades cleanly.
+
+Decisions:
+
+- **Telemetry isolation uses a view, not RLS.** TimescaleDB cannot compress a table with row security, in either order, and A-ENG-9 requires compression. The app role has no privileges on the `telemetry_samples` hypertable; it reads and writes the `telemetry` view, a `security_barrier` view filtered on the current tenant `WITH CHECK OPTION` (inserts for another tenant are refused). Tests prove the same isolation as RLS.
+- `resolved_cases` is the anonymized shared corpus (Task 2.2 strips tenant identity before publishing): any authenticated tenant reads it, inserts only, no updates or deletes.
+- The owner role runs migrations and the retention job, so it must be a superuser or have BYPASSRLS (the dev `diag` role is a superuser); the app role never.
+- `DATABASE_URL` is now the app role; migrations use `MIGRATION_DATABASE_URL`. `vehicles` stores only the VIN's HMAC-SHA256 (key from `VIN_HMAC_KEY_REF`: `env://` and `file://` work now; `secretsmanager://` is a configuration error until the deployment task) and VIN positions 1-9.
+- CI now brings infrastructure up before `just test`, so these database tests run in CI instead of skipping.
 
 Deviations from the Task 1.1 target paths, on purpose:
 
