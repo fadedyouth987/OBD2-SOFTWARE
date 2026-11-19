@@ -7,6 +7,7 @@ Progress through [`PLAN.md`](PLAN.md), in Rule 1 order. A task is done when its 
 | 0.1 Scaffold and local infrastructure | Done, except the infra gate | `just lint`, `just test`, web build pass. **Deferred:** `just infra-gate` has not run anywhere (no Docker in the agent sandbox; GitHub Actions is not starting jobs on this account). Must pass before Task 2.1. |
 | 0.2 Wire schemas and safety policy | Done | 52 parity tests (Rust + vitest), `just codegen-check` drift gate. |
 | 1.1 HAL and virtual vehicles | Done, with hardware items open | See below. |
+| 1.2 Transports, clients, safety interlock | Done | See below. |
 
 ## Task 1.1 detail
 
@@ -30,6 +31,27 @@ Open items (need hardware or access this sandbox does not have):
 | J2534 against a real vendor DLL | Needs Windows and a PassThru device | `J2534_TEST_DLL=... cargo test -p j2534-bridge -- --ignored` on the A-ENG-10 bench |
 | SocketCAN on a live interface | No `vcan` in the sandbox | `cargo test -p edge-daemon -- --ignored socketcan` |
 | Windows CI job | GitHub Actions is not starting jobs on this account | Fix Actions (billing or repo Actions settings) |
+
+## Task 1.2 detail
+
+Gate (`apps/edge-daemon/tests/diag_gate.rs`, public API only, against the virtual vehicles):
+
+- ISO-TP reassembles a 103-byte response with BlockSize 4 and STmin 5 ms honoured: `isotp_reassembles_large_response_with_block_size` (plus send- and receive-side unit tests in `protocols::isotp`).
+- KWP2000 fast init + 0x1A on the virtual pre-03/2007 E90 DME: `kwp2000_fast_init_and_identification_on_e90_dme`.
+- BMW D-CAN extended addressing round trip on the 03/2007+ E90 DME (and DSC): `bmw_dcan_extended_addressing_round_trip`.
+- Every service in `safety_policy.json` refused in SILENT, on ISO-TP, K-line and STN/ELM, with nothing reaching the bus (A-ENG-4): `every_gated_service_refused_in_silent_on_every_transport` and `safety::interlock::tests::every_gated_service_refused_in_silent`.
+- Expired, reused and mismatched tokens refused; unknown or > 2 s old speed refused: `safety::interlock::tests::token_lifecycle`, `speed_must_be_known_fresh_and_zero`.
+- SecurityAccess halted after NRC 0x35, and after 0x36/0x37 with the delay reported: `security_access_halts_end_to_end`.
+- NRC 0x78 then positive succeeds: `response_pending_then_positive_succeeds`.
+
+A-ENG-4 is structural: links are crate-private and `DiagChannel` is the only public way to send a request, so every transport goes through `SafetyInterlock::check()`. A mutation check (bypassing the call) fails four gate tests.
+
+A-CEO-4: every gated attempt (allowed or refused), every token issued or refused, and the ECU's answer with its NRC are written to the audit sink (`safety::audit`, JSON lines on disk). **Open:** syncing to the cloud `audit_log` table lands with Tasks 2.1/2.2.
+
+Assumptions to confirm on hardware:
+
+- After NRC 0x36/0x37 the interlock halts SecurityAccess for 10 s (`DEFAULT_SECURITY_DELAY`), since ECUs do not report their delay. NRC 0x35 halts it for the rest of the session.
+- A plain ELM327 only listens while a command runs, so a final answer that comes long after NRC 0x78 can be missed on CAN; STN chips and the other adapters are not affected.
 
 Deviations from the Task 1.1 target paths, on purpose:
 

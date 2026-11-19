@@ -13,6 +13,8 @@ pub const ENGINE_RESP: u32 = 0x7E8;
 pub const IO_IDLE_ACTUATOR: u16 = 0x0B2A;
 /// RoutineControl id: check programming preconditions.
 pub const ROUTINE_CHECK_PRECONDITIONS: u16 = 0x0203;
+/// Calibration-data DID with a 100-byte value (multi-frame ISO-TP tests).
+pub const DID_CALIBRATION: u16 = 0xF1A0;
 
 const KEY_MASK: [u8; 4] = [0x5A, 0x3C, 0x96, 0xE1];
 
@@ -32,6 +34,7 @@ pub fn engine_spec() -> EcuSpec {
     ];
     spec.dids.insert(0xF187, b"GEN-ECU-0001".to_vec());
     spec.dids.insert(0xF18C, b"SN123456".to_vec());
+    spec.dids.insert(DID_CALIBRATION, (0..100u8).collect());
     spec.writable_dids = vec![0xF198];
     spec.dtcs = vec![Dtc {
         code: 0x0171,

@@ -6,10 +6,9 @@
 //! - [`KLineAdapter`]: byte-oriented, half-duplex ISO 9141 / ISO 14230 K-line
 //!   (K+DCAN cables via FTDI, and [`virtual_kline::VirtualKLineAdapter`]).
 //!
-//! [`DiagTransport`] (request bytes in, response bytes out) sits above both and
-//! is implemented in Task 1.2. Every adapter starts in `SILENT` mode: the HAL
-//! moves bytes only; gating happens in `SafetyInterlock` (Task 1.2), which every
-//! transport calls (A-ENG-4).
+//! `protocols::DiagTransport` (request bytes in, response bytes out, Task 1.2)
+//! sits above both. Every adapter starts in `SILENT` mode: the HAL moves bytes
+//! only; gating happens in `SafetyInterlock`, which every transport calls (A-ENG-4).
 //!
 //! Rule 2: production adapters never fake a protocol. Serial-based adapters run
 //! their real protocol code over a [`serial::SerialLink`], which is either a real
@@ -195,14 +194,6 @@ pub trait KLineAdapter: Send {
     /// and then returning whatever has arrived. Errors with `Timeout` if none.
     async fn read_bytes(&mut self, max: usize, timeout: Duration) -> Result<Vec<u8>>;
     async fn close(&mut self) -> Result<()>;
-}
-
-/// Request bytes in, response bytes out (one diagnostic exchange).
-/// Task 1.2 implements it for ISO-TP over CAN, ISO 14230-2 over K-line, and
-/// ELM-framed messages for STN/ELM adapters.
-#[async_trait]
-pub trait DiagTransport: Send {
-    async fn request(&mut self, payload: &[u8], timeout: Duration) -> Result<Vec<u8>>;
 }
 
 /// Standard CAN bitrates and their SLCAN `Sn` codes.

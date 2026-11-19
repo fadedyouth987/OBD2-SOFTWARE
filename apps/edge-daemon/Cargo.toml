@@ -26,6 +26,9 @@ thiserror = "2"
 tracing = "0.1"
 # No libudev: port enumeration falls back to /sys, so the daemon builds without system packages.
 serialport = { version = "4.10", default-features = false }
+# Safety tokens: random value, bound to the SHA-256 of the request payload (Task 1.2).
+sha2 = "0.11"
+getrandom = "0.4"
 # Wire protocol of the 32-bit J2534 bridge process (A-ENG-1).
 j2534-bridge = { path = "../j2534-bridge" }
 serde = { version = "1", features = ["derive"] }
