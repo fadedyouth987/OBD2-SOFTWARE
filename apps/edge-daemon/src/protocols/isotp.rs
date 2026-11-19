@@ -93,13 +93,17 @@ impl<A: VehicleBusAdapter> IsoTpLink<A> {
     }
 
     fn frame(&self, body: &[u8]) -> Result<CanFrame> {
+        self.frame_to(self.addr.tx_id(), body)
+    }
+
+    fn frame_to(&self, id: u32, body: &[u8]) -> Result<CanFrame> {
         let mut data = Vec::with_capacity(8);
         data.extend(self.addr.tx_prefix());
         data.extend_from_slice(body);
         if let Some(pad) = self.cfg.pad {
             data.resize(8, pad);
         }
-        CanFrame::new(self.addr.tx_id(), self.addr.is_extended(), &data)
+        CanFrame::new(id, self.addr.is_extended(), &data)
     }
 
     /// Next frame from the ECU (address byte removed), within `timeout`.
@@ -128,7 +132,10 @@ impl<A: VehicleBusAdapter> IsoTpLink<A> {
     }
 
     async fn send_flow_control(&mut self) -> Result<()> {
-        let fc = self.frame(&[0x30, self.cfg.block_size, self.cfg.st_min])?;
+        let fc = self.frame_to(
+            self.addr.flow_control_id(),
+            &[0x30, self.cfg.block_size, self.cfg.st_min],
+        )?;
         self.adapter.send_frame(&fc).await
     }
 

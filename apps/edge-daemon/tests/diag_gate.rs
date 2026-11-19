@@ -508,6 +508,13 @@ async fn obd_reads_and_gated_clear() {
     });
     let values = Obd(&mut ch).read_pids(&[0x0C, 0x05]).await.unwrap();
     assert_eq!((values[0].value, values[1].value), (812.5, 88.0));
+    // Six PIDs need a multi-frame answer: Flow Control must go to the PCM's
+    // physical id (0x7E0), not the functional 0x7DF (ISO 15765-4).
+    let six = Obd(&mut ch)
+        .read_pids(&[0x0C, 0x0D, 0x05, 0x06, 0x07, 0x42])
+        .await
+        .unwrap();
+    assert_eq!(six.len(), 6);
     let supported = Obd(&mut ch).supported_pids().await.unwrap();
     assert!(
         supported.contains(&0x0C) && supported.contains(&0x42),
