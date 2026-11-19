@@ -4,6 +4,7 @@ AI-assisted vehicle diagnostics for Australian workshops: a local Rust edge daem
 
 - Build plan: [`docs/PLAN.md`](docs/PLAN.md) (tasks run strictly in order; see Rule 1)
 - Architecture: [`docs/architecture.md`](docs/architecture.md)
+- Edge WebSocket protocol: [`docs/protocol.md`](docs/protocol.md) (generated from `packages/schemas/edge_ws.schema.json`)
 - Plan review: [`docs/reviews/2026-11-19-autoplan-review.md`](docs/reviews/2026-11-19-autoplan-review.md)
 
 ## Quickstart
@@ -29,7 +30,7 @@ No Docker? See [`docs/dev/no-docker.md`](docs/dev/no-docker.md).
 | `apps/web/` | Technician web app | Next.js 15, TypeScript, Tailwind 4 |
 | `services/cloud-api/` | Leases, pairing, session sync, diagnosis, billing | Python 3.12, FastAPI, Alembic |
 | `services/ai-worker/` | Schematic ingestion and ML jobs | Python 3.12, Celery |
-| `packages/schemas/` | Shared wire schemas and safety policy (Task 0.2) | JSON Schema |
+| `packages/schemas/` | Shared wire schemas, safety policy and error hints; source for generated Rust/Zod types (`just codegen`) | JSON Schema |
 | `infra/` | Local infrastructure | Docker Compose |
 
 ## Local services

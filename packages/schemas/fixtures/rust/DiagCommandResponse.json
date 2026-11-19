@@ -1,0 +1,10 @@
+{
+  "nrc": {
+    "code": 53,
+    "name": "invalidKey"
+  },
+  "positive": false,
+  "request_id": "req-1",
+  "response_hex": "7F2735",
+  "type": "DiagCommandResponse"
+}

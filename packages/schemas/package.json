@@ -1,0 +1,21 @@
+{
+  "name": "@obd2/schemas",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared wire contracts: JSON Schemas, safety policy, error hints, and the Zod/doc generator (A-DX-3)",
+  "type": "module",
+  "exports": {
+    "./edge_ws.schema.json": "./edge_ws.schema.json",
+    "./safety_policy.json": "./safety_policy.json",
+    "./safety_policy.schema.json": "./safety_policy.schema.json",
+    "./error_hints.json": "./error_hints.json"
+  },
+  "scripts": {
+    "codegen": "node scripts/codegen.mjs",
+    "codegen:check": "node scripts/codegen.mjs --check"
+  },
+  "devDependencies": {
+    "json-schema-to-zod": "2.8.1",
+    "prettier": "^3.10.1"
+  }
+}

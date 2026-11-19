@@ -1,0 +1,12 @@
+{
+  "frames": [
+    {
+      "can_id": 0,
+      "data_hex": "",
+      "dlc": 0,
+      "is_extended": false,
+      "timestamp_us": 0
+    }
+  ],
+  "type": "CanFrameBatch"
+}

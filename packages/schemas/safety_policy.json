@@ -1,0 +1,68 @@
+{
+  "$schema": "./safety_policy.schema.json",
+  "policy_version": "1.0.0",
+  "token_ttl_s": 60,
+  "tiers": {
+    "A": {
+      "description": "Valid safety_token and vehicle speed 0 km/h from PID 0x0D read within the last 2 s.",
+      "requires_safety_token": true,
+      "max_speed_kmh": 0,
+      "max_speed_age_ms": 2000,
+      "max_rpm": null,
+      "min_battery_v": null
+    },
+    "B": {
+      "description": "Tier A plus RPM 0 and battery voltage >= 12.5 V.",
+      "requires_safety_token": true,
+      "max_speed_kmh": 0,
+      "max_speed_age_ms": 2000,
+      "max_rpm": 0,
+      "min_battery_v": 12.5
+    }
+  },
+  "gated": [
+    { "protocol": "UDS", "service_id": "0x11", "sub_function": null, "name": "ECUReset", "tier": "A" },
+    { "protocol": "UDS", "service_id": "0x14", "sub_function": null, "name": "ClearDiagnosticInformation", "tier": "A" },
+    { "protocol": "UDS", "service_id": "0x27", "sub_function": null, "name": "SecurityAccess", "tier": "A" },
+    { "protocol": "UDS", "service_id": "0x28", "sub_function": null, "name": "CommunicationControl", "tier": "A" },
+    { "protocol": "UDS", "service_id": "0x29", "sub_function": null, "name": "Authentication", "tier": "A" },
+    { "protocol": "UDS", "service_id": "0x2E", "sub_function": null, "name": "WriteDataByIdentifier", "tier": "A" },
+    { "protocol": "UDS", "service_id": "0x2F", "sub_function": null, "name": "InputOutputControlByIdentifier", "tier": "A" },
+    { "protocol": "UDS", "service_id": "0x31", "sub_function": null, "name": "RoutineControl", "tier": "A" },
+    { "protocol": "UDS", "service_id": "0x85", "sub_function": null, "name": "ControlDTCSetting", "tier": "A" },
+    { "protocol": "UDS", "service_id": "0x87", "sub_function": null, "name": "LinkControl", "tier": "A" },
+    { "protocol": "UDS", "service_id": "0x10", "sub_function": "0x02", "name": "DiagnosticSessionControl (programmingSession)", "tier": "B" },
+    { "protocol": "UDS", "service_id": "0x34", "sub_function": null, "name": "RequestDownload", "tier": "B" },
+    { "protocol": "UDS", "service_id": "0x35", "sub_function": null, "name": "RequestUpload", "tier": "B" },
+    { "protocol": "UDS", "service_id": "0x36", "sub_function": null, "name": "TransferData", "tier": "B" },
+    { "protocol": "UDS", "service_id": "0x37", "sub_function": null, "name": "RequestTransferExit", "tier": "B" },
+    { "protocol": "UDS", "service_id": "0x38", "sub_function": null, "name": "RequestFileTransfer", "tier": "B" },
+    { "protocol": "UDS", "service_id": "0x3D", "sub_function": null, "name": "WriteMemoryByAddress", "tier": "B" },
+    { "protocol": "KWP2000", "service_id": "0x11", "sub_function": null, "name": "ECUReset", "tier": "A" },
+    { "protocol": "KWP2000", "service_id": "0x14", "sub_function": null, "name": "ClearDiagnosticInformation", "tier": "A" },
+    { "protocol": "KWP2000", "service_id": "0x27", "sub_function": null, "name": "SecurityAccess", "tier": "A" },
+    { "protocol": "KWP2000", "service_id": "0x28", "sub_function": null, "name": "DisableNormalMessageTransmission", "tier": "A" },
+    { "protocol": "KWP2000", "service_id": "0x2E", "sub_function": null, "name": "WriteDataByCommonIdentifier", "tier": "A" },
+    { "protocol": "KWP2000", "service_id": "0x2F", "sub_function": null, "name": "InputOutputControlByCommonIdentifier", "tier": "A" },
+    { "protocol": "KWP2000", "service_id": "0x30", "sub_function": null, "name": "InputOutputControlByLocalIdentifier", "tier": "A" },
+    { "protocol": "KWP2000", "service_id": "0x31", "sub_function": null, "name": "StartRoutineByLocalIdentifier", "tier": "A" },
+    { "protocol": "KWP2000", "service_id": "0x38", "sub_function": null, "name": "StartRoutineByAddress", "tier": "A" },
+    { "protocol": "KWP2000", "service_id": "0x3B", "sub_function": null, "name": "WriteDataByLocalIdentifier", "tier": "A" },
+    { "protocol": "KWP2000", "service_id": "0x85", "sub_function": null, "name": "ControlDTCSetting", "tier": "A" },
+    { "protocol": "KWP2000", "service_id": "0x10", "sub_function": "0x85", "name": "StartDiagnosticSession (programmingSession)", "tier": "B" },
+    { "protocol": "KWP2000", "service_id": "0x34", "sub_function": null, "name": "RequestDownload", "tier": "B" },
+    { "protocol": "KWP2000", "service_id": "0x35", "sub_function": null, "name": "RequestUpload", "tier": "B" },
+    { "protocol": "KWP2000", "service_id": "0x36", "sub_function": null, "name": "TransferData", "tier": "B" },
+    { "protocol": "KWP2000", "service_id": "0x37", "sub_function": null, "name": "RequestTransferExit", "tier": "B" },
+    { "protocol": "KWP2000", "service_id": "0x3D", "sub_function": null, "name": "WriteMemoryByAddress", "tier": "B" },
+    { "protocol": "OBD", "service_id": "0x04", "sub_function": null, "name": "Clear DTCs and stored values (Mode 0x04)", "tier": "A" },
+    { "protocol": "OBD", "service_id": "0x08", "sub_function": null, "name": "Control of on-board system (Mode 0x08)", "tier": "A" }
+  ],
+  "logged_ungated": [
+    { "protocol": "UDS", "service_id": "0x10", "sub_function": "0x03", "name": "DiagnosticSessionControl (extendedDiagnosticSession)", "reason": "Many read-only identifiers need the extended session; every use is logged." }
+  ],
+  "bench_mode": {
+    "description": "Bench mode may replace the vehicle-speed check only. It needs its own confirmation, is logged, and lasts until disconnect.",
+    "replaces": ["speed"]
+  }
+}

@@ -1,0 +1,103 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://obd2-diag.local/schemas/safety_policy.schema.json",
+  "title": "SafetyPolicy",
+  "description": "Shape of safety_policy.json, the only list of gated diagnostic services (Rule 3). Rust and the web app both load that file.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["policy_version", "token_ttl_s", "tiers", "gated", "logged_ungated", "bench_mode"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "policy_version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "token_ttl_s": { "type": "integer", "format": "uint32", "minimum": 1, "maximum": 600 },
+    "tiers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["A", "B"],
+      "properties": {
+        "A": { "$ref": "#/definitions/TierRequirements" },
+        "B": { "$ref": "#/definitions/TierRequirements" }
+      }
+    },
+    "gated": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/GatedService" }
+    },
+    "logged_ungated": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/LoggedService" }
+    },
+    "bench_mode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description", "replaces"],
+      "properties": {
+        "description": { "type": "string" },
+        "replaces": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["speed"] }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "PolicyProtocol": {
+      "type": "string",
+      "enum": ["UDS", "KWP2000", "OBD"]
+    },
+    "HexByte": {
+      "type": "string",
+      "pattern": "^0x[0-9A-F]{2}$"
+    },
+    "Tier": {
+      "type": "string",
+      "enum": ["A", "B"]
+    },
+    "TierRequirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description", "requires_safety_token", "max_speed_kmh", "max_speed_age_ms", "max_rpm", "min_battery_v"],
+      "properties": {
+        "description": { "type": "string" },
+        "requires_safety_token": { "type": "boolean" },
+        "max_speed_kmh": { "type": "number", "minimum": 0 },
+        "max_speed_age_ms": { "type": "integer", "format": "uint64", "minimum": 0 },
+        "max_rpm": { "type": ["number", "null"], "minimum": 0 },
+        "min_battery_v": { "type": ["number", "null"], "minimum": 0 }
+      }
+    },
+    "GatedService": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "service_id", "sub_function", "name", "tier"],
+      "properties": {
+        "protocol": { "$ref": "#/definitions/PolicyProtocol" },
+        "service_id": { "$ref": "#/definitions/HexByte" },
+        "sub_function": {
+          "description": "Null gates every sub-function of the service.",
+          "anyOf": [{ "$ref": "#/definitions/HexByte" }, { "type": "null" }]
+        },
+        "name": { "type": "string", "minLength": 1 },
+        "tier": { "$ref": "#/definitions/Tier" }
+      }
+    },
+    "LoggedService": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "service_id", "sub_function", "name", "reason"],
+      "properties": {
+        "protocol": { "$ref": "#/definitions/PolicyProtocol" },
+        "service_id": { "$ref": "#/definitions/HexByte" },
+        "sub_function": {
+          "anyOf": [{ "$ref": "#/definitions/HexByte" }, { "type": "null" }]
+        },
+        "name": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

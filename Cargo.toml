@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["apps/edge-daemon"]
+members = ["apps/edge-daemon", "tools/codegen"]
 
 [workspace.package]
 edition = "2021"

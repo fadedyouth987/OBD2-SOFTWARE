@@ -1,0 +1,10 @@
+{
+  "payload_hex": "010C",
+  "protocol": "OBD",
+  "request_id": "web_06",
+  "rx_id": 2024,
+  "safety_token": null,
+  "service_id": 1,
+  "tx_id": 2015,
+  "type": "DiagCommandRequest"
+}

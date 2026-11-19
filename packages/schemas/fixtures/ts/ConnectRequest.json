@@ -1,0 +1,8 @@
+{
+  "adapter_id": "j2534-0",
+  "baud_rate": null,
+  "protocol": "BMW_DCAN",
+  "request_id": "web_03",
+  "safety_mode": "ACTIVE_CONFIRMED",
+  "type": "ConnectRequest"
+}

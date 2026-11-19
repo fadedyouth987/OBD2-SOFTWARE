@@ -1,0 +1,11 @@
+{
+  "evidence_json": {
+    "cas": "WBAVB11060PT99999",
+    "dme": "WBAVB11060PT00001"
+  },
+  "recommended_test": "",
+  "rule_id": "audit.vin_mismatch",
+  "severity": "RED",
+  "title": "VIN differs between DME and CAS",
+  "type": "HeuristicAlert"
+}

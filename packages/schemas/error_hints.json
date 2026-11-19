@@ -1,0 +1,12 @@
+{
+  "UNAUTHENTICATED": "Send HelloRequest with a valid pairing token first; run `edge-daemon pair` for a local code.",
+  "ORIGIN_REJECTED": "Open the app from an allowed origin, or add it to EDGE_ALLOWED_ORIGINS in the daemon config.",
+  "SAFETY_BLOCKED": "This service is gated: reconnect in ACTIVE_CONFIRMED mode and confirm the action first.",
+  "TOKEN_INVALID": "Safety tokens are single-use and expire in 60 s; confirm the action again to get a new one.",
+  "PRECONDITION_UNKNOWN": "Speed, RPM or battery voltage could not be read; check the ignition is on and the adapter is connected.",
+  "LEASE_REQUIRED": "This feature needs a Pro or Workshop lease; sign in online once to refresh it.",
+  "ADAPTER_ERROR": "Check the adapter is plugged in and not in use by another program, then reconnect.",
+  "PROTOCOL_ERROR": "The vehicle did not answer as expected; try a different protocol or AUTO.",
+  "TIMEOUT": "No reply in time; check the ignition is on and the cable is seated, then retry.",
+  "VERSION_UNSUPPORTED": "The app and edge daemon versions are incompatible; update the edge daemon."
+}

@@ -1,0 +1,427 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://obd2-diag.local/schemas/edge_ws.schema.json",
+  "title": "EdgeMessage",
+  "description": "Every message exchanged over the local edge WebSocket (ws://127.0.0.1:8765). Tagged union on `type`. Source of truth for the generated Rust types (typify) and Zod validators (json-schema-to-zod). Edit this file, then run `just codegen`.",
+  "x-protocol-version": "1.0.0",
+  "x-request-response": {
+    "HelloRequest": "HelloResponse",
+    "AdapterListRequest": "AdapterListResponse",
+    "ConnectRequest": "AdapterStatus",
+    "DisconnectRequest": "AdapterStatus",
+    "SafetyConfirmRequest": "SafetyConfirmResponse",
+    "DiagCommandRequest": "DiagCommandResponse"
+  },
+  "oneOf": [
+    { "$ref": "#/definitions/HelloRequest" },
+    { "$ref": "#/definitions/HelloResponse" },
+    { "$ref": "#/definitions/AdapterListRequest" },
+    { "$ref": "#/definitions/AdapterListResponse" },
+    { "$ref": "#/definitions/ConnectRequest" },
+    { "$ref": "#/definitions/DisconnectRequest" },
+    { "$ref": "#/definitions/AdapterStatus" },
+    { "$ref": "#/definitions/CanFrameBatch" },
+    { "$ref": "#/definitions/ObdPidStream" },
+    { "$ref": "#/definitions/SafetyConfirmRequest" },
+    { "$ref": "#/definitions/SafetyConfirmResponse" },
+    { "$ref": "#/definitions/DiagCommandRequest" },
+    { "$ref": "#/definitions/DiagCommandResponse" },
+    { "$ref": "#/definitions/HeuristicAlert" },
+    { "$ref": "#/definitions/ErrorResponse" }
+  ],
+  "definitions": {
+    "RequestId": {
+      "description": "Client-generated id carried by every request and echoed by its response or error.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$"
+    },
+    "SemVer": {
+      "description": "Semantic version, MAJOR.MINOR.PATCH.",
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "HexBytes": {
+      "description": "Bytes as uppercase or lowercase hex, two characters per byte, no separators.",
+      "type": "string",
+      "pattern": "^([0-9A-Fa-f]{2})*$"
+    },
+    "Rfc3339Utc": {
+      "description": "RFC 3339 timestamp in UTC, e.g. 2026-11-19T06:15:58Z.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"
+    },
+    "TimestampUs": {
+      "description": "Microseconds since the Unix epoch.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "CanId": {
+      "description": "11-bit or 29-bit CAN identifier, or a K-line address.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0,
+      "maximum": 536870911
+    },
+    "ServiceId": {
+      "description": "Diagnostic service id (UDS/KWP2000 SID or OBD mode).",
+      "type": "integer",
+      "format": "uint8",
+      "minimum": 0,
+      "maximum": 255
+    },
+    "SafetyMode": {
+      "description": "Rule 7: one spelling everywhere. Every adapter starts in SILENT.",
+      "type": "string",
+      "enum": ["SILENT", "ACTIVE_CONFIRMED"]
+    },
+    "BusProtocol": {
+      "description": "Physical/link protocol for ConnectRequest. J1850 is read-only OBD through STN/ELM adapters only.",
+      "type": "string",
+      "enum": [
+        "AUTO",
+        "ISO15765_11_500",
+        "ISO15765_29_500",
+        "ISO15765_11_250",
+        "ISO15765_29_250",
+        "MS_CAN_125",
+        "BMW_DCAN",
+        "ISO14230_FAST",
+        "ISO14230_5BAUD",
+        "ISO9141_2",
+        "J1850_PWM",
+        "J1850_VPW"
+      ]
+    },
+    "DiagProtocol": {
+      "description": "Diagnostic application protocol. Matches the protocol keys in safety_policy.json.",
+      "type": "string",
+      "enum": ["UDS", "KWP2000", "OBD"]
+    },
+    "AdapterKind": {
+      "type": "string",
+      "enum": ["J2534", "SOCKETCAN", "STN_ELM", "SLCAN", "KLINE_FTDI", "VIRTUAL"]
+    },
+    "AdapterState": {
+      "type": "string",
+      "enum": ["CONNECTED", "DISCONNECTED", "ERROR"]
+    },
+    "LeaseTier": {
+      "type": "string",
+      "enum": ["COMMUNITY", "PRO", "WORKSHOP"]
+    },
+    "Feature": {
+      "description": "Features unlocked by the offline lease (Task 1.4).",
+      "type": "string",
+      "enum": ["J2534", "UDS_ACTIVE", "CAN_RE_PRO"]
+    },
+    "Severity": {
+      "type": "string",
+      "enum": ["INFO", "AMBER", "RED"]
+    },
+    "ErrorCode": {
+      "description": "Every code has a one-line fix-it hint in error_hints.json (A-DX-4).",
+      "type": "string",
+      "enum": [
+        "UNAUTHENTICATED",
+        "ORIGIN_REJECTED",
+        "SAFETY_BLOCKED",
+        "TOKEN_INVALID",
+        "PRECONDITION_UNKNOWN",
+        "LEASE_REQUIRED",
+        "ADAPTER_ERROR",
+        "PROTOCOL_ERROR",
+        "TIMEOUT",
+        "VERSION_UNSUPPORTED"
+      ]
+    },
+    "AdapterInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adapter_id", "kind", "display_name", "path"],
+      "properties": {
+        "adapter_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "kind": { "$ref": "#/definitions/AdapterKind" },
+        "display_name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "path": {
+          "description": "Device path, interface name or DLL path; null for virtual adapters.",
+          "type": ["string", "null"],
+          "maxLength": 512
+        }
+      }
+    },
+    "CanFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timestamp_us", "can_id", "is_extended", "dlc", "data_hex"],
+      "properties": {
+        "timestamp_us": { "$ref": "#/definitions/TimestampUs" },
+        "can_id": { "$ref": "#/definitions/CanId" },
+        "is_extended": { "type": "boolean" },
+        "dlc": { "type": "integer", "format": "uint8", "minimum": 0, "maximum": 8 },
+        "data_hex": { "type": "string", "pattern": "^([0-9A-Fa-f]{2}){0,8}$" }
+      }
+    },
+    "PidSample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timestamp_us", "pid", "name", "value", "unit"],
+      "properties": {
+        "timestamp_us": { "$ref": "#/definitions/TimestampUs" },
+        "pid": { "type": "integer", "format": "uint16", "minimum": 0, "maximum": 65535 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "value": { "type": "number" },
+        "unit": { "type": "string", "maxLength": 16 }
+      }
+    },
+    "Preconditions": {
+      "description": "Live readings the safety token was issued against. Null means the value could not be read (Rule 5: fail closed).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["speed_kmh", "speed_age_ms", "rpm", "battery_v"],
+      "properties": {
+        "speed_kmh": { "type": ["number", "null"], "minimum": 0 },
+        "speed_age_ms": { "type": ["integer", "null"], "format": "uint64", "minimum": 0 },
+        "rpm": { "type": ["number", "null"], "minimum": 0 },
+        "battery_v": { "type": ["number", "null"], "minimum": 0 }
+      }
+    },
+    "Nrc": {
+      "description": "Negative response code from the ECU.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "name"],
+      "properties": {
+        "code": { "type": "integer", "format": "uint8", "minimum": 0, "maximum": 255 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+    "HelloRequest": {
+      "description": "First message on every connection (Rule 4). Request -> HelloResponse.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "request_id", "client_token", "client_version", "protocol_version", "policy_version"],
+      "properties": {
+        "type": { "type": "string", "enum": ["HelloRequest"] },
+        "request_id": { "$ref": "#/definitions/RequestId" },
+        "client_token": {
+          "description": "Cloud pairing JWT (aud=edge-ws) or 6-digit local pairing code from `edge-daemon pair`.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        },
+        "client_version": { "$ref": "#/definitions/SemVer" },
+        "protocol_version": { "$ref": "#/definitions/SemVer" },
+        "policy_version": { "$ref": "#/definitions/SemVer" }
+      }
+    },
+    "HelloResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "request_id", "session_id", "daemon_version", "protocol_version", "policy_version", "lease_tier", "features"],
+      "properties": {
+        "type": { "type": "string", "enum": ["HelloResponse"] },
+        "request_id": { "$ref": "#/definitions/RequestId" },
+        "session_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "daemon_version": { "$ref": "#/definitions/SemVer" },
+        "protocol_version": { "$ref": "#/definitions/SemVer" },
+        "policy_version": { "$ref": "#/definitions/SemVer" },
+        "lease_tier": { "$ref": "#/definitions/LeaseTier" },
+        "features": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/Feature" }
+        }
+      }
+    },
+    "AdapterListRequest": {
+      "description": "Request -> AdapterListResponse.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "request_id"],
+      "properties": {
+        "type": { "type": "string", "enum": ["AdapterListRequest"] },
+        "request_id": { "$ref": "#/definitions/RequestId" }
+      }
+    },
+    "AdapterListResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "request_id", "adapters"],
+      "properties": {
+        "type": { "type": "string", "enum": ["AdapterListResponse"] },
+        "request_id": { "$ref": "#/definitions/RequestId" },
+        "adapters": { "type": "array", "items": { "$ref": "#/definitions/AdapterInfo" } }
+      }
+    },
+    "ConnectRequest": {
+      "description": "Request -> AdapterStatus.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "request_id", "adapter_id", "protocol", "baud_rate", "safety_mode"],
+      "properties": {
+        "type": { "type": "string", "enum": ["ConnectRequest"] },
+        "request_id": { "$ref": "#/definitions/RequestId" },
+        "adapter_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "protocol": { "$ref": "#/definitions/BusProtocol" },
+        "baud_rate": {
+          "description": "Bus or serial baud rate; null lets the daemon pick the protocol default.",
+          "type": ["integer", "null"],
+          "format": "uint32",
+          "minimum": 1,
+          "maximum": 4000000
+        },
+        "safety_mode": { "$ref": "#/definitions/SafetyMode" }
+      }
+    },
+    "DisconnectRequest": {
+      "description": "Request -> AdapterStatus.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "request_id", "adapter_id"],
+      "properties": {
+        "type": { "type": "string", "enum": ["DisconnectRequest"] },
+        "request_id": { "$ref": "#/definitions/RequestId" },
+        "adapter_id": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "AdapterStatus": {
+      "description": "Response to Connect/Disconnect, or pushed unsolicited (request_id null) when an adapter changes state.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "request_id", "adapter_id", "state", "battery_v"],
+      "properties": {
+        "type": { "type": "string", "enum": ["AdapterStatus"] },
+        "request_id": {
+          "anyOf": [{ "$ref": "#/definitions/RequestId" }, { "type": "null" }]
+        },
+        "adapter_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "state": { "$ref": "#/definitions/AdapterState" },
+        "battery_v": { "type": ["number", "null"], "minimum": 0 }
+      }
+    },
+    "CanFrameBatch": {
+      "description": "Pushed by the daemon.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "frames"],
+      "properties": {
+        "type": { "type": "string", "enum": ["CanFrameBatch"] },
+        "frames": { "type": "array", "items": { "$ref": "#/definitions/CanFrame" } }
+      }
+    },
+    "ObdPidStream": {
+      "description": "Pushed by the daemon.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "samples"],
+      "properties": {
+        "type": { "type": "string", "enum": ["ObdPidStream"] },
+        "samples": { "type": "array", "items": { "$ref": "#/definitions/PidSample" } }
+      }
+    },
+    "SafetyConfirmRequest": {
+      "description": "Asks for a single-use safety token for one gated request. Request -> SafetyConfirmResponse.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "request_id", "tx_id", "rx_id", "protocol", "service_id", "payload_hex", "user_ack_text"],
+      "properties": {
+        "type": { "type": "string", "enum": ["SafetyConfirmRequest"] },
+        "request_id": { "$ref": "#/definitions/RequestId" },
+        "tx_id": { "$ref": "#/definitions/CanId" },
+        "rx_id": { "$ref": "#/definitions/CanId" },
+        "protocol": { "$ref": "#/definitions/DiagProtocol" },
+        "service_id": { "$ref": "#/definitions/ServiceId" },
+        "payload_hex": { "$ref": "#/definitions/HexBytes" },
+        "user_ack_text": {
+          "description": "The confirmation text the technician acknowledged (names action, ECU and consequence).",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      }
+    },
+    "SafetyConfirmResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "request_id", "safety_token", "expires_at", "preconditions"],
+      "properties": {
+        "type": { "type": "string", "enum": ["SafetyConfirmResponse"] },
+        "request_id": { "$ref": "#/definitions/RequestId" },
+        "safety_token": { "type": "string", "minLength": 16, "maxLength": 256 },
+        "expires_at": { "$ref": "#/definitions/Rfc3339Utc" },
+        "preconditions": { "$ref": "#/definitions/Preconditions" }
+      }
+    },
+    "DiagCommandRequest": {
+      "description": "Request -> DiagCommandResponse. Gated services need safety_token (see safety_policy.json).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "request_id", "tx_id", "rx_id", "protocol", "service_id", "payload_hex", "safety_token"],
+      "properties": {
+        "type": { "type": "string", "enum": ["DiagCommandRequest"] },
+        "request_id": { "$ref": "#/definitions/RequestId" },
+        "tx_id": { "$ref": "#/definitions/CanId" },
+        "rx_id": { "$ref": "#/definitions/CanId" },
+        "protocol": { "$ref": "#/definitions/DiagProtocol" },
+        "service_id": { "$ref": "#/definitions/ServiceId" },
+        "payload_hex": { "$ref": "#/definitions/HexBytes" },
+        "safety_token": { "type": ["string", "null"], "minLength": 16, "maxLength": 256 }
+      }
+    },
+    "DiagCommandResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "request_id", "positive", "response_hex", "nrc"],
+      "properties": {
+        "type": { "type": "string", "enum": ["DiagCommandResponse"] },
+        "request_id": { "$ref": "#/definitions/RequestId" },
+        "positive": { "type": "boolean" },
+        "response_hex": { "$ref": "#/definitions/HexBytes" },
+        "nrc": {
+          "anyOf": [{ "$ref": "#/definitions/Nrc" }, { "type": "null" }]
+        }
+      }
+    },
+    "HeuristicAlert": {
+      "description": "Pushed by the daemon.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "rule_id", "severity", "title", "evidence_json", "recommended_test"],
+      "properties": {
+        "type": { "type": "string", "enum": ["HeuristicAlert"] },
+        "rule_id": { "type": "string", "pattern": "^[a-z0-9_.-]{1,64}$" },
+        "severity": { "$ref": "#/definitions/Severity" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "evidence_json": {
+          "description": "Rule-specific evidence as a JSON object.",
+          "type": "object"
+        },
+        "recommended_test": { "type": "string", "maxLength": 1000 }
+      }
+    },
+    "ErrorResponse": {
+      "description": "Any request can fail with this. request_id is null when the failed message could not be parsed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "request_id", "code", "message", "hint", "detail_json"],
+      "properties": {
+        "type": { "type": "string", "enum": ["ErrorResponse"] },
+        "request_id": {
+          "anyOf": [{ "$ref": "#/definitions/RequestId" }, { "type": "null" }]
+        },
+        "code": { "$ref": "#/definitions/ErrorCode" },
+        "message": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "hint": {
+          "description": "One line of fix-it text (A-DX-4); defaults come from error_hints.json.",
+          "type": "string",
+          "pattern": "^[^\\r\\n]{1,200}$"
+        },
+        "detail_json": {
+          "anyOf": [{ "type": "object" }, { "type": "null" }]
+        }
+      }
+    }
+  }
+}

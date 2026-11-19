@@ -1,0 +1,19 @@
+{
+  "frames": [
+    {
+      "can_id": 2024,
+      "data_hex": "0441",
+      "dlc": 2,
+      "is_extended": false,
+      "timestamp_us": 1795000000000000
+    },
+    {
+      "can_id": 417001744,
+      "data_hex": "0262F190AABBCCDD",
+      "dlc": 8,
+      "is_extended": true,
+      "timestamp_us": 1795000000000250
+    }
+  ],
+  "type": "CanFrameBatch"
+}

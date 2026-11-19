@@ -1,0 +1,11 @@
+{
+  "code": "SAFETY_BLOCKED",
+  "detail_json": {
+    "service_id": 47,
+    "tier": "A"
+  },
+  "hint": "This service is gated: reconnect in ACTIVE_CONFIRMED mode and confirm the action first.",
+  "message": "0x2F InputOutputControlByIdentifier is gated; the session is SILENT.",
+  "request_id": "req-1",
+  "type": "ErrorResponse"
+}
