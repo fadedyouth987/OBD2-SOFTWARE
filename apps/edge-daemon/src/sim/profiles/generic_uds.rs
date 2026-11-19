@@ -54,10 +54,12 @@ pub fn engine_spec() -> EcuSpec {
     spec
 }
 
+/// 0x0C9 engine frame: RPM x4 (bytes 0-1), speed, ECT + 40, CRC-8 (byte 6,
+/// SAE J1850 over the other bytes), rolling counter (byte 7 low nibble).
 fn engine_data(v: &VehicleState, counter: u32) -> Vec<u8> {
     let rpm = (v.rpm.clamp(0.0, 16_383.0) * 4.0) as u16;
     let [r_hi, r_lo] = rpm.to_be_bytes();
-    vec![
+    let mut frame = vec![
         r_hi,
         r_lo,
         v.speed_kmh.clamp(0.0, 255.0) as u8,
@@ -66,7 +68,10 @@ fn engine_data(v: &VehicleState, counter: u32) -> Vec<u8> {
         0,
         0,
         (counter & 0x0F) as u8,
-    ]
+    ];
+    let covered: Vec<u8> = frame[..6].iter().chain(&frame[7..]).copied().collect();
+    frame[6] = crate::hal::stn_elm::j1850_crc(&covered);
+    frame
 }
 
 fn body_data(v: &VehicleState, counter: u32) -> Vec<u8> {

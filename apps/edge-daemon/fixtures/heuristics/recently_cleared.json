@@ -1,0 +1,34 @@
+{
+  "kind": "audit",
+  "input": {
+    "supported": true,
+    "modules": [
+      {
+        "module": "PCM",
+        "vin": "6FPAAAJGSW8B12345",
+        "odometer_km": 214500
+      },
+      {
+        "module": "IC",
+        "vin": "6FPAAAJGSW8B12345",
+        "odometer_km": 214500
+      }
+    ],
+    "distance_since_clear_km": 12,
+    "incomplete_monitors": 4
+  },
+  "expected": [
+    {
+      "type": "HeuristicAlert",
+      "rule_id": "audit.codes_recently_cleared",
+      "severity": "AMBER",
+      "title": "Codes recently cleared",
+      "evidence_json": {
+        "distance_since_clear_km": 12,
+        "incomplete_monitors": 4,
+        "recent_clear_km": 50
+      },
+      "recommended_test": "Ask when codes were last cleared; road-test until the readiness monitors complete, then re-scan."
+    }
+  ]
+}
