@@ -1,0 +1,23 @@
+# SLCAN session with a Flipper Zero (USB-UART CAN app, MCP2515 add-on), 500 kbit/s.
+# Hand-built from the LAWICEL protocol, not a hardware capture; real captures
+# replace this under A-ENG-10. Escapes: \r CR, \x07 BEL.
+#
+# Close (channel was already closed, so BEL), set 500 kbit/s, open.
+> C\r
+< \x07
+> S6\r
+< \r
+> O\r
+< \r
+# OBD mode 01 PID 0D (vehicle speed), functional request.
+> t7DF802010D0000000000\r
+< z\r
+# Broadcast frame (filtered out), then the PCM reply with a timestamp, then a 29-bit frame.
+< t0C980C80000014000000\r
+< t7E8803410D0000000000A1B2\r
+< T18DAF110803410D0000000000\r
+# A frame the device refuses (BEL): the adapter reports it.
+> t7E03023E00\r
+< \x07
+> C\r
+< \r

@@ -1,0 +1,14 @@
+# K+DCAN cable (FTDI) in K-line mode, BMW E90 DME at 0x12, ISO 14230 fast init.
+# The cable echoes every byte the tester sends. Hand-built from ISO 14230-2,
+# not a hardware capture; real captures replace this under A-ENG-10.
+! baud 10400
+# Fast init: 25 ms low, 25 ms high.
+! break on
+! break off
+# StartCommunication to 0x12, echoed, then the ECU reply (C1 EF 8F).
+>x 81 12 F1 81 05
+<x 81 12 F1 81 05
+<x 83 F1 12 C1 EF 8F C5
+# Next request: the echo comes back corrupted (bus collision).
+>x 82 12 F1 1A 80 1F
+<x 82 12 F1 1A 00 1F
