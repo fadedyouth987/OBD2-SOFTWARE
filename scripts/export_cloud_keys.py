@@ -3,6 +3,13 @@
 
 Usage:
   python3 scripts/export_cloud_keys.py --kid cloud-2026-11 --pubkey-hex <64-hex-chars>
+
+Safe pinning:
+  CLOUD_KEYS is empty by default, which is the secure COMMUNITY-only mode.
+  Only pin the public half of a production key whose private seed lives in a
+  secret manager as CLOUD_SIGNING_PRIVATE_KEY_HEX. Never pin a development
+  key, and never commit a private key. Pinning a key means every valid lease
+  signed by that key is accepted on the vehicle.
 """
 from __future__ import annotations
 
@@ -72,6 +79,10 @@ def main() -> None:
     byte_list = ", ".join(f"0x{b:02x}" for b in raw)
     Path(args.out).write_text(TEMPLATE.format(kid=args.kid, byte_list=byte_list), encoding="utf-8")
     print(f"Pinned {args.kid} -> {args.out}")
+    print(
+        "WARNING: this key will be trusted on the vehicle. Use a production "
+        "public key only; keep CLOUD_KEYS empty for the safe COMMUNITY default."
+    )
 
 
 if __name__ == "__main__":
