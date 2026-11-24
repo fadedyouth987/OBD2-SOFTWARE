@@ -10,7 +10,7 @@ export default function Home() {
             Autel-inspired diagnostic suite backed by local Rust edge-daemon (ws://127.0.0.1:8765) and ap-southeast-2 cloud sync.
           </p>
         </header>
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Link href="/live" className="min-h-[120px] rounded-2xl border border-slate-800 bg-[#151a22] p-4 hover:border-[#e0242f]">
             <div className="text-sm font-bold text-white">Live Diagnostics &amp; Topology</div>
             <p className="mt-1 text-xs text-slate-400">Auto-Scan ECUs, tamper audit, and Tier A/B 1.5s hold safety interlock.</p>
@@ -22,6 +22,10 @@ export default function Home() {
           <Link href="/copilot/demo-session" className="min-h-[120px] rounded-2xl border border-slate-800 bg-[#151a22] p-4 hover:border-[#e0242f]">
             <div className="text-sm font-bold text-white">AI Root-Cause Copilot</div>
             <p className="mt-1 text-xs text-slate-400">Neo4j wiring graph localization with HIGH/MEDIUM/LOW confidence bands.</p>
+          </Link>
+          <Link href="/immo" className="min-h-[120px] rounded-2xl border border-slate-800 bg-[#151a22] p-4 hover:border-[#e0242f]">
+            <div className="text-sm font-bold text-white">Key learn (sandbox)</div>
+            <p className="mt-1 text-xs text-slate-400">AASRA-gated on-board add-key over a BT dongle. Off unless IMMO_FEATURE_ENABLED is set.</p>
           </Link>
         </div>
       </div>

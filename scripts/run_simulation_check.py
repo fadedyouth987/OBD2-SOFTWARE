@@ -36,6 +36,13 @@ WEBHOOK_SECRET = os.environ["STRIPE_WEBHOOK_SECRET"]
 
 sys.path.insert(0, str(ROOT / "services" / "cloud-api"))
 from fastapi.testclient import TestClient  # noqa: E402
+from app.services.immo_catalog import (  # noqa: E402
+    SANDBOX_DEVICE_ID,
+    SANDBOX_KEY_HEX,
+    SANDBOX_OEM,
+    SANDBOX_OPERATION,
+    SANDBOX_VIN,
+)
 from app.main import app  # noqa: E402
 
 client = TestClient(app)
@@ -251,6 +258,7 @@ assert claims["user_id"] == user_id
 assert claims["tier"] == "WORKSHOP"
 assert claims["aasra_verified"] is True
 assert "UDS_ACTIVE" in claims["features"] and "CAN_RE_PRO" in claims["features"] and "J2534" in claims["features"]
+assert "IMMO_PROGRAM" not in claims["features"]
 assert 0 < (claims["exp"] - claims["nbf"]) <= 72 * 3600
 
 pairing = client.post(
@@ -263,5 +271,75 @@ pub_key.verify(base64.urlsafe_b64decode(ps + "=" * (-len(ps) % 4)), f"{ph}.{pp}"
 pclaims = b64url_json(pp)
 assert pclaims["aud"] == "edge-ws" and pclaims["tenant_id"] == tenant_id and pclaims["user_id"] == user_id
 assert pclaims["origin"] == "http://localhost:3000" and 0 < (pclaims["exp"] - pclaims["nbf"]) <= 300
+
+
+# --- Immobilizer Phase 1 (feature flag + deny paths + sandbox happy path) ---
+from datetime import date
+
+os.environ["IMMO_FEATURE_ENABLED"] = "false"
+denied_flag = client.post(
+    "/api/v1/immo/technicians/enrol",
+    json={"aasra_member_id": "VSP-SIM", "national_police_check_dated": date.today().isoformat(), "declared": True},
+    headers=auth,
+)
+assert denied_flag.status_code == 403, denied_flag.text
+
+unauth = client.post("/api/v1/immo/sessions", json={"vin": SANDBOX_VIN, "authorisation_id": str(uuid.uuid4()), "oem": SANDBOX_OEM, "operation": SANDBOX_OPERATION, "device_id": SANDBOX_DEVICE_ID, "device_tier": "dongle"})
+assert unauth.status_code == 401
+
+os.environ["IMMO_FEATURE_ENABLED"] = "true"
+# Workshop not yet marked in this block? The founding tenant was marked earlier via /dev-mark-aasra after first use?
+# Re-mark to be safe, then enrol.
+marked = client.post("/api/v1/auth/dev-mark-aasra", headers=auth)
+assert marked.status_code == 200, marked.text
+enrol = client.post(
+    "/api/v1/immo/technicians/enrol",
+    json={"aasra_member_id": "VSP-SIM", "national_police_check_dated": date.today().isoformat(), "declared": True},
+    headers=auth,
+)
+assert enrol.status_code == 200 and enrol.json()["accredited"] is True, enrol.text
+
+authz = client.post("/api/v1/immo/owner-authorisations", json={"vin": SANDBOX_VIN}, headers=auth)
+assert authz.status_code == 200, authz.text
+job = client.post(
+    "/api/v1/immo/sessions",
+    json={
+        "vin": SANDBOX_VIN,
+        "authorisation_id": authz.json()["id"],
+        "oem": SANDBOX_OEM,
+        "operation": SANDBOX_OPERATION,
+        "device_id": SANDBOX_DEVICE_ID,
+        "device_tier": "dongle",
+        "aasra_verified": False,  # ignored
+    },
+    headers=auth,
+)
+assert job.status_code == 200, job.text
+ilease = job.json()["lease"]
+assert ilease["lease_kind"] == "immo_lease" and ilease["features"] == ["IMMO_PROGRAM"]
+assert "vin" not in ilease
+ih, ip, isig = ilease["token"].split(".")
+pub_key.verify(base64.urlsafe_b64decode(isig + "=" * (-len(isig) % 4)), f"{ih}.{ip}".encode("ascii"))
+iclaims = b64url_json(ip)
+assert iclaims["aud"] == "edge-daemon" and iclaims["lease_kind"] == "immo_lease"
+assert iclaims["vin"] == SANDBOX_VIN and iclaims["device_id"] == SANDBOX_DEVICE_ID
+assert 0 < (iclaims["exp"] - iclaims["nbf"]) <= 30 * 60
+
+sid = job.json()["session_id"]
+tok = client.post(f"/api/v1/immo/sessions/{sid}/token", headers=auth)
+assert tok.status_code == 200 and tok.json()["payload_hex"] == SANDBOX_KEY_HEX, tok.text
+done = client.post(f"/api/v1/immo/sessions/{sid}/complete", headers=auth)
+assert done.status_code == 200 and done.json()["status"] == "completed"
+
+# Second start on a new authorisation should work now that the first job completed.
+authz2 = client.post("/api/v1/immo/owner-authorisations", json={"vin": SANDBOX_VIN}, headers=auth)
+job2 = client.post(
+    "/api/v1/immo/sessions",
+    json={"vin": SANDBOX_VIN, "authorisation_id": authz2.json()["id"], "oem": "FORD", "operation": SANDBOX_OPERATION, "device_id": SANDBOX_DEVICE_ID, "device_tier": "dongle"},
+    headers=auth,
+)
+assert job2.status_code == 403 and "allow-list" in job2.json()["detail"]
+
+os.environ.pop("IMMO_FEATURE_ENABLED", None)
 
 print("ALL SIMULATION CHECKS PASSED!")
