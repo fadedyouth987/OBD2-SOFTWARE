@@ -14,7 +14,9 @@ pub const ALDL_ECM_ID: u8 = 0xF4;
 
 /// Computes the GM ALDL two's-complement checksum byte.
 pub fn aldl_checksum(frame_without_cs: &[u8]) -> u8 {
-    let sum = frame_without_cs.iter().fold(0u8, |acc, &b| acc.wrapping_add(b));
+    let sum = frame_without_cs
+        .iter()
+        .fold(0u8, |acc, &b| acc.wrapping_add(b));
     0u8.wrapping_sub(sum)
 }
 

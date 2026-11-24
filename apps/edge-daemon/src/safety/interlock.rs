@@ -238,7 +238,6 @@ impl SafetyInterlock {
         );
     }
 
-
     pub fn set_immo_registry(&self, registry: ImmoRegistry) {
         self.lock().immo_registry = Some(registry);
     }
@@ -1012,11 +1011,7 @@ mod tests {
         lock.update_speed(0.0);
         let seed = immo_req(&[0x27, 0x01]);
         let err = lock.issue_token(&seed, "ack").unwrap_err();
-        assert!(
-            err.message.contains("immo lease"),
-            "{}",
-            err.message
-        );
+        assert!(err.message.contains("immo lease"), "{}", err.message);
 
         // VIN mismatch.
         lock.update_battery(13.8);
@@ -1050,7 +1045,11 @@ mod tests {
         tokio::time::advance(Duration::from_millis(2_100)).await;
         let err = lock.check(&seed, Some(&grant.token)).unwrap_err();
         assert_eq!(err.code, RefusalCode::PreconditionUnknown);
-        assert!(err.message.contains("stale") || err.message.contains("battery"), "{}", err.message);
+        assert!(
+            err.message.contains("stale") || err.message.contains("battery"),
+            "{}",
+            err.message
+        );
     }
 
     #[tokio::test(start_paused = true)]

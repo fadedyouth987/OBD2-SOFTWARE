@@ -9,11 +9,19 @@
 //! Environment: `EDGE_PORT` (default 8765), `EDGE_ALLOWED_ORIGINS` (comma
 //! separated, default `http://localhost:3000` for development),
 //! `EDGE_DATA_DIR` (pairing codes, audit log, lease; default per user),
+//! `EDGE_DEVICE_ID` (must match the lease `rcid` claim when set),
+//! `EDGE_LEASE_MIN_VERSION` (leases with a lower `lease_ver` are revoked),
 //! `RUST_LOG` (default `info`). An offline lease is read from
 //! `<data dir>/lease.jwt` when present, and an immobilizer lease from
-//! `<data dir>/immo_lease.jwt` when present.
+//! `<data dir>/immo_lease.jwt` when present. Replacing `lease.jwt` or
+//! `<data dir>/lease.min_ver` bumps the lease epoch and closes open sockets.
 
-use std::{path::PathBuf, process::ExitCode, sync::Arc};
+use std::{
+    path::PathBuf,
+    process::ExitCode,
+    sync::{atomic::Ordering, Arc},
+    time::Duration,
+};
 
 use edge_daemon::{
     auth::{cloud_keys::KeyRing, unix_now},
@@ -77,9 +85,65 @@ async fn serve(dir: PathBuf) -> ExitCode {
     }
     cfg.lease_token = std::fs::read_to_string(dir.join("lease.jwt")).ok();
     cfg.immo_lease_token = std::fs::read_to_string(dir.join("immo_lease.jwt")).ok();
+    if let Ok(id) = std::env::var("EDGE_DEVICE_ID") {
+        let id = id.trim();
+        if !id.is_empty() {
+            cfg.device_id = Some(id.to_owned());
+        }
+    }
+    if let Ok(v) = std::env::var("EDGE_LEASE_MIN_VERSION") {
+        if let Ok(n) = v.trim().parse::<i64>() {
+            cfg.lease_min_version.store(n, Ordering::SeqCst);
+        }
+    }
+    if let Ok(s) = std::fs::read_to_string(dir.join("lease.min_ver")) {
+        if let Ok(n) = s.trim().parse::<i64>() {
+            cfg.lease_min_version.store(n, Ordering::SeqCst);
+        }
+    }
+    {
+        let mut live = cfg.live_lease.lock().expect("live lease lock");
+        *live = cfg.lease_token.clone();
+    }
     if cfg.keys.is_empty() {
         tracing::info!("no cloud keys pinned yet: COMMUNITY tier, local pairing codes only");
     }
+    let live = Arc::clone(&cfg.live_lease);
+    let epoch = Arc::clone(&cfg.lease_epoch);
+    let min_ver = Arc::clone(&cfg.lease_min_version);
+    let lease_path = dir.join("lease.jwt");
+    let min_path = dir.join("lease.min_ver");
+    let mut last_lease = cfg.lease_token.clone();
+    let mut last_min = min_ver.load(Ordering::SeqCst);
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(2));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tick.tick().await;
+            let new_lease = std::fs::read_to_string(&lease_path).ok();
+            if new_lease != last_lease {
+                last_lease = new_lease.clone();
+                if let Ok(mut guard) = live.lock() {
+                    *guard = new_lease;
+                }
+                epoch.fetch_add(1, Ordering::SeqCst);
+                tracing::info!("lease.jwt changed; open sessions will be asked to reconnect");
+            }
+            if let Ok(s) = std::fs::read_to_string(&min_path) {
+                if let Ok(n) = s.trim().parse::<i64>() {
+                    if n != last_min {
+                        last_min = n;
+                        min_ver.store(n, Ordering::SeqCst);
+                        epoch.fetch_add(1, Ordering::SeqCst);
+                        tracing::info!(
+                            min_version = n,
+                            "lease.min_ver changed; open sessions will reconnect"
+                        );
+                    }
+                }
+            }
+        }
+    });
     let origins = cfg.allowed_origins.join(", ");
     let server = match Server::bind(cfg).await {
         Ok(s) => s,

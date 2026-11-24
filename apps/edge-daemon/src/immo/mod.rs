@@ -39,12 +39,7 @@ pub fn sandbox_token_key(_seed: &[u8]) -> Vec<u8> {
     SANDBOX_KEY.to_vec()
 }
 
-pub fn is_sandbox_key_learn(
-    protocol: DiagProtocol,
-    tx: u32,
-    rx: u32,
-    payload: &[u8],
-) -> bool {
+pub fn is_sandbox_key_learn(protocol: DiagProtocol, tx: u32, rx: u32, payload: &[u8]) -> bool {
     matches!(protocol, DiagProtocol::Uds)
         && tx == SANDBOX_ECU_TX
         && rx == SANDBOX_ECU_RX
@@ -171,9 +166,7 @@ mod tests {
         let reg = ImmoRegistry::new();
         reg.begin("j1", SANDBOX_VIN, SANDBOX_DEVICE_ID, "s1")
             .unwrap();
-        let err = reg
-            .begin("j2", SANDBOX_VIN, "other", "s2")
-            .unwrap_err();
+        let err = reg.begin("j2", SANDBOX_VIN, "other", "s2").unwrap_err();
         assert!(err.contains("already active"), "{err}");
     }
 }

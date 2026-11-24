@@ -202,7 +202,10 @@ async fn pair_list_connect_and_stream_at_20hz() {
         }
     }
     assert!(pids >= 20, "ObdPidStream at {pids} Hz");
-    assert!(frames >= 20, "CanFrameBatch at {frames} Hz");
+    assert_eq!(
+        frames, 0,
+        "raw CAN is gated on CAN_RE_PRO; got {frames} batches"
+    );
     assert!(saw_rpm);
 
     // Diagnostics over the socket: an ungated read works, a gated one is blocked in SILENT.
@@ -422,4 +425,120 @@ async fn protocol_errors_keep_the_session() {
         "ADAPTER_ERROR",
         "K-line live view is Task 4.1"
     );
+}
+
+/// Raw CAN frames are streamed only when the lease includes CAN_RE_PRO.
+#[tokio::test]
+async fn can_re_pro_is_required_for_raw_can_frames() {
+    let now = unix_now();
+    let d = start(|cfg, cloud| {
+        cfg.lease_token = Some(jws::sign(
+            &json!({
+                "aud": "edge-daemon",
+                "tenant_id": "t-1",
+                "tier": "WORKSHOP",
+                "features": ["UDS_ACTIVE", "CAN_RE_PRO", "J2534"],
+                "nbf": now - 60,
+                "exp": now + 3_600
+            }),
+            "cloud-test",
+            cloud,
+        ));
+    })
+    .await;
+    let mut ws = paired(&d).await;
+    send(
+        &mut ws,
+        &json!({"type": "ConnectRequest", "request_id": "c1", "adapter_id": "virtual-generic-uds",
+                          "protocol": "AUTO", "baud_rate": null, "safety_mode": "SILENT"}),
+    )
+    .await;
+    assert_eq!(reply(&mut ws, "c1").await["state"], "CONNECTED");
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let mut frames = 0;
+    let start = Instant::now();
+    while Instant::now() - start < Duration::from_secs(1) {
+        let msg = next(&mut ws).await.unwrap();
+        if msg["type"] == "CanFrameBatch" {
+            frames += 1;
+        }
+    }
+    assert!(
+        frames >= 20,
+        "workshop lease streams raw CAN at {frames} Hz"
+    );
+}
+
+/// A lease bound to another device, or an old lease generation, is COMMUNITY.
+#[tokio::test]
+async fn device_mismatch_and_revoked_generation_deny_paid_features() {
+    let now = unix_now();
+    let claims = json!({
+        "aud": "edge-daemon",
+        "tenant_id": "t-1",
+        "tier": "WORKSHOP",
+        "features": ["UDS_ACTIVE", "CAN_RE_PRO"],
+        "rcid": "RC-DGL-04A2",
+        "lease_ver": 2,
+        "nbf": now - 60,
+        "exp": now + 3_600
+    });
+
+    let d = start(|cfg, cloud| {
+        cfg.device_id = Some("OTHER-DEVICE".into());
+        cfg.lease_token = Some(jws::sign(&claims, "cloud-test", cloud));
+    })
+    .await;
+    let mut ws = d.app().await;
+    send(&mut ws, &hello(&d.code())).await;
+    let h = next(&mut ws).await.unwrap();
+    assert_eq!(h["lease_tier"], "COMMUNITY", "wrong device: {h}");
+    assert!(h["features"].as_array().unwrap().is_empty());
+
+    let d = start(|cfg, cloud| {
+        cfg.device_id = Some("RC-DGL-04A2".into());
+        cfg.lease_min_version
+            .store(3, std::sync::atomic::Ordering::SeqCst);
+        cfg.lease_token = Some(jws::sign(&claims, "cloud-test", cloud));
+    })
+    .await;
+    let mut ws = d.app().await;
+    send(&mut ws, &hello(&d.code())).await;
+    let h = next(&mut ws).await.unwrap();
+    assert_eq!(h["lease_tier"], "COMMUNITY", "revoked: {h}");
+}
+
+/// Bumping the lease epoch closes an already-authenticated socket.
+#[tokio::test]
+async fn lease_epoch_closes_open_sockets() {
+    let now = unix_now();
+    let epoch = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let epoch_for_cfg = std::sync::Arc::clone(&epoch);
+    let d = start(move |cfg, cloud| {
+        cfg.lease_epoch = epoch_for_cfg;
+        cfg.lease_token = Some(jws::sign(
+            &json!({
+                "aud": "edge-daemon",
+                "tenant_id": "t-1",
+                "tier": "PRO",
+                "features": ["UDS_ACTIVE"],
+                "nbf": now - 60,
+                "exp": now + 3_600
+            }),
+            "cloud-test",
+            cloud,
+        ));
+    })
+    .await;
+    let mut ws = paired(&d).await;
+    epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    send(
+        &mut ws,
+        &json!({"type": "AdapterListRequest", "request_id": "l1"}),
+    )
+    .await;
+    let msg = next(&mut ws).await.unwrap();
+    assert_eq!(msg["type"], "ErrorResponse");
+    assert_eq!(msg["code"], "TOKEN_INVALID");
+    assert!(next(&mut ws).await.is_none(), "socket should close");
 }

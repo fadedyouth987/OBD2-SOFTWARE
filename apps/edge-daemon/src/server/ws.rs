@@ -23,7 +23,10 @@
 
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicI64, AtomicU64, Ordering},
+        Arc, Mutex,
+    },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -51,7 +54,6 @@ use crate::{
         lease::{self, ImmoLease, Lease},
         unix_now,
     },
-    immo::{self, ImmoRegistry},
     hal::{
         discovery,
         serial::SystemSerial,
@@ -62,6 +64,7 @@ use crate::{
         virtual_bus::VirtualBus,
         HalError, VehicleBusAdapter,
     },
+    immo::{self, ImmoRegistry},
     protocol::{
         self,
         messages::{
@@ -98,6 +101,14 @@ pub struct ServerConfig {
     pub keys: KeyRing,
     /// Raw lease token; verified at every Hello so expiry takes effect.
     pub lease_token: Option<String>,
+    /// Live lease token, updated when `lease.jwt` is replaced on disk.
+    pub live_lease: Arc<Mutex<Option<String>>>,
+    /// Bumped when the lease file or minimum generation changes so open sockets close.
+    pub lease_epoch: Arc<AtomicU64>,
+    /// Optional dongle / tablet identity; compared to the lease `rcid` claim.
+    pub device_id: Option<String>,
+    /// Leases with `lease_ver` below this are treated as revoked.
+    pub lease_min_version: Arc<AtomicI64>,
     /// Optional immobilizer lease; verified at Hello and bound on Connect.
     pub immo_lease_token: Option<String>,
     pub immo_registry: ImmoRegistry,
@@ -116,6 +127,10 @@ impl ServerConfig {
             allowed_origins: vec!["http://localhost:3000".into()],
             keys,
             lease_token: None,
+            live_lease: Arc::new(Mutex::new(None)),
+            lease_epoch: Arc::new(AtomicU64::new(0)),
+            device_id: None,
+            lease_min_version: Arc::new(AtomicI64::new(0)),
             immo_lease_token: None,
             immo_registry: ImmoRegistry::new(),
             pairing,
@@ -160,6 +175,11 @@ impl Server {
 
     pub fn port(&self) -> u16 {
         self.cfg.port
+    }
+
+    /// Signal open sessions that the lease has changed; they must reconnect.
+    pub fn bump_lease_epoch(&self) {
+        self.cfg.lease_epoch.fetch_add(1, Ordering::SeqCst);
     }
 
     /// Serves until the task is dropped.
@@ -301,7 +321,19 @@ async fn handle(cfg: Arc<ServerConfig>, stream: TcpStream) {
         }
     };
 
+    let my_epoch = cfg.lease_epoch.load(Ordering::SeqCst);
     while let Some(text) = next_text(&mut source).await {
+        if cfg.lease_epoch.load(Ordering::SeqCst) != my_epoch {
+            let _ = tx
+                .send(Outbound::Msg(err(
+                    request_id_of(&text),
+                    ErrorCode::TokenInvalid,
+                    "lease changed; reconnect with a fresh lease",
+                )))
+                .await;
+            let _ = tx.send(Outbound::Close).await;
+            break;
+        }
         let reply = session.handle(&text).await;
         if tx.send(Outbound::Msg(reply)).await.is_err() {
             break;
@@ -400,7 +432,19 @@ fn authenticate(
             }
         }
     };
-    let lease = lease::effective_lease(cfg.lease_token.as_deref(), &cfg.keys, now);
+    let live = cfg
+        .live_lease
+        .lock()
+        .ok()
+        .and_then(|g| g.clone())
+        .or_else(|| cfg.lease_token.clone());
+    let lease = lease::effective_lease_constrained(
+        live.as_deref(),
+        &cfg.keys,
+        now,
+        cfg.device_id.as_deref(),
+        cfg.lease_min_version.load(Ordering::SeqCst),
+    );
     let immo_lease = match cfg.immo_lease_token.as_deref() {
         None => None,
         Some(token) => match lease::verify_immo_lease(token, &cfg.keys, now) {
@@ -757,6 +801,7 @@ impl Session {
                 shared.port(),
                 self.tx.clone(),
                 self.stream_period,
+                self.lease.has(Feature::CanRePro),
             ))];
             match open_channel(
                 bus.clone(),
@@ -817,6 +862,7 @@ impl Session {
             frames,
             self.tx.clone(),
             self.stream_period,
+            self.lease.has(Feature::CanRePro),
         ))];
         match open_channel(
             bus_handle.clone(),
@@ -838,15 +884,15 @@ impl Session {
         let battery = bus.with_vehicle(|v| v.battery_v);
         let vin = bus.with_vehicle(|v| v.vin.clone());
         self.interlock.update_battery(battery);
-        self.interlock.update_speed(bus.with_vehicle(|v| v.speed_kmh));
+        self.interlock
+            .update_speed(bus.with_vehicle(|v| v.speed_kmh));
         self.interlock.update_rpm(bus.with_vehicle(|v| v.rpm));
         self.interlock.set_identity(None, Some(vin.clone()));
         if let Some(immo) = self.immo_lease.clone() {
-            if let Err(refusal) = self.interlock.begin_immo(
-                immo,
-                &vin,
-                immo::canonical_device_id(adapter_id),
-            ) {
+            if let Err(refusal) =
+                self.interlock
+                    .begin_immo(immo, &vin, immo::canonical_device_id(adapter_id))
+            {
                 return err(rid, refusal_code(refusal.code), &refusal.message);
             }
         }
@@ -1021,6 +1067,7 @@ async fn stream_can(
     mut port: impl VehicleBusAdapter + 'static,
     tx: mpsc::Sender<Outbound>,
     period: Duration,
+    allow_raw_can: bool,
 ) {
     let mut tick = tokio::time::interval(period);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -1028,7 +1075,8 @@ async fn stream_can(
     loop {
         tokio::select! {
             _ = tick.tick() => {
-                if frames.is_empty() {
+                if frames.is_empty() || !allow_raw_can {
+                    frames.clear();
                     continue;
                 }
                 let batch = m::CanFrameBatch { frames: std::mem::take(&mut frames), type_: m::CanFrameBatchType::CanFrameBatch };
