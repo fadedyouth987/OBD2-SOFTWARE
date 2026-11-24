@@ -1,4 +1,5 @@
 """Celery application with schematic ingestion task registered (Tasks 0.1 & 3.2)."""
+
 import os
 
 from celery import Celery

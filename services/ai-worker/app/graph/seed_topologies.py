@@ -1,4 +1,5 @@
 """Seed electrical topologies for Australian fleet & benchmark vehicles (Task 3.1)."""
+
 from __future__ import annotations
 
 SEED_TOPOLOGIES = {
@@ -8,7 +9,12 @@ SEED_TOPOLOGIES = {
     },
     "ford_ranger_px3": {
         "modules": ["PCM", "TCM", "ABS", "BCM", "IPC", "RCM"],
-        "shared_nodes": ["NODE:HS_CAN_500K", "NODE:MS_CAN_125K", "NODE:EXH_DPF_DIFF_PRESS", "NODE:BATT_MAIN_GND_G101"],
+        "shared_nodes": [
+            "NODE:HS_CAN_500K",
+            "NODE:MS_CAN_125K",
+            "NODE:EXH_DPF_DIFF_PRESS",
+            "NODE:BATT_MAIN_GND_G101",
+        ],
     },
     "ford_falcon_ba_au": {
         "modules": ["PCM", "BEM", "ABS", "IC"],

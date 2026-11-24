@@ -1,4 +1,5 @@
 """Celery task for PDF schematic ingestion (Task 3.2)."""
+
 from __future__ import annotations
 
 from app.celery_app import celery_app

@@ -1,4 +1,5 @@
 """Unit tests for Tasks 3.1 (A-ENG-6) and 3.2 (A-ENG-8)."""
+
 import unittest
 
 from app.graph.neo4j_client import TenantScopedGraphRepository

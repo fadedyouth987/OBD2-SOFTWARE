@@ -77,8 +77,7 @@ def upgrade() -> None:
         """
     )
     op.execute(
-        "CREATE INDEX owner_authorisations_vin "
-        "ON owner_authorisations (tenant_id, vin_hmac)"
+        "CREATE INDEX owner_authorisations_vin ON owner_authorisations (tenant_id, vin_hmac)"
     )
 
     op.execute(
@@ -152,9 +151,7 @@ def upgrade() -> None:
         )
         """
     )
-    op.execute(
-        "CREATE INDEX immo_audit_tenant_at ON immo_audit (tenant_id, at)"
-    )
+    op.execute("CREATE INDEX immo_audit_tenant_at ON immo_audit (tenant_id, at)")
     op.execute(
         "COMMENT ON TABLE immo_audit IS "
         "'MVIS-aligned five-year security-information audit. Never store PINs or key codes.'"

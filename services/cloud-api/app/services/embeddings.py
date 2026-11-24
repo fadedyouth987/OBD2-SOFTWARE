@@ -1,9 +1,10 @@
 """Self-hosted ap-southeast-2 384-dim embedding & numeric feature vector builder (Task 3.3)."""
+
 from __future__ import annotations
 
 import hashlib
 import math
-from typing import Sequence
+from collections.abc import Sequence
 
 EMBEDDING_DIM = 384
 EMBEDDING_MODEL = "bge-small-en-v1.5-ap-se-2"
@@ -44,7 +45,9 @@ def build_feature_vector(
 
 
 def cosine_similarity(a: Sequence[float], b: Sequence[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
+    if len(a) != len(b):
+        raise ValueError("cosine_similarity requires equal-length vectors")
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
     na = math.sqrt(sum(x * x for x in a)) or 1.0
     nb = math.sqrt(sum(y * y for y in b)) or 1.0
     return dot / (na * nb)

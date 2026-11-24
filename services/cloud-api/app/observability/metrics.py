@@ -1,4 +1,5 @@
 """Cloud API Prometheus metrics & operational counters (Task 5.2, A-CEO-5)."""
+
 from __future__ import annotations
 
 from collections import Counter

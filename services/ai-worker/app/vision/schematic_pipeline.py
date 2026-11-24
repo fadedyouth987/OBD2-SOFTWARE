@@ -1,4 +1,5 @@
 """Hybrid vector-first schematic-to-graph pipeline (Task 3.2)."""
+
 from __future__ import annotations
 
 from typing import Any

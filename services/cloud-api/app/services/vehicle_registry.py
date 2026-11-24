@@ -1,4 +1,5 @@
 """Make/model/platform vehicle registry, AutoVIN decoder, and service functions catalog."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -44,7 +45,10 @@ VEHICLE_PLATFORMS: dict[str, dict[str, Any]] = {
         "protocols": ["ALDL_8192"],
         "modules": [{"id": "ECM", "bus": "GM 8192-baud ALDL (Pin 9)", "tx": "0xF4", "rx": "0xF4"}],
         "shared_nodes": ["NODE:ALDL_PIN9_8192", "NODE:DFI_CAS_MODULE"],
-        "common_dtcs": {"12": "System Pass (No RPM pulse)", "42": "Electronic Spark Timing (EST) bypass fault — check DFI module."},
+        "common_dtcs": {
+            "12": "System Pass (No RPM pulse)",
+            "42": "Electronic Spark Timing (EST) bypass fault — check DFI module.",
+        },
     },
     "holden_commodore_vt_vy_ls1": {
         "make": "Holden",
@@ -97,7 +101,12 @@ VEHICLE_PLATFORMS: dict[str, dict[str, Any]] = {
             {"id": "IC", "bus": "ACP / J1850", "tx": "0x720", "rx": "0x728"},
         ],
         "shared_nodes": ["NODE:J1850_PWM_BUS", "NODE:ACP_BODY_BUS", "NODE:PCM_MAIN_RELAY_R1"],
-        "common_dtcs": {"P0420": "Catalyst Efficiency Below Threshold — check O2 heater fuse & exhaust manifold leaks."},
+        "common_dtcs": {
+            "P0420": (
+                "Catalyst Efficiency Below Threshold — check O2 heater "
+                "fuse & exhaust manifold leaks."
+            )
+        },
     },
     "ford_falcon_fg_fgx": {
         "make": "Ford Australia",
@@ -112,7 +121,11 @@ VEHICLE_PLATFORMS: dict[str, dict[str, Any]] = {
             {"id": "BEM/ICC", "bus": "MS-CAN 125k (STP 53)", "tx": "0x726", "rx": "0x72E"},
         ],
         "shared_nodes": ["NODE:HS_CAN_500K", "NODE:MS_CAN_125K", "NODE:ZF_MECHATRONIC_PLUG"],
-        "common_dtcs": {"U0101": "ZF6HP26 TCM comms/mechatronic sleeve leak — inspect 16-pin plug & bridge seal."},
+        "common_dtcs": {
+            "U0101": (
+                "ZF6HP26 TCM comms/mechatronic sleeve leak — inspect 16-pin plug & bridge seal."
+            )
+        },
     },
     "ford_ranger_px3": {
         "make": "Ford",
@@ -128,8 +141,18 @@ VEHICLE_PLATFORMS: dict[str, dict[str, Any]] = {
             {"id": "IPC", "bus": "MS-CAN 125k (STP 53)", "tx": "0x720", "rx": "0x728"},
             {"id": "RCM", "bus": "MS-CAN 125k (STP 53)", "tx": "0x737", "rx": "0x73F"},
         ],
-        "shared_nodes": ["NODE:HS_CAN_500K", "NODE:MS_CAN_125K", "NODE:EXH_DPF_DIFF_PRESS", "NODE:BATT_MAIN_GND_G101"],
-        "common_dtcs": {"P2463": "DPF Soot Accumulation — check differential pressure hoses & 5V ref before forced regen."},
+        "shared_nodes": [
+            "NODE:HS_CAN_500K",
+            "NODE:MS_CAN_125K",
+            "NODE:EXH_DPF_DIFF_PRESS",
+            "NODE:BATT_MAIN_GND_G101",
+        ],
+        "common_dtcs": {
+            "P2463": (
+                "DPF Soot Accumulation — check differential pressure "
+                "hoses & 5V ref before forced regen."
+            )
+        },
     },
     "bmw_e90_dcan": {
         "make": "BMW",
@@ -145,7 +168,11 @@ VEHICLE_PLATFORMS: dict[str, dict[str, Any]] = {
             {"id": "KOMBI", "bus": "K-CAN / D-CAN (0x6F1->0x60)", "tx": "0x6F1", "rx": "0x660"},
         ],
         "shared_nodes": ["NODE:PT_CAN_500K", "NODE:KL15_FUSE_F04", "NODE:CHASSIS_GND_X165"],
-        "common_dtcs": {"2AAF": "Fuel Pump Plausibility — test EKPS module supply voltage & low-pressure sensor."},
+        "common_dtcs": {
+            "2AAF": (
+                "Fuel Pump Plausibility — test EKPS module supply voltage & low-pressure sensor."
+            )
+        },
     },
     "toyota_hilux_gun126": {
         "make": "Toyota",
@@ -160,7 +187,12 @@ VEHICLE_PLATFORMS: dict[str, dict[str, Any]] = {
             {"id": "BCM", "bus": "CAN Gateway", "tx": "0x750", "rx": "0x758"},
         ],
         "shared_nodes": ["NODE:HS_CAN_500K", "NODE:EFI_MAIN_RELAY", "NODE:INJ_EDU_GND_E1"],
-        "common_dtcs": {"P2002": "DPF Efficiency Below Threshold — inspect 5th injector & differential pressure pipe."},
+        "common_dtcs": {
+            "P2002": (
+                "DPF Efficiency Below Threshold — inspect 5th injector "
+                "& differential pressure pipe."
+            )
+        },
     },
     "toyota_jdm_hybrid_import": {
         "make": "Toyota / Lexus (JDM Import)",
@@ -175,7 +207,11 @@ VEHICLE_PLATFORMS: dict[str, dict[str, Any]] = {
             {"id": "ABS/Regen", "bus": "HS-CAN 500k", "tx": "0x7B0", "rx": "0x7B8"},
         ],
         "shared_nodes": ["NODE:HS_CAN_500K", "NODE:HV_INTERLOCK_SW", "NODE:INV_COOLANT_PUMP"],
-        "common_dtcs": {"P0A80": "Replace Hybrid Battery Pack — inspect HV blower fan & delta-V across cell blocks."},
+        "common_dtcs": {
+            "P0A80": (
+                "Replace Hybrid Battery Pack — inspect HV blower fan & delta-V across cell blocks."
+            )
+        },
     },
     "mazda_bt50_cx5": {
         "make": "Mazda",
@@ -189,7 +225,11 @@ VEHICLE_PLATFORMS: dict[str, dict[str, Any]] = {
             {"id": "BCM", "bus": "MS-CAN 125k", "tx": "0x726", "rx": "0x72E"},
         ],
         "shared_nodes": ["NODE:HS_CAN_500K", "NODE:MS_CAN_125K", "NODE:EXH_PRESS_SENSOR_1"],
-        "common_dtcs": {"P0471": "Exhaust Pressure Sensor Range/Performance — check carbon blockage in sensor pipe."},
+        "common_dtcs": {
+            "P0471": (
+                "Exhaust Pressure Sensor Range/Performance — check carbon blockage in sensor pipe."
+            )
+        },
     },
     "hyundai_kia_platform": {
         "make": "Hyundai / Kia",
@@ -204,7 +244,12 @@ VEHICLE_PLATFORMS: dict[str, dict[str, Any]] = {
             {"id": "BCM", "bus": "B-CAN", "tx": "0x7A0", "rx": "0x7A8"},
         ],
         "shared_nodes": ["NODE:C_CAN_500K", "NODE:JUNCTION_BOX_F12", "NODE:CHASSIS_GND_G11"],
-        "common_dtcs": {"P0014": "Exhaust Camshaft Timing Over-Advanced — test OCV solenoid resistance (6.9-7.9 ohm)."},
+        "common_dtcs": {
+            "P0014": (
+                "Exhaust Camshaft Timing Over-Advanced — test OCV "
+                "solenoid resistance (6.9-7.9 ohm)."
+            )
+        },
     },
     "vw_audi_mqb": {
         "make": "Volkswagen / Audi / Skoda",
@@ -219,7 +264,12 @@ VEHICLE_PLATFORMS: dict[str, dict[str, Any]] = {
             {"id": "19-Gateway", "bus": "CAN Gateway", "tx": "0x710", "rx": "0x77A"},
         ],
         "shared_nodes": ["NODE:PT_CAN_500K", "NODE:TERM15_RELAY_J329", "NODE:GATEWAY_J533"],
-        "common_dtcs": {"P0299": "Turbocharger Underboost — smoke-test charge pipes & verify N75 actuator duty cycle."},
+        "common_dtcs": {
+            "P0299": (
+                "Turbocharger Underboost — smoke-test charge pipes "
+                "& verify N75 actuator duty cycle."
+            )
+        },
     },
     "mercedes_sprinter_cclass": {
         "make": "Mercedes-Benz",
@@ -233,7 +283,9 @@ VEHICLE_PLATFORMS: dict[str, dict[str, Any]] = {
             {"id": "ESP", "bus": "Chassis CAN 500k", "tx": "0x720", "rx": "0x728"},
         ],
         "shared_nodes": ["NODE:PT_CAN_500K", "NODE:FRONT_SAM_N10", "NODE:DPF_BACKPRESS_B60"],
-        "common_dtcs": {"P2453": "DPF Differential Pressure Sensor — inspect B28/8 sensor & boost hoses."},
+        "common_dtcs": {
+            "P2453": "DPF Differential Pressure Sensor — inspect B28/8 sensor & boost hoses."
+        },
     },
     "isuzu_dmax_mux": {
         "make": "Isuzu",
@@ -247,7 +299,12 @@ VEHICLE_PLATFORMS: dict[str, dict[str, Any]] = {
             {"id": "ABS", "bus": "HS-CAN 500k", "tx": "0x760", "rx": "0x768"},
         ],
         "shared_nodes": ["NODE:HS_CAN_500K", "NODE:SCV_SUCTION_VALVE", "NODE:ECM_GND_E2"],
-        "common_dtcs": {"P0087": "Fuel Rail Pressure Too Low — test Suction Control Valve (SCV) & fuel filter vacuum."},
+        "common_dtcs": {
+            "P0087": (
+                "Fuel Rail Pressure Too Low — test Suction Control "
+                "Valve (SCV) & fuel filter vacuum."
+            )
+        },
     },
     "mitsubishi_triton_pajero": {
         "make": "Mitsubishi",
@@ -261,7 +318,9 @@ VEHICLE_PLATFORMS: dict[str, dict[str, Any]] = {
             {"id": "ABS/ASC", "bus": "HS-CAN 500k", "tx": "0x784", "rx": "0x78C"},
         ],
         "shared_nodes": ["NODE:HS_CAN_500K", "NODE:INTERCOOLER_HOSE", "NODE:EGR_VALVE_LIN"],
-        "common_dtcs": {"P0299": "Turbo Underboost — inspect split rubber intercooler hose on driver side."},
+        "common_dtcs": {
+            "P0299": "Turbo Underboost — inspect split rubber intercooler hose on driver side."
+        },
     },
     "nissan_navara_patrol": {
         "make": "Nissan",
@@ -276,7 +335,9 @@ VEHICLE_PLATFORMS: dict[str, dict[str, Any]] = {
             {"id": "IPDM", "bus": "HS-CAN 500k", "tx": "0x745", "rx": "0x74D"},
         ],
         "shared_nodes": ["NODE:HS_CAN_500K", "NODE:IPDM_ER_FUSE_BOX", "NODE:VAC_SOLENOID_BOOST"],
-        "common_dtcs": {"P0101": "MAF Sensor Circuit Range — clean MAF & inspect turbo boost vacuum solenoid."},
+        "common_dtcs": {
+            "P0101": "MAF Sensor Circuit Range — clean MAF & inspect turbo boost vacuum solenoid."
+        },
     },
     "subaru_forester_wrx": {
         "make": "Subaru",
@@ -291,7 +352,9 @@ VEHICLE_PLATFORMS: dict[str, dict[str, Any]] = {
             {"id": "EYESIGHT", "bus": "HS-CAN 500k", "tx": "0x7A2", "rx": "0x7AA"},
         ],
         "shared_nodes": ["NODE:HS_CAN_500K", "NODE:STOP_LAMP_SW", "NODE:TGV_ACTUATOR"],
-        "common_dtcs": {"P0171": "System Too Lean Bank 1 — inspect PCV hose & intake manifold gasket."},
+        "common_dtcs": {
+            "P0171": "System Too Lean Bank 1 — inspect PCV hose & intake manifold gasket."
+        },
     },
     "honda_civic_crv_jdm": {
         "make": "Honda",
@@ -305,7 +368,9 @@ VEHICLE_PLATFORMS: dict[str, dict[str, Any]] = {
             {"id": "VSA/ABS", "bus": "HS-CAN 500k", "tx": "0x7B0", "rx": "0x7B8"},
         ],
         "shared_nodes": ["NODE:HS_CAN_500K", "NODE:PGMFI_MAIN_RELAY"],
-        "common_dtcs": {"P0300": "L15B7 injector/coil misfire — check fuel dilution & coil pack resistance."},
+        "common_dtcs": {
+            "P0300": "L15B7 injector/coil misfire — check fuel dilution & coil pack resistance."
+        },
     },
     "suzuki_swift_jimny": {
         "make": "Suzuki",
@@ -318,7 +383,9 @@ VEHICLE_PLATFORMS: dict[str, dict[str, Any]] = {
             {"id": "ABS/ESP", "bus": "HS-CAN 500k", "tx": "0x760", "rx": "0x768"},
         ],
         "shared_nodes": ["NODE:HS_CAN_500K", "NODE:MAIN_FUSE_BOX"],
-        "common_dtcs": {"P0420": "Catalyst Efficiency — check downstream O2 sensor & exhaust flange."},
+        "common_dtcs": {
+            "P0420": "Catalyst Efficiency — check downstream O2 sensor & exhaust flange."
+        },
     },
     "gwm_haval_chery": {
         "make": "GWM / Haval / Chery",
@@ -334,8 +401,12 @@ VEHICLE_PLATFORMS: dict[str, dict[str, Any]] = {
         ],
         "shared_nodes": ["NODE:HS_CAN_500K", "NODE:SAS_STEERING_ZERO", "NODE:AUX_12V_PHEV"],
         "common_dtcs": {
-            "C1200": "ESP/SAS uncalibrated — run SAS Zero-Point Calibration with wheels straight ahead.",
-            "U0100": "PHEV/Hybrid 12V aux drop — load-test 12V battery before condemning HV modules.",
+            "C1200": (
+                "ESP/SAS uncalibrated — run SAS Zero-Point Calibration with wheels straight ahead."
+            ),
+            "U0100": (
+                "PHEV/Hybrid 12V aux drop — load-test 12V battery before condemning HV modules."
+            ),
         },
     },
     "byd_ev_phev": {
@@ -350,10 +421,19 @@ VEHICLE_PLATFORMS: dict[str, dict[str, Any]] = {
             {"id": "MCU/Inverter", "bus": "EV CAN 500k", "tx": "0x7E2", "rx": "0x7EA"},
             {"id": "IPB (iBoost)", "bus": "Chassis CAN 500k", "tx": "0x7B0", "rx": "0x7B8"},
         ],
-        "shared_nodes": ["NODE:AUX_12V_DCDC_13V5", "NODE:REAR_AXLE_HV_CONN", "NODE:HV_ISOLATION_LOOP"],
+        "shared_nodes": [
+            "NODE:AUX_12V_DCDC_13V5",
+            "NODE:REAR_AXLE_HV_CONN",
+            "NODE:HV_ISOLATION_LOOP",
+        ],
         "common_dtcs": {
-            "VCU_LIMP_MODE": "Check 12V aux voltage & DC-DC (>13.5V Ready); inspect rear-axle HV connector on Seal.",
-            "BMS_ISO_LOW": "HV isolation resistance low — inspect underbody HV harness & coolant conductivity.",
+            "VCU_LIMP_MODE": (
+                "Check 12V aux voltage & DC-DC (>13.5V Ready); inspect "
+                "rear-axle HV connector on Seal."
+            ),
+            "BMS_ISO_LOW": (
+                "HV isolation resistance low — inspect underbody HV harness & coolant conductivity."
+            ),
         },
     },
     "ldv_mg_saic": {
@@ -370,7 +450,9 @@ VEHICLE_PLATFORMS: dict[str, dict[str, Any]] = {
         ],
         "shared_nodes": ["NODE:HS_CAN_500K", "NODE:DPF_DIFF_PRESS", "NODE:INTERCOOLER_HOSE"],
         "common_dtcs": {
-            "P2463": "LDV T60 DPF soot load — inspect diff-pressure hoses & run Tier B forced regen.",
+            "P2463": (
+                "LDV T60 DPF soot load — inspect diff-pressure hoses & run Tier B forced regen."
+            ),
             "P0299": "Turbo underboost — inspect charge pipe clamps & VGT actuator.",
         },
     },
@@ -386,7 +468,9 @@ VEHICLE_PLATFORMS: dict[str, dict[str, Any]] = {
             {"id": "RLM (Air Susp)", "bus": "MS-CAN 125k", "tx": "0x726", "rx": "0x72E"},
         ],
         "shared_nodes": ["NODE:HS_CAN_500K", "NODE:MS_CAN_125K", "NODE:CROSSOVER_EGR_PIPE"],
-        "common_dtcs": {"P0299": "TDV6/SDV6 plastic inlet manifold crack or secondary turbo actuator fault."},
+        "common_dtcs": {
+            "P0299": "TDV6/SDV6 plastic inlet manifold crack or secondary turbo actuator fault."
+        },
     },
     "jeep_ram_stellantis": {
         "make": "Jeep / RAM",
@@ -400,22 +484,90 @@ VEHICLE_PLATFORMS: dict[str, dict[str, Any]] = {
             {"id": "ABS", "bus": "CAN-C 500k", "tx": "0x760", "rx": "0x768"},
         ],
         "shared_nodes": ["NODE:CAN_C_500K", "NODE:SGW_SECURITY_GATEWAY", "NODE:ESIM_EVAP_SWITCH"],
-        "common_dtcs": {"P0456": "Small EVAP leak — replace ESIM purge integrity module on canister."},
+        "common_dtcs": {
+            "P0456": "Small EVAP leak — replace ESIM purge integrity module on canister."
+        },
     },
 }
 
 SERVICE_FUNCTIONS_CATALOG: list[dict[str, Any]] = [
-    {"id": "oil_reset", "name": "Oil Service / Maintenance Reset", "tier": "A", "uds_service": "0x31", "notes": "Resets service interval counter in IPC/PCM."},
-    {"id": "bms_reset", "name": "BMS Battery Registration", "tier": "A", "uds_service": "0x31", "notes": "Registers new AGM/EFB battery capacity & state-of-charge."},
-    {"id": "epb_service", "name": "EPB Caliper Retract / Service Mode", "tier": "A", "uds_service": "0x31", "notes": "Opens rear electronic parking brake calipers for pad replacement."},
-    {"id": "sas_cal", "name": "Steering Angle Sensor (SAS) Zero Calibration", "tier": "A", "uds_service": "0x31", "notes": "Zeros steering angle with wheels straight ahead."},
-    {"id": "dpf_regen", "name": "DPF Static Forced Regeneration", "tier": "B", "uds_service": "0x31", "notes": "Requires park/neutral, coolant >= 70C, battery >= 12.5V."},
-    {"id": "abs_bleed", "name": "ABS / VSC Automated Hydraulic Bleed", "tier": "B", "uds_service": "0x2F", "notes": "Actuates ABS pump & solenoids during brake fluid bleed."},
-    {"id": "injector_coding", "name": "Diesel Injector IMA / QR Coding", "tier": "B", "uds_service": "0x2E", "notes": "Writes injector trim codes to ECM."},
-    {"id": "throttle_relearn", "name": "Electronic Throttle Body Idle Relearn", "tier": "A", "uds_service": "0x31", "notes": "Relearns closed-throttle stop after cleaning."},
-    {"id": "tpms_relearn", "name": "TPMS Sensor ID Relearn", "tier": "A", "uds_service": "0x31", "notes": "Registers wheel TPMS sensor IDs in BCM."},
-    {"id": "radar_cal", "name": "Park Assist & Blind-Spot Radar Zero-Point Calibration", "tier": "B", "uds_service": "0x31", "notes": "Calibrates ultrasonic/radar baseline on flat ground."},
-    {"id": "ckp_relearn", "name": "Crankshaft Position (CKP) Sensor Relearn", "tier": "B", "uds_service": "0x31", "notes": "Clears P1336 / cam-crank variation after CKP/ECU replacement."},
+    {
+        "id": "oil_reset",
+        "name": "Oil Service / Maintenance Reset",
+        "tier": "A",
+        "uds_service": "0x31",
+        "notes": "Resets service interval counter in IPC/PCM.",
+    },
+    {
+        "id": "bms_reset",
+        "name": "BMS Battery Registration",
+        "tier": "A",
+        "uds_service": "0x31",
+        "notes": "Registers new AGM/EFB battery capacity & state-of-charge.",
+    },
+    {
+        "id": "epb_service",
+        "name": "EPB Caliper Retract / Service Mode",
+        "tier": "A",
+        "uds_service": "0x31",
+        "notes": "Opens rear electronic parking brake calipers for pad replacement.",
+    },
+    {
+        "id": "sas_cal",
+        "name": "Steering Angle Sensor (SAS) Zero Calibration",
+        "tier": "A",
+        "uds_service": "0x31",
+        "notes": "Zeros steering angle with wheels straight ahead.",
+    },
+    {
+        "id": "dpf_regen",
+        "name": "DPF Static Forced Regeneration",
+        "tier": "B",
+        "uds_service": "0x31",
+        "notes": "Requires park/neutral, coolant >= 70C, battery >= 12.5V.",
+    },
+    {
+        "id": "abs_bleed",
+        "name": "ABS / VSC Automated Hydraulic Bleed",
+        "tier": "B",
+        "uds_service": "0x2F",
+        "notes": "Actuates ABS pump & solenoids during brake fluid bleed.",
+    },
+    {
+        "id": "injector_coding",
+        "name": "Diesel Injector IMA / QR Coding",
+        "tier": "B",
+        "uds_service": "0x2E",
+        "notes": "Writes injector trim codes to ECM.",
+    },
+    {
+        "id": "throttle_relearn",
+        "name": "Electronic Throttle Body Idle Relearn",
+        "tier": "A",
+        "uds_service": "0x31",
+        "notes": "Relearns closed-throttle stop after cleaning.",
+    },
+    {
+        "id": "tpms_relearn",
+        "name": "TPMS Sensor ID Relearn",
+        "tier": "A",
+        "uds_service": "0x31",
+        "notes": "Registers wheel TPMS sensor IDs in BCM.",
+    },
+    {
+        "id": "radar_cal",
+        "name": "Park Assist & Blind-Spot Radar Zero-Point Calibration",
+        "tier": "B",
+        "uds_service": "0x31",
+        "notes": "Calibrates ultrasonic/radar baseline on flat ground.",
+    },
+    {
+        "id": "ckp_relearn",
+        "name": "Crankshaft Position (CKP) Sensor Relearn",
+        "tier": "B",
+        "uds_service": "0x31",
+        "notes": "Clears P1336 / cam-crank variation after CKP/ECU replacement.",
+    },
 ]
 
 
@@ -440,7 +592,15 @@ def decode_vin_platform(vin: str) -> dict[str, Any]:
         "make": "Universal OBD-II / EOBD",
         "model": "Generic ISO 15765 / KWP2000 / J1850 Vehicle",
         "engine": "All OBD-II Compliant Powertrains",
-        "protocols": ["AUTO", "ISO15765_11_500", "ISO15765_29_500", "ISO14230_FAST", "ISO9141_2", "J1850_PWM", "J1850_VPW"],
+        "protocols": [
+            "AUTO",
+            "ISO15765_11_500",
+            "ISO15765_29_500",
+            "ISO14230_FAST",
+            "ISO9141_2",
+            "J1850_PWM",
+            "J1850_VPW",
+        ],
         "modules": [{"id": "ECM/PCM", "bus": "OBD-II Functional", "tx": "0x7DF", "rx": "0x7E8"}],
         "shared_nodes": ["NODE:OBD2_PIN16_BATT", "NODE:OBD2_PIN4_5_GND"],
         "common_dtcs": {},
