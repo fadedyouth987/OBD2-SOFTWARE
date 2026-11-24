@@ -9,3 +9,4 @@ pub mod safety;
 pub mod server;
 pub mod sim;
 pub mod storage;
+pub mod telemetry;

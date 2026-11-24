@@ -51,7 +51,16 @@ use crate::{
         lease::{self, Lease},
         unix_now,
     },
-    hal::{discovery, to_hex, virtual_bus::VirtualBus, HalError, VehicleBusAdapter},
+    hal::{
+        discovery,
+        serial::SystemSerial,
+        shared_bus::SharedBus,
+        slcan_serial::SlcanSerialAdapter,
+        stn_elm::{StnElmAdapter, StnProtocol},
+        to_hex,
+        virtual_bus::VirtualBus,
+        HalError, VehicleBusAdapter,
+    },
     protocol::{
         self,
         messages::{
@@ -452,9 +461,24 @@ impl Bucket {
     }
 }
 
+#[derive(Clone)]
+enum BusHandle {
+    Virtual(VirtualBus),
+    Physical(SharedBus),
+}
+
+impl BusHandle {
+    fn bitrate(&self) -> u32 {
+        match self {
+            Self::Virtual(b) => b.bitrate(),
+            Self::Physical(b) => b.bitrate(),
+        }
+    }
+}
+
 struct Connected {
     adapter_id: String,
-    bus: VirtualBus,
+    bus: BusHandle,
     tasks: Vec<JoinHandle<()>>,
     channels: HashMap<(u32, u32), DiagChannel>,
 }
@@ -476,17 +500,42 @@ struct Session {
     stream_period: Duration,
 }
 
-/// A diagnostic channel on its own port of the virtual bus.
+/// A diagnostic channel on its own port of the virtual or shared physical bus.
 async fn open_channel(
-    bus: VirtualBus,
+    bus: BusHandle,
     bitrate: u32,
     addr: CanAddressing,
     interlock: Arc<SafetyInterlock>,
 ) -> Result<DiagChannel, HalError> {
-    let mut port = bus.adapter();
-    port.open(bitrate).await?;
-    let link = IsoTpLink::new(port, addr, IsoTpConfig::default()).await?;
-    Ok(DiagChannel::isotp(link, interlock))
+    match bus {
+        BusHandle::Virtual(b) => {
+            let mut port = b.adapter();
+            port.open(bitrate).await?;
+            let link = IsoTpLink::new(port, addr, IsoTpConfig::default()).await?;
+            Ok(DiagChannel::isotp(link, interlock))
+        }
+        BusHandle::Physical(b) => {
+            let port = b.port();
+            let link = IsoTpLink::new(port, addr, IsoTpConfig::default()).await?;
+            Ok(DiagChannel::isotp(link, interlock))
+        }
+    }
+}
+
+fn stn_protocol_for(protocol: BusProtocol) -> StnProtocol {
+    match protocol {
+        BusProtocol::Auto => StnProtocol::Auto,
+        BusProtocol::Iso1576511500 | BusProtocol::BmwDcan => StnProtocol::Can11_500,
+        BusProtocol::Iso1576529500 => StnProtocol::Can29_500,
+        BusProtocol::Iso1576511250 => StnProtocol::Can11_250,
+        BusProtocol::Iso1576529250 => StnProtocol::Can29_250,
+        BusProtocol::MsCan125 => StnProtocol::MsCan125,
+        BusProtocol::Iso91412 => StnProtocol::Iso9141,
+        BusProtocol::Iso142305baud => StnProtocol::Kwp5Baud,
+        BusProtocol::Iso14230Fast => StnProtocol::KwpFast,
+        BusProtocol::J1850Pwm => StnProtocol::J1850Pwm,
+        BusProtocol::J1850Vpw => StnProtocol::J1850Vpw,
+    }
 }
 
 fn bitrate_for(protocol: BusProtocol, profile_bitrate: u32) -> Option<u32> {
@@ -604,18 +653,94 @@ impl Session {
             .strip_prefix("virtual-")
             .and_then(profiles::by_id)
         else {
-            let kind = discovery::discover()
+            let found = discovery::discover()
                 .into_iter()
-                .find(|a| a.adapter_id == adapter_id)
-                .map(|a| a.kind);
-            let msg = match kind {
-                None => format!("unknown adapter {adapter_id}"),
-                Some(AdapterKind::J2534) if !self.lease.has(Feature::J2534) => {
-                    return err(rid, ErrorCode::LeaseRequired, "J2534 adapters need the J2534 feature");
-                }
-                Some(_) => "live sessions on physical adapters arrive with Task 4.1; use a virtual vehicle for now".into(),
+                .find(|a| a.adapter_id == adapter_id);
+            let Some(adapter_info) = found else {
+                return err(rid, ErrorCode::AdapterError, &format!("unknown adapter {adapter_id}"));
             };
-            return err(rid, ErrorCode::AdapterError, &msg);
+            if adapter_info.kind == AdapterKind::J2534 && !self.lease.has(Feature::J2534) {
+                return err(rid, ErrorCode::LeaseRequired, "J2534 adapters need the J2534 feature");
+            }
+            let path = adapter_info.path.clone().unwrap_or_default();
+            let bitrate = r
+                .baud_rate
+                .map(|b| b.get())
+                .or_else(|| bitrate_for(r.protocol, 500_000))
+                .unwrap_or(500_000);
+            let boxed: Box<dyn VehicleBusAdapter> = match adapter_info.kind {
+                AdapterKind::StnElm => {
+                    let link = match SystemSerial::open(&path, 115_200) {
+                        Ok(l) => l,
+                        Err(e) => return err(rid, ErrorCode::AdapterError, &e.to_string()),
+                    };
+                    Box::new(StnElmAdapter::new(link, stn_protocol_for(r.protocol)))
+                }
+                AdapterKind::Slcan => {
+                    let link = match SystemSerial::open(&path, 115_200) {
+                        Ok(l) => l,
+                        Err(e) => return err(rid, ErrorCode::AdapterError, &e.to_string()),
+                    };
+                    Box::new(SlcanSerialAdapter::new(link))
+                }
+                #[cfg(target_os = "linux")]
+                AdapterKind::Socketcan => Box::new(crate::hal::socketcan_linux::SocketCanAdapter::new(&path)),
+                #[cfg(not(target_os = "linux"))]
+                AdapterKind::Socketcan => {
+                    return err(rid, ErrorCode::AdapterError, "SocketCAN is only available on Linux");
+                }
+                AdapterKind::J2534 => {
+                    #[cfg(windows)]
+                    {
+                        Box::new(crate::hal::j2534_win::J2534Adapter::new(
+                            crate::hal::j2534_win::default_bridge_path(),
+                            &path,
+                        ))
+                    }
+                    #[cfg(not(windows))]
+                    {
+                        return err(rid, ErrorCode::AdapterError, "J2534 PassThru requires Windows");
+                    }
+                }
+                AdapterKind::KlineFtdi => {
+                    return err(rid, ErrorCode::AdapterError, "K-line FTDI direct streaming is not CAN");
+                }
+                AdapterKind::Virtual => unreachable!("handled by virtual- prefix"),
+            };
+            let shared = match SharedBus::open(boxed, bitrate).await {
+                Ok(s) => s,
+                Err(e) => return err(rid, ErrorCode::AdapterError, &e.to_string()),
+            };
+            let bus = BusHandle::Physical(shared.clone());
+            let mut tasks = vec![tokio::spawn(stream_can(
+                shared.port(),
+                self.tx.clone(),
+                self.stream_period,
+            ))];
+            match open_channel(
+                bus.clone(),
+                bitrate,
+                CanAddressing::obd_functional(0x7E8),
+                Arc::clone(&self.interlock),
+            )
+            .await
+            {
+                Ok(ch) => tasks.push(tokio::spawn(stream_pids(
+                    ch,
+                    Arc::clone(&self.interlock),
+                    self.tx.clone(),
+                    self.stream_period,
+                ))),
+                Err(e) => tracing::warn!("no OBD poller on physical adapter: {e}"),
+            }
+            self.interlock.set_mode(r.safety_mode);
+            self.conn = Some(Connected {
+                adapter_id: adapter_id.to_owned(),
+                bus,
+                tasks,
+                channels: HashMap::new(),
+            });
+            return self.status(rid, adapter_id, AdapterState::Connected, None);
         };
         let Link::Can {
             bitrate: profile_bitrate,
@@ -646,13 +771,14 @@ impl Session {
         if let Err(e) = frames.open(bitrate).await {
             return err(rid, ErrorCode::AdapterError, &e.to_string());
         }
+        let bus_handle = BusHandle::Virtual(bus.clone());
         let mut tasks = vec![tokio::spawn(stream_can(
             frames,
             self.tx.clone(),
             self.stream_period,
         ))];
         match open_channel(
-            bus.clone(),
+            bus_handle.clone(),
             bitrate,
             CanAddressing::obd_functional(0x7E8),
             Arc::clone(&self.interlock),
@@ -671,7 +797,7 @@ impl Session {
         let battery = bus.with_vehicle(|v| v.battery_v);
         self.conn = Some(Connected {
             adapter_id: adapter_id.to_owned(),
-            bus,
+            bus: bus_handle,
             tasks,
             channels: HashMap::new(),
         });
@@ -770,10 +896,19 @@ impl Session {
         let key = (r.tx_id.0, r.rx_id.0);
         if !conn.channels.contains_key(&key) {
             let (bus, bitrate) = (conn.bus.clone(), conn.bus.bitrate());
+            let addressing = if r.protocol == BusProtocol::BmwDcan
+                || (key.0 == 0x6F1 && (0x600..=0x6FF).contains(&key.1))
+            {
+                CanAddressing::BmwExtended {
+                    ecu: (key.1 & 0xFF) as u8,
+                }
+            } else {
+                CanAddressing::normal(key.0, key.1)
+            };
             match open_channel(
                 bus,
                 bitrate,
-                CanAddressing::normal(key.0, key.1),
+                addressing,
                 Arc::clone(&self.interlock),
             )
             .await
@@ -835,7 +970,7 @@ impl Session {
 }
 
 async fn stream_can(
-    mut port: crate::hal::virtual_bus::VirtualBusAdapter,
+    mut port: impl VehicleBusAdapter + Send + 'static,
     tx: mpsc::Sender<Outbound>,
     period: Duration,
 ) {

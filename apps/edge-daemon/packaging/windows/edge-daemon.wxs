@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- WiX v4 MSI installer manifest for RootCause OBD Edge Daemon + 32-bit J2534 Bridge (Task 5.1) -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="RootCause OBD Edge Daemon" Manufacturer="RootCause OBD Australia" Version="0.1.0" UpgradeCode="7E9E6E2A-4B54-4B77-A4B3-1F492C7B0011">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of RootCause OBD Edge Daemon is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="RootCauseOBD">
+        <Component Id="EdgeDaemonBin" Guid="2B61F58C-1E23-41C1-98E2-370F4F320021">
+          <File Id="EdgeDaemonExe" Source="target\release\edge-daemon.exe" KeyPath="yes" />
+          <ServiceInstall Id="EdgeDaemonSvc" Name="RootCauseEdgeDaemon" DisplayName="RootCause OBD Edge Daemon" Start="auto" Type="ownProcess" ErrorControl="normal" />
+          <ServiceControl Id="EdgeDaemonCtrl" Name="RootCauseEdgeDaemon" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+        </Component>
+        <Component Id="J2534BridgeBin" Guid="9A11E44D-3F22-48AA-B321-889C4D120032">
+          <File Id="J2534BridgeExe" Source="target\i686-pc-windows-msvc\release\j2534-bridge.exe" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+  </Package>
+</Wix>

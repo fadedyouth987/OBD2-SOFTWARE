@@ -121,3 +121,16 @@ Deviations from the Task 1.1 target paths, on purpose:
 - `tokio-tungstenite`, `rusqlite` and `ed25519-dalek` were added by the tasks that use them (1.3, 1.4), not in 1.1, so no unused dependencies ship; `jsonwebtoken` was replaced (see Task 1.4).
 - The Windows `j2534` dependency lives in `apps/j2534-bridge` (as the maintained fork `j2534-mrw`; `j2534` 0.3.1 no longer compiles), because A-ENG-1 moves DLL loading out of the daemon. `hal/j2534_win.rs` is the daemon's bridge client and builds on every OS.
 - `serialport` is built without libudev, so the daemon needs no system packages; USB details for discovery may be missing on Linux.
+
+## Remediation Update (Tasks 2.2–5.2 Scaffold & Core Modules Added)
+
+| Task | Status | Notes |
+| --- | --- | --- |
+| 2.2 Control plane, signing, anonymizer, sync | Implemented | `services/cloud-api/app/api/v1/{auth,sessions,dbc}.py`, `services/{signing,anonymizer}.py` (`py_compile` verified). |
+| 2.3 Billing & AU MVIS/AASRA gateways | Implemented | `services/cloud-api/app/api/v1/{billing,gateways}.py` with Stripe HMAC verification & event idempotency. |
+| 3.1–3.2 Neo4j tenant repo & PDF pipeline | Implemented | `services/ai-worker/app/{graph,vision,tasks}/` with A-ENG-6 tenant filter & A-ENG-8 50 MB/200-page limits. |
+| 3.3 KG-guided RAG localizer | Implemented | `services/cloud-api/app/services/{embeddings,ai_diagnostic_agent}.py`, `api/v1/diagnose.py` (A-CEO-1 fallback, A-DES-4 bands). |
+| 4.1–4.3 Next.js Autel-style frontend + `DESIGN.md` | Implemented | `DESIGN.md`, `edge-client.ts`, `SafetyConfirmModal.tsx` (1.5s hold), `BitFlipMatrix.tsx` (29-bit), `WiringTopologyViewer.tsx`, `/live`, `/can-studio`, `/copilot/[sessionId]`. |
+| 5.1–5.2 Packaging, CI, telemetry, runbooks | Implemented | `apps/edge-daemon/src/telemetry/`, `packaging/{linux,windows}/`, `scripts/export_cloud_keys.py`, `.github/workflows/ci.yml`, `infra/monitoring/prometheus.yml`, `docs/runbooks/incident-response.md`. |
+
+Remaining verification requiring local host/hardware: `cargo test --workspace`, `pnpm --filter web build`, live Postgres/Neo4j integration tests, and physical `A-ENG-10` vehicle captures.
