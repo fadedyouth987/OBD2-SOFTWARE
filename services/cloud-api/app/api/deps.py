@@ -1,7 +1,8 @@
 """Authenticated principal for cloud-api routes.
 
-Tenant, user, subscription tier, and AASRA status are always loaded from the
-database for the identity in the session JWT. Request bodies cannot set them.
+Tenant, user, subscription tier, role, and AASRA status are always loaded
+from the database for the identity in the session JWT. Request bodies cannot
+set them.
 """
 
 from __future__ import annotations
@@ -13,8 +14,9 @@ from uuid import UUID
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app.db.models import SubscriptionTier, Tenant, TenantMembership
+from app.db.models import MembershipRole, SubscriptionTier, Tenant, TenantMembership
 from app.db.session import tenant_session
+from app.services.billing import effective_tier, maybe_expire_grace
 from app.services.signing import SigningKeyError, verify_session_jwt
 
 _bearer = HTTPBearer(auto_error=False)
@@ -27,6 +29,10 @@ class Principal:
     tier: SubscriptionTier
     aasra_verified: bool
     tenant_name: str
+    role: MembershipRole = MembershipRole.TECH
+    immo_entitled: bool = False
+    lease_version: int = 0
+    billing_status: str = "none"
 
 
 def get_principal(
@@ -50,18 +56,32 @@ def get_principal(
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED, detail="Unknown tenant"
                 )
+            maybe_expire_grace(session, tenant)
             membership = session.get(TenantMembership, (tenant_id, user_id))
             if membership is None:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Not a member of this tenant",
                 )
+            tier = effective_tier(
+                tenant.subscription_tier,
+                billing_status=tenant.stripe_subscription_status,
+                billing_grace_until=tenant.billing_grace_until,
+            )
+            immo = bool(tenant.immo_entitled) and tier in {
+                SubscriptionTier.WORKSHOP,
+                SubscriptionTier.FLEET,
+            }
             return Principal(
                 tenant_id=tenant.id,
                 user_id=user_id,
-                tier=tenant.subscription_tier,
+                tier=tier,
                 aasra_verified=bool(tenant.aasra_verified),
                 tenant_name=tenant.name,
+                role=membership.role,
+                immo_entitled=immo,
+                lease_version=int(tenant.lease_version or 0),
+                billing_status=tenant.stripe_subscription_status or "none",
             )
     except HTTPException:
         raise

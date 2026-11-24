@@ -95,7 +95,17 @@ def _auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _grant_immo_plan(client: TestClient, token: str) -> None:
+    res = client.post(
+        "/api/v1/auth/dev-grant-plan",
+        headers=_auth(token),
+        json={"tier": "WORKSHOP", "immo_entitled": True},
+    )
+    assert res.status_code == 200, res.text
+
+
 def _mark_aasra(client: TestClient, token: str) -> None:
+    _grant_immo_plan(client, token)
     with flags(immo=True, dev_login=True):
         res = client.post("/api/v1/auth/dev-mark-aasra", headers=_auth(token))
     assert res.status_code == 200, res.text
@@ -160,6 +170,7 @@ def test_immo_lease_ttl_is_capped():
 def test_start_denied_without_aasra_workshop(client: TestClient):
     _require_db()
     sess = _dev_session(client)
+    _grant_immo_plan(client, sess["access_token"])
     token = sess["access_token"]
     with flags(immo=True):
         enrol = client.post(

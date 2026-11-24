@@ -19,6 +19,16 @@ os.environ.setdefault("CLOUD_SIGNING_PRIVATE_KEY_HEX", "cd" * 32)
 os.environ.setdefault("AUTH_ALLOW_DEV_LOGIN", "true")
 os.environ.setdefault("STRIPE_WEBHOOK_SECRET", "whsec_test_local_not_prod")
 
+os.environ["STRIPE_PRICE_PRO_MONTH"] = "price_test_pro_month"
+os.environ["STRIPE_PRICE_PRO_YEAR"] = "price_test_pro_year"
+os.environ["STRIPE_PRICE_WORKSHOP_MONTH"] = "price_test_workshop_month"
+os.environ["STRIPE_PRICE_WORKSHOP_YEAR"] = "price_test_workshop_year"
+os.environ["STRIPE_PRICE_FLEET_MONTH"] = "price_test_fleet_month"
+os.environ["STRIPE_PRICE_FLEET_YEAR"] = "price_test_fleet_year"
+os.environ["STRIPE_PRICE_IMMO_MONTH"] = "price_test_immo_month"
+os.environ["STRIPE_PRICE_IMMO_YEAR"] = "price_test_immo_year"
+os.environ.setdefault("STRIPE_SECRET_KEY", "sk_test_local_not_prod")
+
 from app.main import app  # noqa: E402
 
 WEBHOOK_SECRET = os.environ["STRIPE_WEBHOOK_SECRET"]
@@ -159,14 +169,24 @@ def test_forged_stripe_webhook_rejected(client: TestClient):
 def test_stripe_webhook_without_secret_fails_closed(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ):
+    from app.config import get_settings
+
     payload = json.dumps({"id": "evt_nosecret", "type": "invoice.paid"}).encode("utf-8")
-    monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
-    res = client.post(
-        "/api/v1/billing/stripe/webhook",
-        content=payload,
-        headers={"Stripe-Signature": _stripe_header(payload), "Content-Type": "application/json"},
-    )
-    assert res.status_code == 503
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "")
+    get_settings.cache_clear()
+    try:
+        res = client.post(
+            "/api/v1/billing/stripe/webhook",
+            content=payload,
+            headers={
+                "Stripe-Signature": _stripe_header(payload),
+                "Content-Type": "application/json",
+            },
+        )
+        assert res.status_code == 503
+    finally:
+        monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", WEBHOOK_SECRET)
+        get_settings.cache_clear()
 
 
 def test_vehicles_catalog_stays_public(client: TestClient):
@@ -248,11 +268,25 @@ def test_aasra_and_sgw_ignore_client_flags_until_marked(client: TestClient):
 def test_stripe_webhook_upgrades_tier_and_rejects_replay(client: TestClient):
     session = _dev_session(client)
     tenant_id = session["tenant_id"]
+    now = int(time.time())
     payload = json.dumps(
         {
             "id": f"evt_{uuid.uuid4().hex}",
             "type": "checkout.session.completed",
-            "data": {"object": {"metadata": {"tenant_id": tenant_id, "tier": "WORKSHOP"}}},
+            "created": now,
+            "data": {
+                "object": {
+                    "object": "checkout.session",
+                    "id": "cs_test_upgrade",
+                    "customer": f"cus_{uuid.uuid4().hex[:8]}",
+                    "subscription": f"sub_{uuid.uuid4().hex[:8]}",
+                    "client_reference_id": tenant_id,
+                    "status": "complete",
+                    "line_items": {"data": [{"price": {"id": "price_test_workshop_month"}}]},
+                    # metadata.tier must be ignored if it disagrees with the price id
+                    "metadata": {"tenant_id": tenant_id, "tier": "FLEET"},
+                }
+            },
         }
     ).encode("utf-8")
     res = client.post(

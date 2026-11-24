@@ -49,6 +49,11 @@ class DevSessionRequest(BaseModel):
     display_name: str = "Local technician"
 
 
+class DevGrantPlanRequest(BaseModel):
+    tier: SubscriptionTier = SubscriptionTier.WORKSHOP
+    immo_entitled: bool = False
+
+
 def _existing_user_id(email: str):
     """Owner-role lookup: RLS hides users until they belong to the current tenant."""
     engine = create_engine(get_settings().migration_database_url)
@@ -134,6 +139,38 @@ def dev_mark_aasra(principal: RequirePrincipal) -> dict:
     return {"tenant_id": str(principal.tenant_id), "aasra_verified": True}
 
 
+@router.post("/dev-grant-plan")
+def dev_grant_plan(req: DevGrantPlanRequest, principal: RequirePrincipal) -> dict:
+    """Set the current tenant's plan for local development. Dev-only."""
+    _require_dev_login()
+    immo = bool(req.immo_entitled) and req.tier in {
+        SubscriptionTier.WORKSHOP,
+        SubscriptionTier.FLEET,
+    }
+    with tenant_session(principal.tenant_id) as session:
+        tenant = session.get(Tenant, principal.tenant_id)
+        if tenant is None:
+            raise HTTPException(status_code=401, detail="Unknown tenant")
+        previous = tenant.subscription_tier
+        prev_immo = bool(tenant.immo_entitled)
+        tenant.subscription_tier = req.tier
+        tenant.immo_entitled = immo
+        tenant.stripe_subscription_status = (
+            "none" if req.tier == SubscriptionTier.COMMUNITY else "active"
+        )
+        tenant.billing_grace_until = None
+        if previous != req.tier or prev_immo != immo:
+            tenant.lease_version = int(tenant.lease_version or 0) + 1
+        version = int(tenant.lease_version or 0)
+    inc("auth_dev_plan_granted")
+    return {
+        "tenant_id": str(principal.tenant_id),
+        "tier": req.tier.value,
+        "immo_entitled": immo,
+        "lease_version": version,
+    }
+
+
 @router.post("/edge-lease")
 def create_edge_lease(req: LeaseRequest, principal: RequirePrincipal) -> dict:
     verified = default_verifier().is_verified(
@@ -146,6 +183,8 @@ def create_edge_lease(req: LeaseRequest, principal: RequirePrincipal) -> dict:
             tier=principal.tier.value,
             dongle_id=req.dongle_id,
             aasra_verified=verified,
+            lease_version=principal.lease_version,
+            immo_entitled=principal.immo_entitled,
         )
     except SigningKeyError as exc:
         raise HTTPException(

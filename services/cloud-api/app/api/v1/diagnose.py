@@ -30,14 +30,12 @@ class DiagnoseRequest(BaseModel):
     vehicle_profile: str = "ford_ranger_px3"
     shared_graph_nodes: list[str] | None = None
     matched_cases: list[dict[str, Any]] | None = None
-    llm_error: str | None = None
 
 
 class FollowupRequest(BaseModel):
     question: str
     vehicle_profile: str = "ford_ranger_px3"
     dtcs: list[str] = []
-    llm_error: str | None = None
 
 
 class DecodeVinRequest(BaseModel):
@@ -103,15 +101,6 @@ def run_diagnosis(
         if req.matched_cases is not None
         else list_published_cases(principal.tenant_id, req.dtcs)
     )
-    if req.llm_error:
-        return diagnose_session(
-            session_id=session_id,
-            dtcs=req.dtcs,
-            shared_graph_nodes=req.shared_graph_nodes,
-            matched_cases=cases,
-            llm_error=req.llm_error,
-            vehicle_profile=req.vehicle_profile,
-        )
     charged, used, limit = charge_ai_quota(principal.tenant_id)
     if not charged:
         raise HTTPException(
@@ -127,7 +116,6 @@ def run_diagnosis(
         dtcs=req.dtcs,
         shared_graph_nodes=req.shared_graph_nodes,
         matched_cases=cases,
-        llm_error=req.llm_error,
         vehicle_profile=req.vehicle_profile,
     )
     result["quota_charged"] = True
@@ -141,14 +129,6 @@ def ask_copilot(
     session_id: str, req: FollowupRequest, principal: RequirePrincipal
 ) -> dict[str, Any]:
     inc("ai_copilot_followups")
-    if req.llm_error:
-        return answer_technician_followup(
-            session_id=session_id,
-            question=req.question,
-            vehicle_profile=req.vehicle_profile,
-            dtcs=req.dtcs,
-            llm_error=req.llm_error,
-        )
     charged, used, limit = charge_ai_quota(principal.tenant_id)
     if not charged:
         raise HTTPException(
@@ -164,7 +144,6 @@ def ask_copilot(
         question=req.question,
         vehicle_profile=req.vehicle_profile,
         dtcs=req.dtcs,
-        llm_error=req.llm_error,
     )
     result["quota_charged"] = True
     result["quota_used"] = used

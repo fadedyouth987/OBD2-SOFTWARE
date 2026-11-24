@@ -1,184 +1,285 @@
-"""Stripe subscription metering, tier entitlements & webhook verification (Task 2.3, A-CEO-3)."""
+"""Billing catalog, Stripe Checkout / Customer Portal, and webhooks."""
 
 from __future__ import annotations
 
-import os
-from datetime import date
+import logging
 from typing import Any
 from uuid import UUID
 
 import stripe
-from fastapi import APIRouter, Header, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
+from pydantic import BaseModel, Field
 
-from app.api.deps import RequirePrincipal
-from app.db.models import StripeEvent, SubscriptionTier, Tenant
+from app.api.deps import Principal, RequirePrincipal
+from app.config import get_settings
+from app.db.models import MembershipRole, SubscriptionTier, Tenant
 from app.db.session import tenant_session
-from app.observability.metrics import inc
-from app.services.signing import normalize_tier
+from app.services.billing import (
+    ACTIONABLE_EVENTS,
+    TRIAL_DAYS,
+    BillingApplyError,
+    apply_stripe_event,
+    catalog_public,
+    charge_ai_quota,
+    charge_schematic_pages,
+    entitlement_for,
+    maybe_expire_grace,
+    resolve_event_tenant_id,
+)
 
 router = APIRouter(prefix="/api/v1/billing", tags=["billing"])
+log = logging.getLogger(__name__)
 
-TIER_QUOTAS: dict[str, dict[str, Any]] = {
-    "COMMUNITY": {"price_aud_month": 0, "ai_diagnoses_per_month": 5, "retention_days": 30},
-    "PRO": {"price_aud_month": 39, "ai_diagnoses_per_month": 100, "retention_days": 365},
-    "WORKSHOP": {"price_aud_month": 89, "ai_diagnoses_per_month": 1000, "retention_days": 730},
-    # Price-list only; stored and enforced as WORKSHOP (DB enum has no FLEET).
-    "FLEET": {"price_aud_month": 249, "ai_diagnoses_per_month": 1000, "retention_days": 730},
-}
-
-
-def quota_limit(tier: str | SubscriptionTier) -> int:
-    key = tier.value if isinstance(tier, SubscriptionTier) else normalize_tier(str(tier))
-    return int(TIER_QUOTAS.get(key, TIER_QUOTAS["COMMUNITY"])["ai_diagnoses_per_month"])
+# Re-exported so existing imports (`from app.api.v1.billing import charge_ai_quota`) keep working.
+__all__ = [
+    "router",
+    "charge_ai_quota",
+    "charge_schematic_pages",
+    "require_owner",
+]
 
 
-def ensure_quota_period(tenant: Tenant) -> None:
-    """Reset the lifetime-looking counter at the start of each calendar month."""
-    today = date.today()
-    start = tenant.ai_quota_period_start
-    if start is None or start.year != today.year or start.month != today.month:
-        tenant.ai_diagnoses_used = 0
-        tenant.ai_quota_period_start = date(today.year, today.month, 1)
+def require_owner(principal: Principal) -> None:
+    if principal.role != MembershipRole.OWNER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the workspace owner can change the billing plan",
+        )
 
 
-def charge_ai_quota(tenant_id: UUID) -> tuple[bool, int, int]:
-    """Atomically charge one AI diagnosis. Returns (charged, used, limit)."""
-    with tenant_session(tenant_id) as session:
-        tenant = session.get(Tenant, tenant_id)
-        if tenant is None:
-            raise HTTPException(status_code=401, detail="Unknown tenant")
-        ensure_quota_period(tenant)
-        limit = quota_limit(tenant.subscription_tier)
-        if tenant.ai_diagnoses_used >= limit:
-            return False, tenant.ai_diagnoses_used, limit
-        tenant.ai_diagnoses_used += 1
-        return True, tenant.ai_diagnoses_used, limit
+class CheckoutRequest(BaseModel):
+    tier: SubscriptionTier
+    interval: str = Field(pattern="^(month|year)$")
+    immo_addon: bool = False
+    start_trial: bool = False
+    success_url: str | None = None
+    cancel_url: str | None = None
 
 
-def _webhook_secret() -> str:
-    return os.environ.get("STRIPE_WEBHOOK_SECRET", "").strip()
-
-
-def _event_attr(event: Any, name: str, default: Any = None) -> Any:
-    if isinstance(event, dict):
-        return event.get(name, default)
-    return getattr(event, name, default)
+class PortalRequest(BaseModel):
+    return_url: str | None = None
 
 
 @router.get("/tiers")
-def get_tiers() -> dict[str, Any]:
-    return {"currency": "AUD", "gst_inclusive": True, "tiers": TIER_QUOTAS}
+def list_tiers() -> dict[str, Any]:
+    """Public catalog: names, AUD prices, and included limits."""
+    return catalog_public()
 
 
-@router.get("/tenants/{tenant_id}")
-def get_tenant_billing(tenant_id: str, principal: RequirePrincipal) -> dict[str, Any]:
-    try:
-        requested = UUID(tenant_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="Unknown tenant") from exc
-    if requested != principal.tenant_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+@router.get("")
+def get_billing(principal: RequirePrincipal) -> dict[str, Any]:
     with tenant_session(principal.tenant_id) as session:
         tenant = session.get(Tenant, principal.tenant_id)
         if tenant is None:
             raise HTTPException(status_code=404, detail="Unknown tenant")
-        ensure_quota_period(tenant)
-        used = tenant.ai_diagnoses_used
-        tier = tenant.subscription_tier.value
-    return {
-        "tenant_id": str(principal.tenant_id),
-        "tier": tier,
-        "quotas": TIER_QUOTAS[tier],
-        "ai_diagnoses_used": used,
-        "ai_diagnoses_remaining": max(0, quota_limit(tier) - used),
-    }
+        maybe_expire_grace(session, tenant)
+        ent = entitlement_for(tenant)
+        return {
+            **catalog_public(),
+            **ent,
+            "ai_diagnoses_used": tenant.ai_diagnoses_used,
+            "schematic_pages_used": tenant.schematic_pages_used,
+            "quota_period_start": (
+                tenant.ai_quota_period_start.isoformat() if tenant.ai_quota_period_start else None
+            ),
+            "quota_timezone": "Australia/Adelaide",
+            "has_stripe_customer": bool(tenant.stripe_customer_id),
+            "role": principal.role.value,
+        }
 
 
-@router.post("/stripe/webhook")
-async def stripe_webhook(
-    request: Request, stripe_signature: str = Header(default="", alias="Stripe-Signature")
-) -> dict[str, Any]:
-    secret = _webhook_secret()
-    if not secret:
-        inc("stripe_webhook_rejected")
+@router.post("/checkout-session")
+def create_checkout_session(req: CheckoutRequest, principal: RequirePrincipal) -> dict[str, Any]:
+    require_owner(principal)
+    if req.tier == SubscriptionTier.COMMUNITY:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Community is the free default; pick a paid plan to check out",
+        )
+    if req.immo_addon and req.tier not in {SubscriptionTier.WORKSHOP, SubscriptionTier.FLEET}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The IMMO add-on is only available on Workshop and Fleet",
+        )
+
+    settings = get_settings()
+    if not settings.stripe_secret_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="STRIPE_WEBHOOK_SECRET is not configured",
+            detail="Stripe secret key is not configured",
         )
-    body = await request.body()
-    try:
-        event = stripe.Webhook.construct_event(body, stripe_signature, secret)
-    except Exception:
-        inc("stripe_webhook_rejected")
-        raise HTTPException(status_code=400, detail="Invalid Stripe webhook signature") from None
-
-    event_id = str(_event_attr(event, "id") or "")
-    event_type = str(_event_attr(event, "type") or "")
-    data = _event_attr(event, "data")
-    obj = _event_attr(data, "object") if data is not None else None
-    meta = _event_attr(obj, "metadata") if obj is not None else None
-    if meta is None:
-        meta = {}
-    elif not isinstance(meta, dict):
-        to_dict = getattr(meta, "to_dict", None)
-        meta = to_dict() if callable(to_dict) else dict(meta)
-    raw_tenant = str(meta.get("tenant_id", "")).strip()
-    raw_tier = str(meta.get("tier", "")).strip().upper()
-    try:
-        tenant_id = UUID(raw_tenant) if raw_tenant else None
-    except ValueError:
-        tenant_id = None
-
-    if not event_id or tenant_id is None:
-        inc("stripe_webhook_processed")
-        return {
-            "status": "processed",
-            "event_id": event_id or None,
-            "tenant_updated": None,
-            "active_tier": None,
-        }
-
-    try:
-        with tenant_session(tenant_id) as session:
-            existing = session.get(StripeEvent, event_id)
-            if existing is not None:
-                tenant = session.get(Tenant, tenant_id)
-                return {
-                    "status": "duplicate_ignored",
-                    "event_id": event_id,
-                    "tenant_updated": str(tenant_id),
-                    "active_tier": tenant.subscription_tier.value if tenant else None,
-                }
-            session.add(
-                StripeEvent(
-                    event_id=event_id,
-                    tenant_id=tenant_id,
-                    event_type=event_type,
-                    payload={"type": event_type, "metadata": {"tier": raw_tier}},
-                )
+    price_id = settings.price_id_for(req.tier.value, req.interval)
+    if not price_id:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Stripe price ID for {req.tier.value} {req.interval} is not configured",
+        )
+    line_items = [{"price": price_id, "quantity": 1}]
+    if req.immo_addon:
+        immo_price = settings.immo_price_id(req.interval)
+        if not immo_price:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Stripe price ID for IMMO {req.interval} is not configured",
             )
-            tenant = session.get(Tenant, tenant_id)
-            active_tier = tenant.subscription_tier.value if tenant else None
-            if tenant is not None and raw_tier in TIER_QUOTAS:
-                if event_type == "customer.subscription.deleted":
-                    tenant.subscription_tier = SubscriptionTier.COMMUNITY
-                else:
-                    tenant.subscription_tier = SubscriptionTier(normalize_tier(raw_tier))
-                active_tier = tenant.subscription_tier.value
-    except Exception:
-        # Unknown tenant (FK) or identity store blip: acknowledge without applying.
-        inc("stripe_webhook_processed")
-        return {
-            "status": "processed",
-            "event_id": event_id,
-            "tenant_updated": None,
-            "active_tier": None,
-        }
+        line_items.append({"price": immo_price, "quantity": 1})
 
-    inc("stripe_webhook_processed")
-    return {
-        "status": "processed",
-        "event_id": event_id,
-        "tenant_updated": str(tenant_id),
-        "active_tier": active_tier,
+    trial = False
+    if req.start_trial:
+        if req.tier != SubscriptionTier.WORKSHOP or req.interval != "month":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="The 14-day trial is a Workshop monthly plan and requires a card",
+            )
+        with tenant_session(principal.tenant_id) as session:
+            tenant = session.get(Tenant, principal.tenant_id)
+            if tenant is None:
+                raise HTTPException(status_code=404, detail="Unknown tenant")
+            if tenant.trial_used:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="This workspace has already used its Workshop trial",
+                )
+        trial = True
+
+    success = req.success_url or f"{settings.public_app_url.rstrip('/')}/billing?checkout=success"
+    cancel = req.cancel_url or f"{settings.public_app_url.rstrip('/')}/billing?checkout=cancel"
+
+    customer_id: str | None = None
+    with tenant_session(principal.tenant_id) as session:
+        tenant = session.get(Tenant, principal.tenant_id)
+        if tenant is not None:
+            customer_id = tenant.stripe_customer_id
+
+    params: dict[str, Any] = {
+        "mode": "subscription",
+        "line_items": line_items,
+        "success_url": success,
+        "cancel_url": cancel,
+        "client_reference_id": str(principal.tenant_id),
+        "subscription_data": {
+            "metadata": {"tenant_id": str(principal.tenant_id)},
+        },
+        "metadata": {"tenant_id": str(principal.tenant_id)},
+        # Card is always collected, including for the 14-day Workshop trial.
+        "payment_method_collection": "always",
     }
+    if trial:
+        params["subscription_data"]["trial_period_days"] = TRIAL_DAYS
+    if customer_id:
+        params["customer"] = customer_id
+    else:
+        params["customer_creation"] = "always"
+
+    try:
+        stripe.api_key = settings.stripe_secret_key
+        session_obj = stripe.checkout.Session.create(**params)
+    except stripe.StripeError as exc:
+        log.exception("Stripe Checkout session create failed")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Stripe Checkout could not be started",
+        ) from exc
+
+    return {"checkout_url": session_obj.url, "checkout_session_id": session_obj.id}
+
+
+@router.post("/customer-portal")
+def create_customer_portal(req: PortalRequest, principal: RequirePrincipal) -> dict[str, Any]:
+    require_owner(principal)
+    settings = get_settings()
+    if not settings.stripe_secret_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Stripe secret key is not configured",
+        )
+    with tenant_session(principal.tenant_id) as session:
+        tenant = session.get(Tenant, principal.tenant_id)
+        if tenant is None or not tenant.stripe_customer_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This workspace has no Stripe customer yet — start a paid plan first",
+            )
+        customer_id = tenant.stripe_customer_id
+    return_url = req.return_url or f"{settings.public_app_url.rstrip('/')}/billing"
+    try:
+        stripe.api_key = settings.stripe_secret_key
+        portal = stripe.billing_portal.Session.create(customer=customer_id, return_url=return_url)
+    except stripe.StripeError as exc:
+        log.exception("Stripe Customer Portal session create failed")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Stripe Customer Portal could not be started",
+        ) from exc
+    return {"portal_url": portal.url}
+
+
+@router.post("/webhook")
+@router.post("/stripe/webhook")
+async def stripe_webhook(request: Request) -> dict[str, Any]:
+    settings = get_settings()
+    secret = settings.stripe_webhook_secret
+    if not secret:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Stripe webhook secret is not configured",
+        )
+    payload = await request.body()
+    signature = request.headers.get("stripe-signature", "")
+    try:
+        event = stripe.Webhook.construct_event(payload, signature, secret)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payload"
+        ) from exc
+    except stripe.SignatureVerificationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid Stripe signature"
+        ) from exc
+
+    if isinstance(event, stripe.Event):
+        event_dict = event.to_dict()
+    elif isinstance(event, dict):
+        event_dict = event
+    else:
+        event_dict = dict(event)
+
+    event_type = str(event_dict.get("type") or "")
+    event_id = str(event_dict.get("id") or "")
+    if event_type not in ACTIONABLE_EVENTS:
+        return {"status": "ignored", "event_id": event_id, "type": event_type}
+
+    try:
+        tenant_id = resolve_event_tenant_id(event_dict)
+    except Exception as exc:
+        log.exception("tenant lookup failed for Stripe event %s", event_id)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not resolve tenant for Stripe event",
+        ) from exc
+
+    if tenant_id is None:
+        # Actionable events must be applied; returning 2xx would drop the retry.
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No tenant found for this Stripe customer or subscription",
+        )
+
+    try:
+        with tenant_session(UUID(str(tenant_id))) as session:
+            result = apply_stripe_event(session, event_dict)
+    except BillingApplyError as exc:
+        log.exception("Stripe event %s apply failed: %s", event_id, exc)
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except Exception as exc:
+        log.exception("Stripe event %s apply failed", event_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to apply Stripe event",
+        ) from exc
+
+    # Compatibility with earlier tests/simulation: "processed" / "duplicate_ignored".
+    status_map = {"applied": "processed", "duplicate": "duplicate_ignored"}
+    out = dict(result)
+    out["status"] = status_map.get(str(out.get("status")), out.get("status"))
+    return out

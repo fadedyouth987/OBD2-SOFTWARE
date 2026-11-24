@@ -105,6 +105,33 @@ class TestCloudServices(unittest.TestCase):
         self.assertFalse(fb["quota_charged"])
         self.assertEqual(fb["ranked_causes"], [])
 
+    def test_fleet_is_a_real_tier_and_paid_leases_are_short(self):
+        import time
+
+        from app.services.signing import PAID_LEASE_TTL_S, normalize_tier
+
+        self.assertEqual(normalize_tier("FLEET"), "FLEET")
+        lease = issue_edge_lease("t", "u", tier="FLEET")
+        self.assertEqual(lease["tier"], "FLEET")
+        self.assertEqual(set(lease["features"]), {"UDS_ACTIVE", "CAN_RE_PRO", "J2534"})
+        now = int(time.time())
+        self.assertLessEqual(lease["expires_at"] - now, PAID_LEASE_TTL_S + 2)
+        self.assertGreater(lease["expires_at"] - now, PAID_LEASE_TTL_S - 5)
+
+        community = issue_edge_lease("t", "u", tier="COMMUNITY")
+        self.assertEqual(community["features"], [])
+        self.assertGreater(community["expires_at"] - now, 24 * 3600)
+
+        entitled = issue_edge_lease("t", "u", tier="WORKSHOP", immo_entitled=True, lease_version=7)
+        self.assertIn("IMMO_PROGRAM", entitled["features"])
+        import base64
+        import json
+
+        payload = entitled["token"].split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+        self.assertEqual(claims["lease_ver"], 7)
+        self.assertEqual(claims["tier"], "WORKSHOP")
+
 
 if __name__ == "__main__":
     unittest.main()

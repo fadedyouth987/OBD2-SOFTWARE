@@ -21,7 +21,8 @@ import time
 from typing import Any
 
 PINNED_KID = "cloud-2026-11"
-DEFAULT_LEASE_TTL_S = 72 * 3600  # 72-hour offline edge lease (MAX_LEASE_SECS)
+DEFAULT_LEASE_TTL_S = 72 * 3600  # Community / read-only offline lease
+PAID_LEASE_TTL_S = 12 * 3600  # Paid features: shorter so cancel/downgrade bites sooner
 DEFAULT_PAIRING_TTL_S = 120  # 2-minute browser pairing token (<= 300s MAX_PAIRING_SECS)
 DEFAULT_SESSION_TTL_S = 12 * 3600
 DEFAULT_IMMO_LEASE_TTL_S = 15 * 60  # 15-minute immobilizer session
@@ -30,13 +31,12 @@ IMMO_LEASE_KIND = "immo_lease"
 IMMO_FEATURE = "IMMO_PROGRAM"
 
 # Features the edge Feature enum actually understands. Anything else is dropped.
-KNOWN_FEATURES: frozenset[str] = frozenset({"J2534", "UDS_ACTIVE", "CAN_RE_PRO"})
+KNOWN_FEATURES: frozenset[str] = frozenset({"J2534", "UDS_ACTIVE", "CAN_RE_PRO", "IMMO_PROGRAM"})
 
 TIER_DEFAULT_FEATURES: dict[str, list[str]] = {
     "COMMUNITY": [],
     "PRO": ["UDS_ACTIVE"],
     "WORKSHOP": ["UDS_ACTIVE", "CAN_RE_PRO", "J2534"],
-    # Billing price list may say FLEET; the DB enum and edge lease only have WORKSHOP.
     "FLEET": ["UDS_ACTIVE", "CAN_RE_PRO", "J2534"],
 }
 
@@ -124,17 +124,25 @@ def _sign_payload(header: dict[str, Any], payload: dict[str, Any]) -> str:
 
 
 def normalize_tier(tier: str) -> str:
-    """Map a billing/price tier onto the edge/DB enum (FLEET -> WORKSHOP)."""
+    """Map a billing/price label onto the edge/DB enum. FLEET is a real tier."""
     norm = (tier or "COMMUNITY").upper()
-    if norm == "FLEET":
-        return "WORKSHOP"
-    if norm not in {"COMMUNITY", "PRO", "WORKSHOP"}:
+    if norm not in {"COMMUNITY", "PRO", "WORKSHOP", "FLEET"}:
         return "COMMUNITY"
     return norm
 
 
-def features_for_tier(tier: str, requested: list[str] | None = None) -> list[str]:
-    allowed = [f for f in TIER_DEFAULT_FEATURES.get(tier.upper(), []) if f in KNOWN_FEATURES]
+def features_for_tier(
+    tier: str,
+    requested: list[str] | None = None,
+    *,
+    immo_entitled: bool = False,
+) -> list[str]:
+    allowed = [
+        f for f in TIER_DEFAULT_FEATURES.get(normalize_tier(tier), []) if f in KNOWN_FEATURES
+    ]
+    if immo_entitled and normalize_tier(tier) in {"WORKSHOP", "FLEET"}:
+        if IMMO_FEATURE not in allowed:
+            allowed.append(IMMO_FEATURE)
     if requested is None:
         return list(allowed)
     wanted = {f for f in requested if f in KNOWN_FEATURES}
@@ -148,12 +156,16 @@ def issue_edge_lease(
     features: list[str] | None = None,
     dongle_id: str | None = None,
     aasra_verified: bool = False,
-    ttl_s: int = DEFAULT_LEASE_TTL_S,
+    ttl_s: int | None = None,
+    lease_version: int = 0,
+    immo_entitled: bool = False,
 ) -> dict[str, Any]:
     now = int(time.time())
     edge_tier = normalize_tier(tier)
-    granted = features_for_tier(tier, features)
-    effective_ttl = min(max(ttl_s, 1), DEFAULT_LEASE_TTL_S)
+    granted = features_for_tier(tier, features, immo_entitled=immo_entitled)
+    default_ttl = PAID_LEASE_TTL_S if granted else DEFAULT_LEASE_TTL_S
+    requested_ttl = default_ttl if ttl_s is None else ttl_s
+    effective_ttl = min(max(int(requested_ttl), 1), DEFAULT_LEASE_TTL_S)
     payload: dict[str, Any] = {
         "iss": ISSUER,
         "aud": "edge-daemon",
@@ -163,6 +175,7 @@ def issue_edge_lease(
         "tier": edge_tier,
         "features": granted,
         "aasra_verified": bool(aasra_verified),
+        "lease_ver": int(lease_version or 0),
         "nbf": now,
         "iat": now,
         "exp": now + effective_ttl,

@@ -13,6 +13,7 @@ from app.db.models import (
     ImmoAuditEntry,
     ImmoSession,
     OwnerAuthorisation,
+    SubscriptionTier,
     TechnicianCredential,
 )
 from app.db.session import tenant_session
@@ -117,6 +118,10 @@ def require_feature() -> None:
 
 def require_workshop_and_tech(principal: Principal) -> TechnicianCredential:
     require_feature()
+    if principal.tier not in {SubscriptionTier.WORKSHOP, SubscriptionTier.FLEET}:
+        raise ImmoDenied(403, "Immobilizer tools require a Workshop or Fleet plan")
+    if not principal.immo_entitled:
+        raise ImmoDenied(403, "Immobilizer add-on is not active on this workspace")
     verified = default_verifier().is_verified(
         principal.tenant_id, tenant_flag=principal.aasra_verified
     )

@@ -32,6 +32,16 @@ if not os.environ.get("CLOUD_SIGNING_PRIVATE_KEY_HEX", "").strip():
 if not os.environ.get("STRIPE_WEBHOOK_SECRET", "").strip():
     os.environ["STRIPE_WEBHOOK_SECRET"] = "whsec_sim_local_not_for_production"
 
+# Simulation webhooks map these placeholder price IDs; they do not call Stripe.
+os.environ.setdefault("STRIPE_PRICE_WORKSHOP_MONTH", "price_sim_workshop_month")
+os.environ.setdefault("STRIPE_PRICE_WORKSHOP_YEAR", "price_sim_workshop_year")
+os.environ.setdefault("STRIPE_PRICE_PRO_MONTH", "price_sim_pro_month")
+os.environ.setdefault("STRIPE_PRICE_PRO_YEAR", "price_sim_pro_year")
+os.environ.setdefault("STRIPE_PRICE_FLEET_MONTH", "price_sim_fleet_month")
+os.environ.setdefault("STRIPE_PRICE_FLEET_YEAR", "price_sim_fleet_year")
+os.environ.setdefault("STRIPE_PRICE_IMMO_MONTH", "price_sim_immo_month")
+os.environ.setdefault("STRIPE_PRICE_IMMO_YEAR", "price_sim_immo_year")
+
 WEBHOOK_SECRET = os.environ["STRIPE_WEBHOOK_SECRET"]
 
 sys.path.insert(0, str(ROOT / "services" / "cloud-api"))
@@ -144,17 +154,25 @@ assert diag_ok["mode"] == "KG_RAG_SYNTHESIS" and diag_ok["quota_charged"] is Tru
 assert diag_ok["ranked_causes"][0]["confidence_band"] in {"HIGH", "MEDIUM", "LOW"}
 assert pub["case"]["case_id"] in diag_ok["ranked_causes"][0]["cited_case_ids"]
 
-diag_fb = client.post(
-    f"/api/v1/diagnose/{session_id}",
-    json={"dtcs": ["P2463"], "vehicle_profile": "ford_ranger_px3", "llm_error": "timeout"},
-    headers=auth,
-).json()
+# Fallback is an internal LLM-failure path (not a client-controlled flag).
+from app.services.ai_diagnostic_agent import diagnose_session as _diagnose_session
+
+diag_fb = _diagnose_session(session_id, ["P2463"], llm_error="timeout", vehicle_profile="ford_ranger_px3")
 assert diag_fb["mode"] == "FALLBACK_NO_LLM" and diag_fb["quota_charged"] is False
 
 payload = json.dumps({
     "id": f"evt_sim_{run_id}",
     "type": "invoice.paid",
-    "data": {"object": {"metadata": {"tenant_id": tenant_id, "tier": "WORKSHOP"}}},
+    "created": int(time.time()),
+    "data": {"object": {
+        "object": "invoice",
+        "id": f"in_sim_{run_id}",
+        "customer": f"cus_sim_{run_id}",
+        "subscription": f"sub_sim_{run_id}",
+        "client_reference_id": tenant_id,
+        "metadata": {"tenant_id": tenant_id},
+        "lines": {"data": [{"price": {"id": os.environ["STRIPE_PRICE_WORKSHOP_MONTH"]}}]},
+    }},
 }).encode("utf-8")
 wh = client.post(
     "/api/v1/billing/stripe/webhook",
@@ -234,7 +252,17 @@ pub_key = Ed25519PublicKey.from_public_bytes(pub_bytes)
 checkout_payload = json.dumps({
     "id": f"evt_founding_{run_id}",
     "type": "checkout.session.completed",
-    "data": {"object": {"metadata": {"tenant_id": tenant_id, "tier": "WORKSHOP", "source": "kickstarter_founding"}}},
+    "created": int(time.time()) + 1,
+    "data": {"object": {
+        "object": "checkout.session",
+        "id": f"cs_founding_{run_id}",
+        "customer": f"cus_sim_{run_id}",
+        "subscription": f"sub_sim_{run_id}",
+        "client_reference_id": tenant_id,
+        "status": "complete",
+        "line_items": {"data": [{"price": {"id": os.environ["STRIPE_PRICE_WORKSHOP_MONTH"]}}]},
+        "metadata": {"tenant_id": tenant_id, "source": "kickstarter_founding"},
+    }},
 }).encode("utf-8")
 wh_res = client.post(
     "/api/v1/billing/stripe/webhook",
@@ -288,10 +316,15 @@ unauth = client.post("/api/v1/immo/sessions", json={"vin": SANDBOX_VIN, "authori
 assert unauth.status_code == 401
 
 os.environ["IMMO_FEATURE_ENABLED"] = "true"
-# Workshop not yet marked in this block? The founding tenant was marked earlier via /dev-mark-aasra after first use?
-# Re-mark to be safe, then enrol.
+# Re-mark AASRA and attach the IMMO add-on (Workshop was granted by the founding checkout).
 marked = client.post("/api/v1/auth/dev-mark-aasra", headers=auth)
 assert marked.status_code == 200, marked.text
+grant = client.post(
+    "/api/v1/auth/dev-grant-plan",
+    json={"tier": "WORKSHOP", "immo_entitled": True},
+    headers=auth,
+)
+assert grant.status_code == 200, grant.text
 enrol = client.post(
     "/api/v1/immo/technicians/enrol",
     json={"aasra_member_id": "VSP-SIM", "national_police_check_dated": date.today().isoformat(), "declared": True},

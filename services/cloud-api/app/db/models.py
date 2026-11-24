@@ -46,6 +46,17 @@ class SubscriptionTier(enum.StrEnum):
     COMMUNITY = "COMMUNITY"
     PRO = "PRO"
     WORKSHOP = "WORKSHOP"
+    FLEET = "FLEET"
+
+
+class BillingStatus(enum.StrEnum):
+    NONE = "none"
+    TRIALING = "trialing"
+    ACTIVE = "active"
+    PAST_DUE = "past_due"
+    CANCELED = "canceled"
+    UNPAID = "unpaid"
+    INCOMPLETE = "incomplete"
 
 
 def _uuid_pk() -> Mapped[uuid.UUID]:
@@ -68,6 +79,16 @@ class Tenant(Base):
     schematic_pages_used: Mapped[int] = mapped_column(Integer, default=0)
     aasra_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     ai_quota_period_start: Mapped[date] = mapped_column(Date, default=date.today)
+    stripe_customer_id: Mapped[str | None] = mapped_column(Text)
+    stripe_subscription_id: Mapped[str | None] = mapped_column(Text)
+    stripe_subscription_status: Mapped[str] = mapped_column(Text, default="none")
+    billing_grace_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    billing_event_created: Mapped[int] = mapped_column(BigInteger, default=0)
+    lease_version: Mapped[int] = mapped_column(Integer, default=0)
+    immo_entitled: Mapped[bool] = mapped_column(Boolean, default=False)
+    trial_used: Mapped[bool] = mapped_column(Boolean, default=False)
+    trial_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    site_count: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = _created()
 
 
