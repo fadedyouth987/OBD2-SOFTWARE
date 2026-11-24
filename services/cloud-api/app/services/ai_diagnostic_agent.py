@@ -1,4 +1,5 @@
-"""KG-guided RAG root-cause localizer & step-by-step repair assistant (Task 3.3, A-CEO-1, A-DES-4)."""
+"""KG-guided root-cause localizer and repair assistant (Task 3.3, A-CEO-1)."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -16,27 +17,41 @@ def score_to_confidence_band(score: float) -> str:
     return "LOW"
 
 
-def _build_guided_steps(code: str, platform: dict[str, Any], primary_node: str) -> list[dict[str, str]]:
+def _build_guided_steps(
+    code: str, platform: dict[str, Any], primary_node: str
+) -> list[dict[str, str]]:
     make_model = f"{platform['make']} {platform['model']}"
     return [
         {
             "step": "1. Pre-Scan & Bus Health",
-            "action": f"Confirm KOEO battery >= 12.5V and scan all modules on {make_model} ({', '.join(platform['protocols'])}).",
+            "action": (
+                f"Confirm KOEO battery >= 12.5V and scan all modules on "
+                f"{make_model} ({', '.join(platform['protocols'])})."
+            ),
             "safety_tier": "SILENT",
         },
         {
             "step": "2. Pinpoint Circuit Test",
-            "action": f"Back-probe {primary_node} with a multimeter; verify <0.2V drop under load and clean 5V/12V reference.",
+            "action": (
+                f"Back-probe {primary_node} with a multimeter; verify "
+                f"<0.2V drop under load and clean 5V/12V reference."
+            ),
             "safety_tier": "SILENT",
         },
         {
             "step": "3. Active / Service Verification",
-            "action": f"Command actuator/bidirectional check or service reset for {code} after mechanical/wiring repair.",
+            "action": (
+                f"Command actuator/bidirectional check or service reset "
+                f"for {code} after mechanical/wiring repair."
+            ),
             "safety_tier": "TIER A / B",
         },
         {
             "step": "4. Post-Scan & Clear",
-            "action": f"Run Mode 0x04 Clear DTCs (1.5s hold-to-confirm) and verify {code} does not return on road test.",
+            "action": (
+                f"Run Mode 0x04 Clear DTCs (1.5s hold-to-confirm) and "
+                f"verify {code} does not return on road test."
+            ),
             "safety_tier": "TIER A",
         },
     ]
@@ -73,16 +88,19 @@ def diagnose_session(
         }
 
     ranked = []
-    for idx, code in enumerate(dtcs or ["P0000"]):
+    for code in dtcs or ["P0000"]:
         matching_for_dtc = [
             c for c in cases if code.upper() in [str(d).upper() for d in c.get("dtcs", [])]
         ]
-        score = 0.90 if matching_for_dtc else (0.85 if idx == 0 else 0.64)
-        band = score_to_confidence_band(score)
-        cited_case_ids = [
-            str(c.get("case_id")) for c in (matching_for_dtc or cases) if c.get("case_id")
-        ] or [f"CASE-AU-2026-014{idx+1}"]
+        # Evidence-based score: start low, add for a platform note and each
+        # real matching case. Never invent case IDs or a fixed 0.90/0.85/0.64.
         known_note = platform.get("common_dtcs", {}).get(code.upper())
+        score = 0.35
+        if known_note:
+            score += 0.20
+        score += min(0.20 * len(matching_for_dtc), 0.50)
+        band = score_to_confidence_band(score)
+        cited_case_ids = [str(c.get("case_id")) for c in matching_for_dtc if c.get("case_id")]
         fix_hint = (
             matching_for_dtc[0].get("verified_fix")
             if matching_for_dtc and matching_for_dtc[0].get("verified_fix")
@@ -96,7 +114,9 @@ def diagnose_session(
                 "cited_nodes": nodes[:2],
                 "cited_case_ids": cited_case_ids,
                 "hypothesis": fix_hint,
-                "multimeter_test": f"Verify <0.2V drop across {nodes[0]} under KOEO load before replacing module.",
+                "multimeter_test": (
+                    f"Verify <0.2V drop across {nodes[0]} under KOEO load before replacing module."
+                ),
                 "guided_steps": _build_guided_steps(code, platform, nodes[0]),
             }
         )
@@ -137,23 +157,36 @@ def answer_technician_followup(
     q = question.lower()
     if "0v" in q or "0.0v" in q or "no voltage" in q or "open" in q:
         guidance = (
-            f"On {platform['make']} {platform['model']}, 0.0V at {nodes[0]} points to an open supply fuse/relay "
-            f"or broken harness wire upstream. Check continuity back to {nodes[-1]} before condemning the ECU."
+            f"On {platform['make']} {platform['model']}, 0.0V at "
+            f"{nodes[0]} points to an open supply fuse/relay or broken "
+            f"harness wire upstream. Check continuity back to "
+            f"{nodes[-1]} before condemning the ECU."
         )
-        next_step = "Inspect main relay/fuse continuity and load-test the supply pin with a 21W test lamp."
+        next_step = (
+            "Inspect main relay/fuse continuity and load-test the supply pin with a 21W test lamp."
+        )
     elif "regen" in q or "dpf" in q or "bleed" in q or "reset" in q:
         guidance = (
-            f"For {platform['make']} {platform['model']}, service routines (DPF regen / ABS bleed / BMS reset) "
-            f"require Tier A/B SafetyInterlock confirmation: vehicle stationary (0 km/h), battery >= 12.5V, and 1.5s hold-to-confirm."
+            f"For {platform['make']} {platform['model']}, service "
+            f"routines (DPF regen / ABS bleed / BMS reset) require "
+            f"Tier A/B SafetyInterlock confirmation: vehicle stationary "
+            f"(0 km/h), battery >= 12.5V, and 1.5s hold-to-confirm."
         )
-        next_step = "Open Service Functions, verify preconditions are green, and execute the gated UDS routine."
+        next_step = (
+            "Open Service Functions, verify preconditions are green, "
+            "and execute the gated UDS routine."
+        )
     else:
         dtc_str = ", ".join(dtcs or ["active fault"])
         guidance = (
             f"For {platform['make']} {platform['model']} ({platform['engine']}) with {dtc_str}, "
-            f"verify communication on {', '.join(platform['protocols'])} and inspect {nodes[0]} and {nodes[-1]}."
+            f"verify communication on {', '.join(platform['protocols'])} "
+            f"and inspect {nodes[0]} and {nodes[-1]}."
         )
-        next_step = f"Check live PIDs on {platform['modules'][0]['id']} ({platform['modules'][0]['tx']}) and compare against KOEO spec."
+        next_step = (
+            f"Check live PIDs on {platform['modules'][0]['id']} "
+            f"({platform['modules'][0]['tx']}) and compare against KOEO spec."
+        )
 
     return {
         "session_id": session_id,

@@ -1,4 +1,5 @@
 """PII & tenant scrubber for shared resolved_cases corpus (Task 2.2, A-CEO-6)."""
+
 from __future__ import annotations
 
 import re
@@ -28,3 +29,28 @@ def anonymize_case(raw_case: dict[str, Any]) -> dict[str, Any]:
         "verified_fix": scrub_text(str(raw_case.get("verified_fix", ""))),
         "parts_replaced": [scrub_text(str(p)) for p in raw_case.get("parts_replaced", [])],
     }
+
+
+def scrub_value(value: Any) -> Any:
+    """Recursively scrub strings in a telemetry or audit payload."""
+    if isinstance(value, str):
+        return scrub_text(value)
+    if isinstance(value, dict):
+        return {str(k): scrub_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [scrub_value(v) for v in value]
+    return value
+
+
+def anonymize_telemetry_row(row: dict[str, Any]) -> dict[str, Any]:
+    cleaned = scrub_value(row)
+    if not isinstance(cleaned, dict):
+        return {}
+    return cleaned
+
+
+def anonymize_audit_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    cleaned = scrub_value(entry)
+    if not isinstance(cleaned, dict):
+        return {}
+    return cleaned

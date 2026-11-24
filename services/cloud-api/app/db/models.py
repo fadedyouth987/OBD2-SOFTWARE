@@ -7,7 +7,7 @@ inside ``app.db.session.tenant_session``.
 
 import enum
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
@@ -16,6 +16,7 @@ from sqlalchemy import (
     REAL,
     BigInteger,
     Boolean,
+    Date,
     DateTime,
     Enum,
     Float,
@@ -66,6 +67,7 @@ class Tenant(Base):
     ai_diagnoses_used: Mapped[int] = mapped_column(Integer, default=0)
     schematic_pages_used: Mapped[int] = mapped_column(Integer, default=0)
     aasra_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    ai_quota_period_start: Mapped[date] = mapped_column(Date, default=date.today)
     created_at: Mapped[datetime] = _created()
 
 
@@ -187,3 +189,26 @@ class AuditLogEntry(Base):
     nrc: Mapped[int | None] = mapped_column(SmallInteger)
     detail: Mapped[str] = mapped_column(Text, default="")
     received_at: Mapped[datetime] = _created()
+
+
+class SyncBatch(Base):
+    """Idempotency key for edge session sync (tenant, batch_id)."""
+
+    __tablename__ = "sync_batches"
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), primary_key=True)
+    batch_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    edge_session_id: Mapped[str] = mapped_column(Text)
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("diagnostic_sessions.id"))
+    watermark_us: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = _created()
+
+
+class StripeEvent(Base):
+    """Stripe webhook idempotency log, visible only to the affected tenant."""
+
+    __tablename__ = "stripe_events"
+    event_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"))
+    event_type: Mapped[str] = mapped_column(Text)
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = _created()

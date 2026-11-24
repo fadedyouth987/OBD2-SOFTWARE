@@ -23,6 +23,10 @@ try:
         redis_url: str = "redis://localhost:6379/0"
         s3_endpoint_url: str = "http://localhost:8333"
         s3_bucket: str = "automotive-traces-au"
+        # Empty by default: signing and Stripe fail closed until set in the environment.
+        cloud_signing_private_key_hex: str = ""
+        auth_allow_dev_login: bool = False
+        stripe_webhook_secret: str = ""
 
         @model_validator(mode="after")
         def _check_residency(self) -> "Settings":
@@ -44,6 +48,9 @@ except ImportError:
         redis_url: str = "redis://localhost:6379/0"
         s3_endpoint_url: str = "http://localhost:8333"
         s3_bucket: str = "automotive-traces-au"
+        cloud_signing_private_key_hex: str = ""
+        auth_allow_dev_login: bool = False
+        stripe_webhook_secret: str = ""
 
         class Config:
             env_file = ".env"
@@ -51,7 +58,10 @@ except ImportError:
 
         @root_validator
         def _check_residency(cls, values: dict) -> dict:
-            if values.get("data_residency_enforce", True) and values.get("aws_region") != REQUIRED_REGION:
+            if (
+                values.get("data_residency_enforce", True)
+                and values.get("aws_region") != REQUIRED_REGION
+            ):
                 raise ValueError(
                     f"AWS_REGION={values.get('aws_region')!r} violates data residency; "
                     f"set AWS_REGION={REQUIRED_REGION} or DATA_RESIDENCY_ENFORCE=false (dev only)"
