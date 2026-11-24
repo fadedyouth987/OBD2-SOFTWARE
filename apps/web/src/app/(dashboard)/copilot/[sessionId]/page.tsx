@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { INITIAL_DIAGNOSTIC_STATE } from "@/store/diagnostic-store";
 
 const CLOUD_API_URL = process.env.NEXT_PUBLIC_CLOUD_API_URL ?? "http://127.0.0.1:8000";
+const SESSION_KEY = "rootcause.session";
 
 interface VehicleOption {
   profile: string;
@@ -77,6 +78,39 @@ export default function CopilotSessionPage() {
   const [followupAnswer, setFollowupAnswer] = useState<{ answer: string; recommended_next_step?: string; cited_nodes?: string[] } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sessionToken, setSessionToken] = useState("");
+
+  useEffect(() => {
+    try {
+      setSessionToken(window.localStorage.getItem(SESSION_KEY) ?? "");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const authHeaders = (): HeadersInit => {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (sessionToken) headers.Authorization = `Bearer ${sessionToken}`;
+    return headers;
+  };
+
+  const describeError = async (res: Response): Promise<string> => {
+    const data = (await res.json().catch(() => null)) as
+      | { detail?: { message?: string; used?: number; limit?: number } | string }
+      | null;
+    if (res.status === 429) {
+      const detail = typeof data?.detail === "object" && data?.detail ? data.detail : null;
+      if (detail && typeof detail.used === "number" && typeof detail.limit === "number") {
+        return `AI diagnosis quota exceeded (${detail.used}/${detail.limit} this calendar month in Australia/Adelaide). Upgrade your plan or wait for the reset.`;
+      }
+      return "AI diagnosis monthly quota exceeded.";
+    }
+    if (res.status === 401) {
+      return "Sign in from the Live page first, then retry diagnosis.";
+    }
+    if (typeof data?.detail === "string") return data.detail;
+    return `Request failed (${res.status})`;
+  };
 
   useEffect(() => {
     fetch(`${CLOUD_API_URL}/api/v1/vehicles`)
@@ -96,19 +130,22 @@ export default function CopilotSessionPage() {
       });
   }, []);
 
-  const runDiagnosis = async (simulateFallback = false) => {
+  const runDiagnosis = async () => {
     setLoading(true);
     setError(null);
     try {
       const res = await fetch(`${CLOUD_API_URL}/api/v1/diagnose/${sessionId}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(),
         body: JSON.stringify({
           dtcs: INITIAL_DIAGNOSTIC_STATE.dtcs.map((d) => d.code),
           vehicle_profile: profile,
-          llm_error: simulateFallback ? "upstream_llm_timeout" : null,
         }),
       });
+      if (!res.ok) {
+        setError(await describeError(res));
+        return;
+      }
       const data = (await res.json()) as DiagnosisResult;
       setResult(data);
     } catch {
@@ -124,13 +161,17 @@ export default function CopilotSessionPage() {
     try {
       const res = await fetch(`${CLOUD_API_URL}/api/v1/diagnose/${sessionId}/ask`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(),
         body: JSON.stringify({
           question,
           vehicle_profile: profile,
           dtcs: INITIAL_DIAGNOSTIC_STATE.dtcs.map((d) => d.code),
         }),
       });
+      if (!res.ok) {
+        setError(await describeError(res));
+        return;
+      }
       const data = await res.json();
       setFollowupAnswer(data);
     } catch {
@@ -154,11 +195,8 @@ export default function CopilotSessionPage() {
                 <option key={v.profile} value={v.profile}>{v.label}</option>
               ))}
             </select>
-            <button type="button" onClick={() => runDiagnosis(false)} disabled={loading} className="min-h-[44px] rounded-xl bg-blue-600 px-3 text-xs font-bold text-white">
+            <button type="button" onClick={() => void runDiagnosis()} disabled={loading} className="min-h-[44px] rounded-xl bg-blue-600 px-3 text-xs font-bold text-white">
               {loading ? "Running..." : "Run KG-RAG Diagnosis"}
-            </button>
-            <button type="button" onClick={() => runDiagnosis(true)} disabled={loading} className="min-h-[44px] rounded-xl border border-amber-500/40 bg-amber-500/15 px-3 text-xs font-semibold text-amber-300">
-              Test A-CEO-1 Fallback
             </button>
             <Link href="/live" className="flex min-h-[44px] items-center rounded-xl bg-[#e0242f] px-4 text-xs font-bold text-white">
               Back to Session

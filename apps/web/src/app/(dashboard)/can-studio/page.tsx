@@ -42,6 +42,7 @@ export default function CanStudioPage() {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h1 className="text-lg font-bold">CAN Reverse-Engineering Studio (A-DES-7)</h1>
+            <p className="text-xs text-slate-400">Live raw CAN frames from the edge daemon require a Workshop or Fleet lease with CAN_RE_PRO. OBD PID streaming still works on lower tiers.</p>
             <p className="text-xs text-slate-400">Supports 11-bit standard and 29-bit extended CAN identifiers ({rows.length} frames)</p>
           </div>
           <div className="flex items-center gap-2">
