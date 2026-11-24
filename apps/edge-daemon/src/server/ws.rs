@@ -657,10 +657,18 @@ impl Session {
                 .into_iter()
                 .find(|a| a.adapter_id == adapter_id);
             let Some(adapter_info) = found else {
-                return err(rid, ErrorCode::AdapterError, &format!("unknown adapter {adapter_id}"));
+                return err(
+                    rid,
+                    ErrorCode::AdapterError,
+                    &format!("unknown adapter {adapter_id}"),
+                );
             };
             if adapter_info.kind == AdapterKind::J2534 && !self.lease.has(Feature::J2534) {
-                return err(rid, ErrorCode::LeaseRequired, "J2534 adapters need the J2534 feature");
+                return err(
+                    rid,
+                    ErrorCode::LeaseRequired,
+                    "J2534 adapters need the J2534 feature",
+                );
             }
             let path = adapter_info.path.clone().unwrap_or_default();
             let bitrate = r
@@ -684,10 +692,16 @@ impl Session {
                     Box::new(SlcanSerialAdapter::new(link))
                 }
                 #[cfg(target_os = "linux")]
-                AdapterKind::Socketcan => Box::new(crate::hal::socketcan_linux::SocketCanAdapter::new(&path)),
+                AdapterKind::Socketcan => {
+                    Box::new(crate::hal::socketcan_linux::SocketCanAdapter::new(&path))
+                }
                 #[cfg(not(target_os = "linux"))]
                 AdapterKind::Socketcan => {
-                    return err(rid, ErrorCode::AdapterError, "SocketCAN is only available on Linux");
+                    return err(
+                        rid,
+                        ErrorCode::AdapterError,
+                        "SocketCAN is only available on Linux",
+                    );
                 }
                 AdapterKind::J2534 => {
                     #[cfg(windows)]
@@ -699,11 +713,19 @@ impl Session {
                     }
                     #[cfg(not(windows))]
                     {
-                        return err(rid, ErrorCode::AdapterError, "J2534 PassThru requires Windows");
+                        return err(
+                            rid,
+                            ErrorCode::AdapterError,
+                            "J2534 PassThru requires Windows",
+                        );
                     }
                 }
                 AdapterKind::KlineFtdi => {
-                    return err(rid, ErrorCode::AdapterError, "K-line FTDI direct streaming is not CAN");
+                    return err(
+                        rid,
+                        ErrorCode::AdapterError,
+                        "K-line FTDI direct streaming is not CAN",
+                    );
                 }
                 AdapterKind::Virtual => unreachable!("handled by virtual- prefix"),
             };
@@ -896,23 +918,16 @@ impl Session {
         let key = (r.tx_id.0, r.rx_id.0);
         if !conn.channels.contains_key(&key) {
             let (bus, bitrate) = (conn.bus.clone(), conn.bus.bitrate());
-            let addressing = if r.protocol == BusProtocol::BmwDcan
-                || (key.0 == 0x6F1 && (0x600..=0x6FF).contains(&key.1))
-            {
+            // Local box fix: r.protocol is DiagProtocol, not BusProtocol.
+            // BMW D-CAN extended addressing is detected from IDs (0x6F1 / 0x6xx).
+            let addressing = if key.0 == 0x6F1 && (0x600..=0x6FF).contains(&key.1) {
                 CanAddressing::BmwExtended {
                     ecu: (key.1 & 0xFF) as u8,
                 }
             } else {
                 CanAddressing::normal(key.0, key.1)
             };
-            match open_channel(
-                bus,
-                bitrate,
-                addressing,
-                Arc::clone(&self.interlock),
-            )
-            .await
-            {
+            match open_channel(bus, bitrate, addressing, Arc::clone(&self.interlock)).await {
                 Ok(ch) => {
                     self.conn
                         .as_mut()
@@ -970,7 +985,7 @@ impl Session {
 }
 
 async fn stream_can(
-    mut port: impl VehicleBusAdapter + Send + 'static,
+    mut port: impl VehicleBusAdapter + 'static,
     tx: mpsc::Sender<Outbound>,
     period: Duration,
 ) {

@@ -293,7 +293,11 @@ impl<L: SerialLink> StnElmAdapter<L> {
     /// for CAN; call it directly before `request_message` on K-line or J1850.
     pub async fn init(&mut self) -> Result<DeviceInfo> {
         let stp_cmd = self.protocol.stp_command();
-        let atsp = if stp_cmd.is_some() { None } else { Some(self.protocol.atsp()?) };
+        let atsp = if stp_cmd.is_some() {
+            None
+        } else {
+            Some(self.protocol.atsp()?)
+        };
         let elm_version = self
             .command("ATZ")
             .await?
@@ -347,9 +351,9 @@ impl<L: SerialLink> StnElmAdapter<L> {
                 "request_message is for K-line and J1850 protocols".into(),
             ));
         }
-        let j1850_allowed = data.first().is_some_and(|m| {
-            J1850_READ_MODES.contains(m) || (safety_confirmed && *m == 0x04)
-        });
+        let j1850_allowed = data
+            .first()
+            .is_some_and(|m| J1850_READ_MODES.contains(m) || (safety_confirmed && *m == 0x04));
         if self.protocol.is_j1850() && !j1850_allowed {
             return Err(HalError::Unsupported(
                 "J1850 is read-only: OBD read modes only".into(),
@@ -606,7 +610,17 @@ mod tests {
             Err(HalError::Unsupported(_))
         ));
 
-        let mut ms = StnElmAdapter::new(ReplaySerial::new(Vec::new()), StnProtocol::MsCan125);
-        assert!(matches!(ms.init().await, Err(HalError::Unsupported(_))));
+        // Intended MS-CAN behaviour: probe the chip first (STI), then refuse
+        // STP 53 on a plain ELM327. An empty serial link is the wrong fixture
+        // -- init must talk to the adapter before it can decide.
+        let elm_mscan = "> ATZ\\r\n< ATZ\\r\\r\\rELM327 v1.5\\r\\r>\n> ATE0\\r\n< ATE0\\rOK\\r\\r>\n> ATL0\\r\n< OK\\r\\r>\n> ATS1\\r\n< OK\\r\\r>\n> ATH1\\r\n< OK\\r\\r>\n> STI\\r\n< ?\\r\\r>\n";
+        let mut ms = StnElmAdapter::new(
+            ReplaySerial::from_script(elm_mscan).unwrap(),
+            StnProtocol::MsCan125,
+        );
+        assert!(
+            matches!(ms.init().await, Err(HalError::Unsupported(_))),
+            "plain ELM327 must not be given STP 53"
+        );
     }
 }
