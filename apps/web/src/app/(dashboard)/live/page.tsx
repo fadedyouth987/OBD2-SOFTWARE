@@ -7,18 +7,23 @@ import { SafetyConfirmModal } from "@/components/safety/SafetyConfirmModal";
 import { WiringTopologyViewer } from "@/components/graph/WiringTopologyViewer";
 import { EdgeClient, type EdgeConnectionState } from "@/lib/edge-client";
 import { INITIAL_DIAGNOSTIC_STATE } from "@/store/diagnostic-store";
+import { normalizeBus, redactVin, type TopologyBus } from "@/lib/vin";
 
 const CLOUD_API_URL = process.env.NEXT_PUBLIC_CLOUD_API_URL ?? "http://127.0.0.1:8000";
+const SESSION_KEY = "rootcause.session";
+/** Prefills the decode form only; never shown in the dashboard chrome. */
+const DEMO_VIN = "MPBUMFF60PX418290";
 
 interface TopoNode {
   id: string;
-  bus: string;
+  bus: TopologyBus;
   faults: number;
 }
 
 export default function LiveDashboardPage() {
   const [diag, setDiag] = useState(INITIAL_DIAGNOSTIC_STATE);
-  const [vinInput, setVinInput] = useState(INITIAL_DIAGNOSTIC_STATE.vin);
+  const [vinInput, setVinInput] = useState(DEMO_VIN);
+  const [sessionToken, setSessionToken] = useState("");
   const [topoNodes, setTopoNodes] = useState<TopoNode[]>([
     { id: "PCM", bus: "HS-CAN", faults: 1 },
     { id: "TCM", bus: "HS-CAN", faults: 0 },
@@ -39,6 +44,46 @@ export default function LiveDashboardPage() {
   const clientRef = useRef<EdgeClient | null>(null);
 
   useEffect(() => {
+    try {
+      setSessionToken(window.localStorage.getItem(SESSION_KEY) ?? "");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const authHeaders = (json = true): HeadersInit => {
+    const headers: Record<string, string> = {};
+    if (json) headers["Content-Type"] = "application/json";
+    if (sessionToken) headers.Authorization = `Bearer ${sessionToken}`;
+    return headers;
+  };
+
+  const handleDevSignIn = async () => {
+    try {
+      const res = await fetch(`${CLOUD_API_URL}/api/v1/auth/dev-session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setConnHint(data.detail ?? "Dev sign-in failed (is AUTH_ALLOW_DEV_LOGIN=true?)");
+        return;
+      }
+      const token = data.access_token as string;
+      setSessionToken(token);
+      try {
+        window.localStorage.setItem(SESSION_KEY, token);
+      } catch {
+        /* ignore */
+      }
+      setConnHint("Signed in with a local dev session.");
+    } catch {
+      setConnHint("Cloud API offline on :8000 — start uvicorn to sign in.");
+    }
+  };
+
+  useEffect(() => {
     if (!simRunning || connState === "connected") return;
     const timer = setInterval(() => {
       setDiag((prev) => ({
@@ -52,12 +97,21 @@ export default function LiveDashboardPage() {
   }, [simRunning, connState]);
 
   const handleAutoVinDecode = async () => {
+    const vin = vinInput.trim().toUpperCase();
     try {
-      const res = await fetch(`${CLOUD_API_URL}/api/v1/vehicles/decode/${encodeURIComponent(vinInput.trim())}`);
+      const res = await fetch(`${CLOUD_API_URL}/api/v1/vehicles/decode`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ vin }),
+      });
       const data = await res.json();
+      if (!res.ok) {
+        setConnHint(typeof data.detail === "string" ? data.detail : "VIN decode failed.");
+        return;
+      }
       setDiag((prev) => ({
         ...prev,
-        vin: vinInput.trim().toUpperCase(),
+        vin: redactVin(vin),
         vehicleName: `${data.make} ${data.model}`,
         protocol: Array.isArray(data.protocols) ? data.protocols.join(" / ") : prev.protocol,
       }));
@@ -65,7 +119,7 @@ export default function LiveDashboardPage() {
         setTopoNodes(
           data.modules.map((m: { id: string; bus: string }, idx: number) => ({
             id: m.id,
-            bus: m.bus,
+            bus: normalizeBus(m.bus),
             faults: idx === 0 ? diag.dtcs.length : 0,
           }))
         );
@@ -134,9 +188,9 @@ export default function LiveDashboardPage() {
     try {
       const res = await fetch(`${CLOUD_API_URL}/api/v1/cases/publish`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(),
         body: JSON.stringify({
-          vin: diag.vin,
+          vin: vinInput.trim().toUpperCase(),
           engine_family: diag.vehicleName,
           dtcs: diag.dtcs.map((d) => d.code).length ? diag.dtcs.map((d) => d.code) : ["P2463"],
           symptom_summary: "Workshop verified diagnostic fault resolution",
@@ -160,7 +214,7 @@ export default function LiveDashboardPage() {
               <span className="rounded bg-[#e0242f] px-2 py-0.5 font-mono text-xs font-bold text-white">{diag.vehicleId}</span>
               <h1 className="text-base font-bold">{diag.vehicleName}</h1>
             </div>
-            <p className="mt-0.5 font-mono text-xs text-slate-400">VIN: {diag.vin} · {diag.protocol} · {diag.batteryV.toFixed(1)}V</p>
+            <p className="mt-0.5 font-mono text-xs text-slate-400">VIN: {redactVin(diag.vin)} · {diag.protocol} · {diag.batteryV.toFixed(1)}V</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1 font-mono text-xs text-emerald-300">{diag.safetyMode}</span>
@@ -180,6 +234,9 @@ export default function LiveDashboardPage() {
           <input value={vinInput} onChange={(e) => setVinInput(e.target.value)} placeholder="17-char VIN (e.g. 6G1EP5...)" className="min-h-[40px] w-48 rounded-lg border border-slate-700 bg-slate-900 px-2.5 font-mono uppercase" />
           <button type="button" onClick={handleAutoVinDecode} className="min-h-[40px] rounded-lg bg-emerald-600 px-3 font-semibold text-white">
             AutoVIN Decode
+          </button>
+          <button type="button" onClick={handleDevSignIn} className="min-h-[40px] rounded-lg border border-slate-700 bg-slate-900 px-3 font-semibold">
+            {sessionToken ? "Dev session active" : "Dev sign-in"}
           </button>
           <select value={adapterId} onChange={(e) => setAdapterId(e.target.value)} className="min-h-[40px] rounded-lg border border-slate-700 bg-slate-900 px-2.5">
             <option value="virtual-generic-uds">virtual-generic-uds (CAN 500k)</option>

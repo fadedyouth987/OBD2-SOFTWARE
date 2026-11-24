@@ -28,7 +28,7 @@ export interface DiagnosticState {
 export const INITIAL_DIAGNOSTIC_STATE: DiagnosticState = {
   vehicleId: "FLT-104",
   vehicleName: "2023 Ford Ranger Wildtrak",
-  vin: "MPBUMFF60PX418290",
+  vin: "MPBUMFF60••••••••",
   protocol: "HS-CAN 500k",
   safetyMode: "SILENT",
   speedKmh: 0,
