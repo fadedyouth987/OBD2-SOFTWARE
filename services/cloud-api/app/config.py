@@ -27,6 +27,7 @@ try:
         cloud_signing_private_key_hex: str = ""
         auth_allow_dev_login: bool = False
         stripe_webhook_secret: str = ""
+        immo_feature_enabled: bool = False
 
         @model_validator(mode="after")
         def _check_residency(self) -> "Settings":
@@ -51,6 +52,7 @@ except ImportError:
         cloud_signing_private_key_hex: str = ""
         auth_allow_dev_login: bool = False
         stripe_webhook_secret: str = ""
+        immo_feature_enabled: bool = False
 
         class Config:
             env_file = ".env"

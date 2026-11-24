@@ -212,3 +212,82 @@ class StripeEvent(Base):
     event_type: Mapped[str] = mapped_column(Text)
     payload: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = _created()
+
+
+class TechnicianCredential(Base):
+    """Per-technician AASRA paperwork. The tenant flag is never sufficient."""
+
+    __tablename__ = "technician_credentials"
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    aasra_member_id: Mapped[str] = mapped_column(Text)
+    vsp_status: Mapped[str] = mapped_column(Text, default="pending")
+    national_police_check_dated: Mapped[date | None] = mapped_column(Date)
+    repairer_licence_renewed_at: Mapped[date | None] = mapped_column(Date)
+    declaration_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    accredited_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class OwnerAuthorisation(Base):
+    """Owner declaration metadata. The VIN itself is stored only as an HMAC."""
+
+    __tablename__ = "owner_authorisations"
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"))
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    vin_hmac: Mapped[str] = mapped_column(Text)
+    declared_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _created()
+
+
+class ImmoSession(Base):
+    """An immobilizer job and its short-lived lease. No PIN or key columns."""
+
+    __tablename__ = "immo_sessions"
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"))
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    authorisation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    vin_hmac: Mapped[str] = mapped_column(Text)
+    oem: Mapped[str] = mapped_column(Text)
+    operation: Mapped[str] = mapped_column(Text)
+    device_id: Mapped[str] = mapped_column(Text)
+    device_tier: Mapped[str] = mapped_column(Text)
+    lease_jti: Mapped[str] = mapped_column(Text)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(Text)
+    token_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ImmoAuditEntry(Base):
+    """Five-year security-information audit. Append-only; never stores secrets."""
+
+    __tablename__ = "immo_audit"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"))
+    session_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    aasra_member_id: Mapped[str | None] = mapped_column(Text)
+    vin_hmac: Mapped[str | None] = mapped_column(Text)
+    device_id: Mapped[str | None] = mapped_column(Text)
+    device_tier: Mapped[str | None] = mapped_column(Text)
+    oem: Mapped[str | None] = mapped_column(Text)
+    operation: Mapped[str | None] = mapped_column(Text)
+    event: Mapped[str] = mapped_column(Text)
+    nrc: Mapped[int | None] = mapped_column(SmallInteger)
+    detail: Mapped[str] = mapped_column(Text, default="")
+    retain_until: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _created()

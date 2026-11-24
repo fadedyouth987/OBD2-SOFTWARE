@@ -24,6 +24,10 @@ PINNED_KID = "cloud-2026-11"
 DEFAULT_LEASE_TTL_S = 72 * 3600  # 72-hour offline edge lease (MAX_LEASE_SECS)
 DEFAULT_PAIRING_TTL_S = 120  # 2-minute browser pairing token (<= 300s MAX_PAIRING_SECS)
 DEFAULT_SESSION_TTL_S = 12 * 3600
+DEFAULT_IMMO_LEASE_TTL_S = 15 * 60  # 15-minute immobilizer session
+MAX_IMMO_LEASE_TTL_S = 30 * 60
+IMMO_LEASE_KIND = "immo_lease"
+IMMO_FEATURE = "IMMO_PROGRAM"
 
 # Features the edge Feature enum actually understands. Anything else is dropped.
 KNOWN_FEATURES: frozenset[str] = frozenset({"J2534", "UDS_ACTIVE", "CAN_RE_PRO"})
@@ -172,6 +176,59 @@ def issue_edge_lease(
         "expires_at": payload["exp"],
         "tier": edge_tier,
         "features": granted,
+    }
+
+
+def issue_immo_lease(
+    tenant_id: str,
+    user_id: str,
+    *,
+    session_id: str,
+    jti: str,
+    vin: str,
+    device_id: str,
+    device_tier: str,
+    oem: str,
+    operation: str,
+    ttl_s: int = DEFAULT_IMMO_LEASE_TTL_S,
+) -> dict[str, Any]:
+    """Issue a short-lived immobilizer lease. Never granted by issue_edge_lease."""
+    now = int(time.time())
+    effective_ttl = min(max(int(ttl_s), 1), MAX_IMMO_LEASE_TTL_S)
+    payload: dict[str, Any] = {
+        "iss": ISSUER,
+        "aud": "edge-daemon",
+        "sub": user_id,
+        "user_id": user_id,
+        "tenant_id": tenant_id,
+        "lease_kind": IMMO_LEASE_KIND,
+        "session_id": session_id,
+        "jti": jti,
+        "vin": vin,
+        "device_id": device_id,
+        "device_tier": device_tier,
+        "oem": oem,
+        "operation": operation,
+        "aasra_verified": True,
+        "features": [IMMO_FEATURE],
+        "nbf": now,
+        "iat": now,
+        "exp": now + effective_ttl,
+    }
+    token = _sign_payload({"alg": "EdDSA", "typ": "JWT", "kid": PINNED_KID}, payload)
+    return {
+        "token": token,
+        "kid": PINNED_KID,
+        "jti": jti,
+        "expires_at": payload["exp"],
+        "lease_kind": IMMO_LEASE_KIND,
+        "features": [IMMO_FEATURE],
+        "session_id": session_id,
+        "oem": oem,
+        "operation": operation,
+        "device_id": device_id,
+        "device_tier": device_tier,
+        # VIN is in the token for the daemon; it is not repeated here.
     }
 
 

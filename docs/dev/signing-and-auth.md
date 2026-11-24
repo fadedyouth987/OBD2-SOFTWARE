@@ -33,3 +33,11 @@ real AASRA/OEM integration before production.
 deliberately pin the *public* half of a production key with
 `scripts/export_cloud_keys.py`. An empty list is the safe default: the daemon
 stays COMMUNITY and ignores cloud-issued leases.
+
+`IMMO_FEATURE_ENABLED` (default false) gates immobilizer routes. A short-lived
+`immo_lease` (`aud=edge-daemon`, `lease_kind=immo_lease`, 15 minutes, 30-minute
+cap) is issued only when the tenant is AASRA-verified, the technician is
+accredited, and an owner authorisation for that VIN exists. The sandbox OEM
+adapter issues a fake SecurityAccess token only when `AUTH_ALLOW_DEV_LOGIN=true`.
+The secret is never stored. Put the lease in `$EDGE_DATA_DIR/immo_lease.jwt` so
+the daemon can bind it on connect. See `docs/design/immobilizer-key-programming.md`.
