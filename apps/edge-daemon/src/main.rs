@@ -10,7 +10,8 @@
 //! separated, default `http://localhost:3000` for development),
 //! `EDGE_DATA_DIR` (pairing codes, audit log, lease; default per user),
 //! `RUST_LOG` (default `info`). An offline lease is read from
-//! `<data dir>/lease.jwt` when present.
+//! `<data dir>/lease.jwt` when present, and an immobilizer lease from
+//! `<data dir>/immo_lease.jwt` when present.
 
 use std::{path::PathBuf, process::ExitCode, sync::Arc};
 
@@ -75,6 +76,7 @@ async fn serve(dir: PathBuf) -> ExitCode {
             .collect();
     }
     cfg.lease_token = std::fs::read_to_string(dir.join("lease.jwt")).ok();
+    cfg.immo_lease_token = std::fs::read_to_string(dir.join("immo_lease.jwt")).ok();
     if cfg.keys.is_empty() {
         tracing::info!("no cloud keys pinned yet: COMMUNITY tier, local pairing codes only");
     }

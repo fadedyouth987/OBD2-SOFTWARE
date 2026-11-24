@@ -26,6 +26,8 @@ use super::{
     policy::{self, Gating, TierRules},
     rfc3339,
 };
+use crate::auth::lease::ImmoLease;
+use crate::immo::{self, ImmoRegistry, IMMO_MIN_BATTERY_V};
 use crate::protocol::messages::{DiagProtocol, SafetyMode};
 
 /// Lockout assumed after NRC 0x36/0x37 when the ECU does not say (ISO 14229-1
@@ -152,6 +154,8 @@ struct State {
     battery: Option<Reading>,
     tokens: HashMap<String, TokenRecord>,
     halts: HashMap<(String, u32, u32), Halt>,
+    immo: Option<ImmoLease>,
+    immo_registry: Option<ImmoRegistry>,
 }
 
 /// One interlock per diagnostic session (one WebSocket connection).
@@ -184,6 +188,8 @@ impl SafetyInterlock {
                 battery: None,
                 tokens: HashMap::new(),
                 halts: HashMap::new(),
+                immo: None,
+                immo_registry: None,
             }),
         }
     }
@@ -232,6 +238,135 @@ impl SafetyInterlock {
         );
     }
 
+
+    pub fn set_immo_registry(&self, registry: ImmoRegistry) {
+        self.lock().immo_registry = Some(registry);
+    }
+
+    /// Bind a verified immobilizer lease to this session. VIN and device must match.
+    pub fn begin_immo(
+        &self,
+        lease: ImmoLease,
+        vehicle_vin: &str,
+        device_id: &str,
+    ) -> Result<(), Refusal> {
+        if vehicle_vin != lease.vin {
+            return Err(Refusal::new(
+                RefusalCode::SafetyBlocked,
+                "immo lease VIN does not match the vehicle",
+            ));
+        }
+        let expected_device = immo::canonical_device_id(device_id);
+        if expected_device != lease.device_id {
+            return Err(Refusal::new(
+                RefusalCode::SafetyBlocked,
+                "immo lease device does not match the connected adapter",
+            ));
+        }
+        let registry = self.lock().immo_registry.clone();
+        if let Some(registry) = registry {
+            if let Err(msg) = registry.begin(
+                lease.jti.clone(),
+                lease.vin.clone(),
+                lease.device_id.clone(),
+                self.session_id.clone(),
+            ) {
+                return Err(Refusal::new(RefusalCode::SafetyBlocked, msg));
+            }
+        }
+        let mut s = self.lock();
+        s.vehicle = Some(lease.vin.clone());
+        s.immo = Some(lease);
+        drop(s);
+        self.audit_raw(
+            None,
+            "SANDBOX_IMMO",
+            "immo begin",
+            None,
+            Outcome::Allowed,
+            None,
+            None,
+            "immo session bound".into(),
+        );
+        Ok(())
+    }
+
+    /// Hard abort. The same lease cannot be resumed.
+    pub fn abort_immo(&self, reason: &str) -> bool {
+        let mut s = self.lock();
+        let Some(lease) = s.immo.take() else {
+            return false;
+        };
+        let registry = s.immo_registry.clone();
+        drop(s);
+        if let Some(registry) = registry {
+            registry.abort(Some(&self.session_id));
+        }
+        self.audit_raw(
+            None,
+            "SANDBOX_IMMO",
+            "immo abort",
+            None,
+            Outcome::Refused,
+            None,
+            None,
+            reason.to_owned(),
+        );
+        let _ = lease;
+        true
+    }
+
+    pub fn immo_active(&self) -> bool {
+        self.lock().immo.is_some()
+    }
+
+    fn check_immo_preconditions(s: &State, req: &GatedRequest<'_>) -> Result<(), Refusal> {
+        if !immo::is_sandbox_key_learn(req.protocol, req.tx, req.rx, req.payload) {
+            return Ok(());
+        }
+        let Some(lease) = s.immo.as_ref() else {
+            return Err(Refusal::new(
+                RefusalCode::SafetyBlocked,
+                "allow-listed key-learn requires a valid immo lease",
+            ));
+        };
+        if let Some(registry) = s.immo_registry.as_ref() {
+            if registry.is_aborted(&lease.jti) {
+                return Err(Refusal::new(
+                    RefusalCode::SafetyBlocked,
+                    "immo lease was aborted; start a new session (no silent resume)",
+                ));
+            }
+        }
+        // Battery is checked before and during the procedure (stale or low is a fail).
+        let now = Instant::now();
+        match s.battery {
+            None => {
+                return Err(Refusal::new(
+                    RefusalCode::PreconditionUnknown,
+                    "battery voltage is unknown; connect a maintainer",
+                ))
+            }
+            Some(r) if now.saturating_duration_since(r.at) > Duration::from_millis(2000) => {
+                return Err(Refusal::new(
+                    RefusalCode::PreconditionUnknown,
+                    "battery voltage reading is stale; aborting",
+                ))
+            }
+            Some(r) if r.value < IMMO_MIN_BATTERY_V => {
+                return Err(Refusal::new(
+                    RefusalCode::SafetyBlocked,
+                    format!(
+                        "battery at {} V (needs {IMMO_MIN_BATTERY_V} V and a maintainer)",
+                        r.value
+                    ),
+                ))
+            }
+            Some(_) => {}
+        }
+        Ok(())
+    }
+
     pub fn update_speed(&self, kmh: f64) {
         self.lock().speed = Some(Reading {
             value: kmh,
@@ -267,11 +402,13 @@ impl SafetyInterlock {
 
     /// Ends the session: tokens, halts and bench mode are cleared, mode back to SILENT.
     pub fn end_session(&self) {
+        let aborted = self.abort_immo("link_drop_or_session_end");
         let mut s = self.lock();
         s.tokens.clear();
         s.halts.clear();
         s.bench_mode = false;
         s.mode = SafetyMode::Silent;
+        let _ = aborted;
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -420,6 +557,7 @@ impl SafetyInterlock {
             if let Some(refusal) = Self::security_halt(&mut s, req) {
                 return Err(refusal);
             }
+            Self::check_immo_preconditions(&s, req)?;
             Self::check_preconditions(&s, rules)?;
             let ttl = policy::token_ttl();
             let token = random_token();
@@ -479,6 +617,7 @@ impl SafetyInterlock {
             if let Some(refusal) = Self::security_halt(&mut s, req) {
                 return Err(refusal);
             }
+            Self::check_immo_preconditions(&s, req)?;
             if s.mode != SafetyMode::ActiveConfirmed {
                 return Err(Refusal::new(
                     RefusalCode::SafetyBlocked,
@@ -825,5 +964,125 @@ mod tests {
             .entries()
             .iter()
             .any(|e| e.outcome == Outcome::Response && e.nrc == Some(0x35)));
+    }
+
+    fn immo_req(payload: &'static [u8]) -> GatedRequest<'static> {
+        GatedRequest {
+            protocol: DiagProtocol::Uds,
+            tx: crate::immo::SANDBOX_ECU_TX,
+            rx: crate::immo::SANDBOX_ECU_RX,
+            payload,
+        }
+    }
+
+    fn sandbox_lease(jti: &str) -> crate::auth::lease::ImmoLease {
+        crate::auth::lease::ImmoLease {
+            tenant_id: "t".into(),
+            user_id: "u".into(),
+            session_id: "sess-1".into(),
+            jti: jti.into(),
+            vin: crate::immo::SANDBOX_VIN.into(),
+            device_id: crate::immo::SANDBOX_DEVICE_ID.into(),
+            device_tier: "dongle".into(),
+            oem: "SANDBOX".into(),
+            operation: "add_key_onboard".into(),
+            expires_at: 0,
+        }
+    }
+
+    fn ready_immo(lock: &SafetyInterlock, jti: &str) {
+        let reg = crate::immo::ImmoRegistry::new();
+        lock.set_immo_registry(reg);
+        lock.set_mode(SafetyMode::ActiveConfirmed);
+        lock.update_speed(0.0);
+        lock.update_rpm(0.0);
+        lock.update_battery(13.8);
+        lock.begin_immo(
+            sandbox_lease(jti),
+            crate::immo::SANDBOX_VIN,
+            crate::immo::SANDBOX_DEVICE_ID,
+        )
+        .unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn immo_key_learn_requires_lease_and_voltage() {
+        let (_audit, lock) = interlock();
+        lock.set_mode(SafetyMode::ActiveConfirmed);
+        lock.update_speed(0.0);
+        let seed = immo_req(&[0x27, 0x01]);
+        let err = lock.issue_token(&seed, "ack").unwrap_err();
+        assert!(
+            err.message.contains("immo lease"),
+            "{}",
+            err.message
+        );
+
+        // VIN mismatch.
+        lock.update_battery(13.8);
+        let bad = lock.begin_immo(
+            sandbox_lease("j-vin"),
+            "1HGCM82633A004352",
+            crate::immo::SANDBOX_DEVICE_ID,
+        );
+        assert!(bad.unwrap_err().message.contains("VIN"));
+
+        // Device mismatch.
+        let bad = lock.begin_immo(
+            sandbox_lease("j-dev"),
+            crate::immo::SANDBOX_VIN,
+            "OTHER-DONGLE",
+        );
+        assert!(bad.unwrap_err().message.contains("device"));
+
+        ready_immo(&lock, "j-ok");
+        // Low battery mid-session.
+        lock.update_battery(12.0);
+        let err = lock.issue_token(&seed, "ack").unwrap_err();
+        assert!(err.message.contains("battery"), "{}", err.message);
+
+        lock.update_battery(13.8);
+        let grant = lock.issue_token(&seed, "ack").unwrap();
+        assert!(lock.check(&seed, Some(&grant.token)).is_ok());
+
+        // Stale voltage during the procedure.
+        let grant = lock.issue_token(&seed, "ack").unwrap();
+        tokio::time::advance(Duration::from_millis(2_100)).await;
+        let err = lock.check(&seed, Some(&grant.token)).unwrap_err();
+        assert_eq!(err.code, RefusalCode::PreconditionUnknown);
+        assert!(err.message.contains("stale") || err.message.contains("battery"), "{}", err.message);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn immo_abort_has_no_silent_resume() {
+        let registry = crate::immo::ImmoRegistry::new();
+        let audit = Arc::new(MemoryAudit::default());
+        let lock = SafetyInterlock::new("sess-1", audit);
+        lock.set_immo_registry(registry.clone());
+        lock.set_mode(SafetyMode::ActiveConfirmed);
+        lock.update_speed(0.0);
+        lock.update_battery(13.8);
+        lock.begin_immo(
+            sandbox_lease("j-abort"),
+            crate::immo::SANDBOX_VIN,
+            crate::immo::SANDBOX_DEVICE_ID,
+        )
+        .unwrap();
+        assert!(lock.immo_active());
+        lock.end_session(); // link drop
+        assert!(!lock.immo_active());
+        let lock2 = SafetyInterlock::new("sess-2", Arc::new(MemoryAudit::default()));
+        lock2.set_immo_registry(registry);
+        lock2.set_mode(SafetyMode::ActiveConfirmed);
+        lock2.update_speed(0.0);
+        lock2.update_battery(13.8);
+        let err = lock2
+            .begin_immo(
+                sandbox_lease("j-abort"),
+                crate::immo::SANDBOX_VIN,
+                crate::immo::SANDBOX_DEVICE_ID,
+            )
+            .unwrap_err();
+        assert!(err.message.contains("no silent resume"), "{}", err.message);
     }
 }

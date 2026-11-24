@@ -15,6 +15,7 @@ use super::{
     cloud_keys::KeyRing,
     jws::{self, JwsError},
 };
+use crate::immo::{IMMO_LEASE_KIND, MAX_IMMO_LEASE_SECS};
 use crate::protocol::messages::{Feature, LeaseTier};
 
 pub const SKEW_SECS: u64 = 300;
@@ -48,6 +49,8 @@ pub struct Lease {
     pub tier: LeaseTier,
     pub features: Vec<Feature>,
     pub aasra_verified: bool,
+    /// True when this token is an immobilizer lease, not a diagnostic one.
+    pub immo: bool,
     /// Unix seconds; `None` for the no-lease default.
     pub expires_at: Option<u64>,
 }
@@ -60,6 +63,7 @@ impl Lease {
             tier: LeaseTier::Community,
             features: Vec::new(),
             aasra_verified: false,
+            immo: false,
             expires_at: None,
         }
     }
@@ -143,11 +147,13 @@ pub fn verify_lease(token: &str, keys: &KeyRing, now: u64) -> Result<Lease, Toke
         .get("aasra_verified")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let immo = claims.get("lease_kind").and_then(Value::as_str) == Some(IMMO_LEASE_KIND);
     Ok(Lease {
         tenant_id: Some(tenant_id),
         tier,
         features,
         aasra_verified,
+        immo,
         expires_at: Some(exp),
     })
 }
@@ -155,6 +161,10 @@ pub fn verify_lease(token: &str, keys: &KeyRing, now: u64) -> Result<Lease, Toke
 /// The lease to use now: a verified token, or COMMUNITY if there is none or it fails.
 pub fn effective_lease(token: Option<&str>, keys: &KeyRing, now: u64) -> Lease {
     match token.map(|t| verify_lease(t.trim(), keys, now)) {
+        Some(Ok(lease)) if lease.immo => {
+            tracing::warn!("immo lease presented as a diagnostic lease; running at COMMUNITY tier");
+            Lease::community()
+        }
         Some(Ok(lease)) => lease,
         Some(Err(e)) => {
             tracing::warn!("lease rejected ({e}); running at COMMUNITY tier");
@@ -190,6 +200,47 @@ pub fn verify_pairing(
         tenant_id: string(&claims, "tenant_id")?,
     })
 }
+
+/// A verified immobilizer lease (`lease_kind=immo_lease`, `aud=edge-daemon`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImmoLease {
+    pub tenant_id: String,
+    pub user_id: String,
+    pub session_id: String,
+    pub jti: String,
+    pub vin: String,
+    pub device_id: String,
+    pub device_tier: String,
+    pub oem: String,
+    pub operation: String,
+    pub expires_at: u64,
+}
+
+/// Verifies an immobilizer lease. Diagnostic leases and over-long tokens fail.
+pub fn verify_immo_lease(token: &str, keys: &KeyRing, now: u64) -> Result<ImmoLease, TokenError> {
+    let claims = jws::verify(token, keys)?;
+    check_audience(&claims, LEASE_AUDIENCE)?;
+    if claims.get("lease_kind").and_then(Value::as_str) != Some(IMMO_LEASE_KIND) {
+        return Err(TokenError::Claim("lease_kind"));
+    }
+    let (_, exp) = check_times(&claims, now, MAX_IMMO_LEASE_SECS)?;
+    if claims.get("aasra_verified").and_then(Value::as_bool) != Some(true) {
+        return Err(TokenError::Claim("aasra_verified"));
+    }
+    Ok(ImmoLease {
+        tenant_id: string(&claims, "tenant_id")?,
+        user_id: string(&claims, "user_id")?,
+        session_id: string(&claims, "session_id")?,
+        jti: string(&claims, "jti")?,
+        vin: string(&claims, "vin")?,
+        device_id: string(&claims, "device_id")?,
+        device_tier: string(&claims, "device_tier")?,
+        oem: string(&claims, "oem")?,
+        operation: string(&claims, "operation")?,
+        expires_at: exp,
+    })
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -323,5 +374,62 @@ mod tests {
             verify_pairing(&lease_token, &keys, Some("https://app.example"), NOW),
             Err(TokenError::WrongAudience(_))
         ));
+    }
+
+    fn immo_claims() -> Value {
+        json!({
+            "aud": "edge-daemon",
+            "lease_kind": "immo_lease",
+            "tenant_id": "t-1",
+            "user_id": "u-1",
+            "session_id": "s-1",
+            "jti": "j-1",
+            "vin": "SBXTESTVAN0000001",
+            "device_id": "RC-DONGLE-SANDBOX",
+            "device_tier": "dongle",
+            "oem": "SANDBOX",
+            "operation": "add_key_onboard",
+            "aasra_verified": true,
+            "features": ["IMMO_PROGRAM"],
+            "nbf": NOW - 10,
+            "exp": NOW + 15 * 60
+        })
+    }
+
+    #[test]
+    fn immo_lease_gates() {
+        let (key, keys) = setup();
+        let sign = |c: Value| jws::sign(&c, "cloud-1", &key);
+        let lease = verify_immo_lease(&sign(immo_claims()), &keys, NOW).unwrap();
+        assert_eq!(lease.vin, "SBXTESTVAN0000001");
+        assert_eq!(lease.device_id, "RC-DONGLE-SANDBOX");
+
+        // A diagnostic lease is not an immo lease.
+        assert_eq!(
+            verify_immo_lease(&sign(lease_claims()), &keys, NOW),
+            Err(TokenError::Claim("lease_kind"))
+        );
+
+        // Longer than 30 minutes is refused.
+        let mut long = immo_claims();
+        long["exp"] = json!(NOW + 31 * 60);
+        assert_eq!(
+            verify_immo_lease(&sign(long), &keys, NOW),
+            Err(TokenError::TooLong(MAX_IMMO_LEASE_SECS))
+        );
+
+        // VIN binding is required.
+        let mut no_vin = immo_claims();
+        no_vin["vin"] = json!("");
+        assert_eq!(
+            verify_immo_lease(&sign(no_vin), &keys, NOW),
+            Err(TokenError::Claim("vin"))
+        );
+
+        // An immo lease must not unlock diagnostic features.
+        assert_eq!(
+            effective_lease(Some(&sign(immo_claims())), &keys, NOW),
+            Lease::community()
+        );
     }
 }

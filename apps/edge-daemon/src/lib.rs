@@ -3,6 +3,7 @@
 pub mod analytics;
 pub mod auth;
 pub mod hal;
+pub mod immo;
 pub mod protocol;
 pub mod protocols;
 pub mod safety;

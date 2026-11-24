@@ -48,9 +48,10 @@ use super::pairing::{looks_like_code, PairingStore};
 use crate::{
     auth::{
         cloud_keys::KeyRing,
-        lease::{self, Lease},
+        lease::{self, ImmoLease, Lease},
         unix_now,
     },
+    immo::{self, ImmoRegistry},
     hal::{
         discovery,
         serial::SystemSerial,
@@ -97,6 +98,9 @@ pub struct ServerConfig {
     pub keys: KeyRing,
     /// Raw lease token; verified at every Hello so expiry takes effect.
     pub lease_token: Option<String>,
+    /// Optional immobilizer lease; verified at Hello and bound on Connect.
+    pub immo_lease_token: Option<String>,
+    pub immo_registry: ImmoRegistry,
     pub pairing: Arc<PairingStore>,
     pub audit: Arc<dyn AuditSink>,
     pub hello_timeout: Duration,
@@ -112,6 +116,8 @@ impl ServerConfig {
             allowed_origins: vec!["http://localhost:3000".into()],
             keys,
             lease_token: None,
+            immo_lease_token: None,
+            immo_registry: ImmoRegistry::new(),
             pairing,
             audit,
             hello_timeout: HELLO_TIMEOUT,
@@ -395,11 +401,22 @@ fn authenticate(
         }
     };
     let lease = lease::effective_lease(cfg.lease_token.as_deref(), &cfg.keys, now);
+    let immo_lease = match cfg.immo_lease_token.as_deref() {
+        None => None,
+        Some(token) => match lease::verify_immo_lease(token, &cfg.keys, now) {
+            Ok(immo) => Some(immo),
+            Err(e) => {
+                tracing::warn!("immo lease rejected ({e})");
+                None
+            }
+        },
+    };
     let session_id = random_session_id();
     let interlock = Arc::new(SafetyInterlock::new(
         session_id.clone(),
         Arc::clone(&cfg.audit),
     ));
+    interlock.set_immo_registry(cfg.immo_registry.clone());
     interlock.set_identity(user, None);
     let hello_resp = m::HelloResponse {
         daemon_version: env!("CARGO_PKG_VERSION")
@@ -423,6 +440,7 @@ fn authenticate(
     tracing::info!(%session_id, tier = %lease.tier, "client authenticated");
     let session = Session {
         lease,
+        immo_lease,
         interlock,
         conn: None,
         bucket: Bucket::new(cfg.diag_per_second),
@@ -493,6 +511,7 @@ impl Drop for Connected {
 
 struct Session {
     lease: Lease,
+    immo_lease: Option<ImmoLease>,
     interlock: Arc<SafetyInterlock>,
     conn: Option<Connected>,
     bucket: Bucket,
@@ -817,6 +836,20 @@ impl Session {
         }
         self.interlock.set_mode(r.safety_mode);
         let battery = bus.with_vehicle(|v| v.battery_v);
+        let vin = bus.with_vehicle(|v| v.vin.clone());
+        self.interlock.update_battery(battery);
+        self.interlock.update_speed(bus.with_vehicle(|v| v.speed_kmh));
+        self.interlock.update_rpm(bus.with_vehicle(|v| v.rpm));
+        self.interlock.set_identity(None, Some(vin.clone()));
+        if let Some(immo) = self.immo_lease.clone() {
+            if let Err(refusal) = self.interlock.begin_immo(
+                immo,
+                &vin,
+                immo::canonical_device_id(adapter_id),
+            ) {
+                return err(rid, refusal_code(refusal.code), &refusal.message);
+            }
+        }
         self.conn = Some(Connected {
             adapter_id: adapter_id.to_owned(),
             bus: bus_handle,
