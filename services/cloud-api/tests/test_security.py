@@ -370,7 +370,8 @@ def test_session_sync_and_case_publish_round_trip(client: TestClient):
         headers=headers,
     )
     assert diag.status_code == 200, diag.text
-    assert diag.json()["quota_charged"] is True
+    # No model configured in tests: the free built-in rules cite the published case.
+    assert diag.json()["analysis"] == "rules" and diag.json()["quota_charged"] is False
     assert case_id in diag.json()["ranked_causes"][0]["cited_case_ids"]
 
 
