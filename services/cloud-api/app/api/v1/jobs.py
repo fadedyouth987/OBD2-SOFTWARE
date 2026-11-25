@@ -37,7 +37,8 @@ from app.services.identity import user_profile
 
 router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
 
-_DTC = re.compile(r"^[PCBU][0-3][0-9A-F]{3}$")
+# SAE J2012 codes (P0171) or a manufacturer's raw hex code (BMW "2A82").
+_DTC = re.compile(r"^(?:[PCBU][0-3][0-9A-F]{3}|[0-9A-F]{4,6})$")
 MAX_DTCS = 200
 MAX_ALERTS = 50
 
@@ -412,6 +413,7 @@ def job_report(job_id: str, principal: RequirePrincipal) -> dict[str, Any]:
                     "service": a.service,
                     "tier": a.tier,
                     "outcome": a.outcome,
+                    "detail": a.detail or "",
                 }
                 for a in store.query(AuditLogEntry)
                 .filter(AuditLogEntry.edge_session_id == row.edge_session_id)

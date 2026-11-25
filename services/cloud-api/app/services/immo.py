@@ -138,6 +138,51 @@ def require_workshop_and_tech(principal: Principal) -> TechnicianCredential:
     return cred
 
 
+def eligibility(principal: Principal) -> dict:
+    """Each gate for key programming, so the UI can show what is missing.
+
+    Read-only; the gates are still enforced by ``require_workshop_and_tech``.
+    """
+    enabled = immo_feature_enabled()
+    plan_ok = principal.tier in {SubscriptionTier.WORKSHOP, SubscriptionTier.FLEET}
+    aasra_ok = bool(
+        default_verifier().is_verified(principal.tenant_id, tenant_flag=principal.aasra_verified)
+    )
+    with tenant_session(principal.tenant_id) as session:
+        cred = session.get(TechnicianCredential, (principal.tenant_id, principal.user_id))
+        if cred is not None:
+            session.expunge(cred)
+    if cred is None:
+        tech_status = "not_enrolled"
+    elif is_accredited(cred):
+        tech_status = "accredited"
+    elif not paperwork_current(cred):
+        tech_status = "paperwork_expired"
+    elif cred.vsp_status == "active":
+        tech_status = "expired"
+    else:
+        tech_status = "pending"
+    accredited_until = None
+    if cred is not None and cred.accredited_until is not None:
+        accredited_until = cred.accredited_until.isoformat()
+    checks = {
+        "feature_enabled": enabled,
+        "plan": plan_ok,
+        "addon": bool(principal.immo_entitled),
+        "aasra": aasra_ok,
+        "technician": tech_status == "accredited",
+    }
+    return {
+        "checks": checks,
+        "ready": all(checks.values()),
+        "technician": {
+            "status": tech_status,
+            "aasra_member_id": cred.aasra_member_id if cred else None,
+            "accredited_until": accredited_until,
+        },
+    }
+
+
 def enrol_technician(
     principal: Principal,
     *,

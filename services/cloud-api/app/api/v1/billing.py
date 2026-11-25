@@ -47,17 +47,30 @@ def require_owner(principal: Principal) -> None:
         )
 
 
+BILLING_PATH = "/workshop/billing"
+
+
+def _app_url(path: str | None, default: str) -> str:
+    """Absolute URL on our own app. Only same-app paths are accepted, so a
+    client can't turn Stripe's redirect into an open redirect."""
+    base = get_settings().public_app_url.rstrip("/")
+    if not path or not path.startswith("/") or path.startswith("//") or "\\" in path:
+        path = default
+    return f"{base}{path}"
+
+
 class CheckoutRequest(BaseModel):
     tier: SubscriptionTier
     interval: str = Field(pattern="^(month|year)$")
     immo_addon: bool = False
     start_trial: bool = False
-    success_url: str | None = None
-    cancel_url: str | None = None
+    # Paths on this app only (e.g. "/workshop/billing?checkout=success").
+    success_url: str | None = Field(default=None, max_length=300)
+    cancel_url: str | None = Field(default=None, max_length=300)
 
 
 class PortalRequest(BaseModel):
-    return_url: str | None = None
+    return_url: str | None = Field(default=None, max_length=300)
 
 
 @router.get("/tiers")
@@ -142,8 +155,8 @@ def create_checkout_session(req: CheckoutRequest, principal: RequirePrincipal) -
                 )
         trial = True
 
-    success = req.success_url or f"{settings.public_app_url.rstrip('/')}/billing?checkout=success"
-    cancel = req.cancel_url or f"{settings.public_app_url.rstrip('/')}/billing?checkout=cancel"
+    success = _app_url(req.success_url, f"{BILLING_PATH}?checkout=success")
+    cancel = _app_url(req.cancel_url, f"{BILLING_PATH}?checkout=cancel")
 
     customer_id: str | None = None
     with tenant_session(principal.tenant_id) as session:
@@ -201,7 +214,7 @@ def create_customer_portal(req: PortalRequest, principal: RequirePrincipal) -> d
                 detail="This workspace has no Stripe customer yet — start a paid plan first",
             )
         customer_id = tenant.stripe_customer_id
-    return_url = req.return_url or f"{settings.public_app_url.rstrip('/')}/billing"
+    return_url = _app_url(req.return_url, BILLING_PATH)
     try:
         stripe.api_key = settings.stripe_secret_key
         portal = stripe.billing_portal.Session.create(customer=customer_id, return_url=return_url)

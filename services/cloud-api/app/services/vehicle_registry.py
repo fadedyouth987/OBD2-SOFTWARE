@@ -575,8 +575,32 @@ def list_vehicle_platforms() -> list[dict[str, Any]]:
     return [{"profile": k, **v} for k, v in VEHICLE_PLATFORMS.items()]
 
 
-def get_vehicle_platform(profile: str) -> dict[str, Any]:
-    return VEHICLE_PLATFORMS.get(profile, VEHICLE_PLATFORMS["holden_commodore_ve_vf"])
+GENERIC_PROFILE = "generic_obd2_uds"
+
+GENERIC_PLATFORM: dict[str, Any] = {
+    "make": "Universal OBD-II / EOBD",
+    "model": "Generic ISO 15765 / KWP2000 / J1850 Vehicle",
+    "engine": "All OBD-II Compliant Powertrains",
+    "wmi_prefixes": [],
+    "protocols": [
+        "AUTO",
+        "ISO15765_11_500",
+        "ISO15765_29_500",
+        "ISO14230_FAST",
+        "ISO9141_2",
+        "J1850_PWM",
+        "J1850_VPW",
+    ],
+    "modules": [{"id": "ECM/PCM", "bus": "OBD-II Functional", "tx": "0x7DF", "rx": "0x7E8"}],
+    "shared_nodes": ["NODE:OBD2_PIN16_BATT", "NODE:OBD2_PIN4_5_GND"],
+    "common_dtcs": {},
+}
+
+
+def get_vehicle_platform(profile: str | None) -> dict[str, Any]:
+    """The platform for a profile; unknown or missing profiles get generic OBD-II
+    (never another vehicle's data)."""
+    return VEHICLE_PLATFORMS.get(profile or "", GENERIC_PLATFORM)
 
 
 def decode_vin_platform(vin: str) -> dict[str, Any]:
@@ -585,23 +609,4 @@ def decode_vin_platform(vin: str) -> dict[str, Any]:
     for profile, info in VEHICLE_PLATFORMS.items():
         if wmi in info["wmi_prefixes"]:
             return {"matched": True, "profile": profile, "wmi": wmi, **info}
-    return {
-        "matched": False,
-        "profile": "generic_obd2_uds",
-        "wmi": wmi,
-        "make": "Universal OBD-II / EOBD",
-        "model": "Generic ISO 15765 / KWP2000 / J1850 Vehicle",
-        "engine": "All OBD-II Compliant Powertrains",
-        "protocols": [
-            "AUTO",
-            "ISO15765_11_500",
-            "ISO15765_29_500",
-            "ISO14230_FAST",
-            "ISO9141_2",
-            "J1850_PWM",
-            "J1850_VPW",
-        ],
-        "modules": [{"id": "ECM/PCM", "bus": "OBD-II Functional", "tx": "0x7DF", "rx": "0x7E8"}],
-        "shared_nodes": ["NODE:OBD2_PIN16_BATT", "NODE:OBD2_PIN4_5_GND"],
-        "common_dtcs": {},
-    }
+    return {"matched": False, "profile": GENERIC_PROFILE, "wmi": wmi, **GENERIC_PLATFORM}

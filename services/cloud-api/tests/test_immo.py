@@ -451,3 +451,43 @@ def test_abort_then_cannot_fetch_token(client: TestClient):
         assert aborted.status_code == 200 and aborted.json()["status"] == "aborted"
         tok = client.post(f"/api/v1/immo/sessions/{sid}/token", headers=_auth(token))
         assert tok.status_code == 409
+
+
+def test_eligibility_reports_each_gate_and_profiles_follow_the_flag(client: TestClient):
+    _require_db()
+    sess = _dev_session(client)
+    token = sess["access_token"]
+    with flags(immo=False):
+        res = client.get("/api/v1/immo/eligibility", headers=_auth(token))
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert body["ready"] is False
+        assert body["checks"] == {
+            "feature_enabled": False,
+            "plan": False,
+            "addon": False,
+            "aasra": False,
+            "technician": False,
+        }
+        assert body["technician"]["status"] == "not_enrolled"
+        assert client.get("/api/v1/immo/profiles", headers=_auth(token)).status_code == 403
+
+    _mark_aasra(client, token)
+    with flags(immo=True):
+        enrol = client.post(
+            "/api/v1/immo/technicians/enrol",
+            headers=_auth(token),
+            json={
+                "aasra_member_id": "VSP-ELIG-1",
+                "national_police_check_dated": date.today().isoformat(),
+                "declared": True,
+            },
+        )
+        assert enrol.status_code == 200, enrol.text
+        body = client.get("/api/v1/immo/eligibility", headers=_auth(token)).json()
+        assert body["ready"] is True, body
+        assert body["technician"]["status"] == "accredited"
+        assert body["technician"]["aasra_member_id"] == "VSP-ELIG-1"
+        profiles = client.get("/api/v1/immo/profiles", headers=_auth(token)).json()
+        assert [p["oem"] for p in profiles["profiles"]] == [SANDBOX_OEM]
+        assert profiles["min_battery_v"] == 13.0

@@ -33,14 +33,14 @@ log = logging.getLogger(__name__)
 
 class DiagnoseRequest(BaseModel):
     dtcs: list[str]
-    vehicle_profile: str = "ford_ranger_px3"
+    vehicle_profile: str = "generic_obd2_uds"
     shared_graph_nodes: list[str] | None = None
     matched_cases: list[dict[str, Any]] | None = None
 
 
 class FollowupRequest(BaseModel):
-    question: str
-    vehicle_profile: str = "ford_ranger_px3"
+    question: str = Field(min_length=2, max_length=2000)
+    vehicle_profile: str = "generic_obd2_uds"
     dtcs: list[str] = []
 
 

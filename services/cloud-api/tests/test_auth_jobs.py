@@ -305,3 +305,21 @@ def test_service_functions_only_offer_procedures_on_file(client: TestClient):
     assert all(f["procedure"] is None for f in real["functions"])
 
     assert client.get("/api/v1/vehicles/not_a_profile/services").status_code == 404
+
+
+def test_dtc_codes_accept_sae_and_raw_manufacturer_hex():
+    from app.api.v1.jobs import _DTC
+
+    for ok in ("P0171", "C1145", "U0100", "B1A2F", "2A82", "29E0", "A1B2C3"):
+        assert _DTC.match(ok), ok
+    for bad in ("P4171", "X0171", "P01", "P0171 ", "ZZZZ", "1234567"):
+        assert not _DTC.match(bad), bad
+
+
+def test_unknown_vehicle_profile_falls_back_to_generic_obd():
+    from app.services.vehicle_registry import GENERIC_PROFILE, get_vehicle_platform
+
+    generic = get_vehicle_platform("no_such_profile")
+    assert generic["make"].startswith("Universal OBD-II")
+    assert get_vehicle_platform(None)["make"] == generic["make"]
+    assert get_vehicle_platform(GENERIC_PROFILE)["make"] == generic["make"]

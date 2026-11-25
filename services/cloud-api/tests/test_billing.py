@@ -546,3 +546,23 @@ def test_immo_denied_without_addon_even_on_workshop(client: TestClient):
         assert "add-on" in res.json()["detail"].lower() or "immo" in res.json()["detail"].lower()
     finally:
         os.environ["IMMO_FEATURE_ENABLED"] = "false"
+
+
+def test_checkout_redirects_only_to_paths_on_this_app():
+    from app.api.v1.billing import _app_url
+    from app.config import get_settings
+
+    base = get_settings().public_app_url.rstrip("/")
+    assert (
+        _app_url("/workshop/billing?checkout=success", "/x")
+        == f"{base}/workshop/billing?checkout=success"
+    )
+    for hostile in (
+        "https://evil.example/",
+        "//evil.example/x",
+        "/\\\\evil.example",
+        "javascript:alert(1)",
+        "",
+        None,
+    ):
+        assert _app_url(hostile, "/workshop/billing") == f"{base}/workshop/billing"
