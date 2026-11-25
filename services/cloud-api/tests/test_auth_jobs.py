@@ -234,3 +234,74 @@ def test_publish_case_needs_dtcs(client: TestClient):
         json={"summary": "No codes", "actual_fix": "Nothing", "publish_case": True},
     )
     assert res.status_code == 422
+
+
+def test_attach_device_session_once_and_scrub_alert_evidence(client: TestClient):
+    _require_db()
+    _, body = _signup(client)
+    h = _auth(body["access_token"])
+    job = client.post("/api/v1/jobs", headers=h, json={"vehicle_label": "Walk-in"}).json()
+    assert job["edge_session_id"] is None
+    edge = f"sess_{uuid.uuid4().hex[:12]}"
+    first = client.patch(f"/api/v1/jobs/{job['id']}", headers=h, json={"edge_session_id": edge})
+    assert first.status_code == 200 and first.json()["edge_session_id"] == edge
+    # Set once: a later daemon session does not move the job's telemetry.
+    second = client.patch(
+        f"/api/v1/jobs/{job['id']}", headers=h, json={"edge_session_id": "sess_other_1"}
+    )
+    assert second.json()["edge_session_id"] == edge
+    # Another job cannot claim a device session that is already attached.
+    other = client.post("/api/v1/jobs", headers=h, json={}).json()
+    clash = client.patch(f"/api/v1/jobs/{other['id']}", headers=h, json={"edge_session_id": edge})
+    assert clash.status_code == 409
+
+    vin = "6FPAAAJGSW8B12345"
+    upd = client.patch(
+        f"/api/v1/jobs/{job['id']}",
+        headers=h,
+        json={
+            "alerts": [
+                {
+                    "rule_id": "audit.vin_mismatch",
+                    "severity": "RED",
+                    "title": "VIN differs between modules",
+                    "evidence_json": {"PCM": vin, "IC": {"vin": vin}},
+                }
+            ]
+        },
+    )
+    assert upd.status_code == 200, upd.text
+    assert vin not in upd.text
+    assert upd.json()["alerts"][0]["evidence_json"]["IC"]["vin"] == "[VIN_REDACTED]"
+
+
+def test_service_functions_only_offer_procedures_on_file(client: TestClient):
+    _require_db()
+    _, body = _signup(client)
+    h = _auth(body["access_token"])
+    assert client.get("/api/v1/service-functions").status_code in (401, 403)
+
+    sim = client.get(
+        "/api/v1/service-functions?adapter_id=virtual-ford-falcon-ba", headers=h
+    ).json()
+    assert sim["source"] == "simulator"
+    by_id = {f["id"]: f for f in sim["functions"]}
+    assert len(by_id) == 11
+    oil = by_id["oil_reset"]
+    assert oil["availability"] == "simulated"
+    assert oil["procedure"]["start_hex"] == "31010501"
+    assert (oil["procedure"]["tx_id"], oil["procedure"]["rx_id"]) == (0x720, 0x728)
+    assert oil["checklist"], "every function has a technician checklist"
+    assert by_id["abs_bleed"]["procedure"]["stop_hex"] == "1001"
+    assert by_id["injector_coding"]["availability"] == "no_verified_procedure"
+    # Nothing in any procedure uses SecurityAccess (0x27).
+    for f in sim["functions"]:
+        proc = f["procedure"] or {}
+        for key in ("enter_session_hex", "start_hex", "stop_hex", "exit_session_hex"):
+            assert not str(proc.get(key) or "").startswith("27")
+
+    real = client.get("/api/v1/service-functions?adapter_id=serial-ttyUSB0", headers=h).json()
+    assert real["source"] == "none"
+    assert all(f["procedure"] is None for f in real["functions"])
+
+    assert client.get("/api/v1/vehicles/not_a_profile/services").status_code == 404

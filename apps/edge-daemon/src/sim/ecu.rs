@@ -98,6 +98,9 @@ pub struct EcuSpec {
     pub session_routines: Vec<u16>,
     /// I/O control identifiers (UDS 0x2F DIDs; KWP 0x30 local ids).
     pub io_ids: Vec<u16>,
+    /// I/O controls (UDS 0x2F) that run in the extended session without
+    /// SecurityAccess, like `session_routines` (simulated service functions).
+    pub session_io_ids: Vec<u16>,
     /// Normal response time.
     pub p2_ms: u64,
     /// Time a slow service takes after its 0x78 responsePending.
@@ -123,6 +126,7 @@ impl EcuSpec {
             routines: Vec::new(),
             session_routines: Vec::new(),
             io_ids: Vec::new(),
+            session_io_ids: Vec::new(),
             p2_ms: 15,
             slow_ms: 120,
             key_bytes: (0xEF, 0x8F),
@@ -435,13 +439,19 @@ impl EcuSim {
                 if req.len() < 4 {
                     return self.now_reply(negative(sid, nrc::INCORRECT_LENGTH));
                 }
+                let did = u16::from_be_bytes([req[1], req[2]]);
+                if self.spec.session_io_ids.contains(&did) {
+                    if let Some(r) = self.require_session(sid) {
+                        return r;
+                    }
+                    return self.now_reply(positive(sid, &req[1..]));
+                }
                 if let Some(r) = self
                     .require_session(sid)
                     .or_else(|| self.require_unlocked(sid))
                 {
                     return r;
                 }
-                let did = u16::from_be_bytes([req[1], req[2]]);
                 if !self.spec.io_ids.contains(&did) {
                     return self.now_reply(negative(sid, nrc::REQUEST_OUT_OF_RANGE));
                 }

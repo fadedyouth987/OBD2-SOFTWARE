@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from app.api.deps import RequirePrincipal
@@ -18,8 +18,10 @@ from app.db.session import tenant_session
 from app.db.vin import wmi_vds
 from app.observability.metrics import inc
 from app.services.ai_diagnostic_agent import answer_technician_followup, diagnose_session
+from app.services.service_procedures import service_functions_for
 from app.services.vehicle_registry import (
     SERVICE_FUNCTIONS_CATALOG,
+    VEHICLE_PLATFORMS,
     decode_vin_platform,
     get_vehicle_platform,
     list_vehicle_platforms,
@@ -86,6 +88,8 @@ def decode_vin_get_removed(vin: str) -> dict[str, Any]:
 
 @router.get("/vehicles/{profile}/services")
 def get_vehicle_services(profile: str) -> dict[str, Any]:
+    if profile not in VEHICLE_PLATFORMS:
+        raise HTTPException(status_code=404, detail=f"Unknown vehicle profile {profile!r}")
     info = get_vehicle_platform(profile)
     return {
         "profile": profile,
@@ -93,6 +97,15 @@ def get_vehicle_services(profile: str) -> dict[str, Any]:
         "modules": info["modules"],
         "service_functions": SERVICE_FUNCTIONS_CATALOG,
     }
+
+
+@router.get("/service-functions")
+def get_service_functions(
+    principal: RequirePrincipal,
+    adapter_id: str | None = Query(default=None, max_length=128),
+) -> dict[str, Any]:
+    """Service functions with a runnable procedure where one is on file for this adapter."""
+    return service_functions_for(adapter_id)
 
 
 @router.post("/diagnose/{session_id}")

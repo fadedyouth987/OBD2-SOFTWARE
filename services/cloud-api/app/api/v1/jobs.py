@@ -31,7 +31,7 @@ from app.db.models import (
 from app.db.session import tenant_session
 from app.db.vin import normalize_vin, resolve_secret, vin_hmac
 from app.observability.metrics import inc
-from app.services.anonymizer import anonymize_case, scrub_text
+from app.services.anonymizer import anonymize_case, scrub_text, scrub_value
 from app.services.embeddings import EMBEDDING_MODEL, embed_canonical_text
 from app.services.identity import user_profile
 
@@ -75,6 +75,9 @@ class JobStart(BaseModel):
 
 
 class JobUpdate(BaseModel):
+    # Attach a daemon session to a job started without one, so live-data
+    # recordings (POST /sessions/sync) land on it. Set once; never replaced.
+    edge_session_id: str | None = Field(default=None, min_length=1, max_length=64)
     vin: str | None = Field(default=None, max_length=32)
     vehicle_label: str | None = Field(default=None, max_length=200)
     vehicle_profile: str | None = Field(default=None, max_length=64)
@@ -264,6 +267,20 @@ def update_job(job_id: str, req: JobUpdate, principal: RequirePrincipal) -> dict
                 detail="This session is closed. Start a new session to make changes.",
             )
         fields = req.model_fields_set
+        if req.edge_session_id and not row.edge_session_id:
+            taken = (
+                store.query(DiagnosticSession.id)
+                .filter(
+                    DiagnosticSession.tenant_id == principal.tenant_id,
+                    DiagnosticSession.edge_session_id == req.edge_session_id,
+                )
+                .first()
+            )
+            if taken is not None:
+                raise HTTPException(
+                    status_code=409, detail="That device session already belongs to another job"
+                )
+            row.edge_session_id = req.edge_session_id
         if "vin" in fields:
             row.vin_hmac, row.vin_redacted = _vin_fields(req.vin)
         for name in ("vehicle_label", "vehicle_profile", "odometer_km", "complaint"):
@@ -274,7 +291,8 @@ def update_job(job_id: str, req: JobUpdate, principal: RequirePrincipal) -> dict
         if req.dtcs is not None:
             row.dtcs = _clean_dtcs(req.dtcs)
         if req.alerts is not None:
-            row.alerts = [a.model_dump() for a in req.alerts[:MAX_ALERTS]]
+            # Alert evidence can quote identifiers read from the car (VINs): scrub it.
+            row.alerts = [scrub_value(a.model_dump()) for a in req.alerts[:MAX_ALERTS]]
         if "diagnosis" in fields:
             row.diagnosis = req.diagnosis
         row.updated_at = datetime.now(UTC)

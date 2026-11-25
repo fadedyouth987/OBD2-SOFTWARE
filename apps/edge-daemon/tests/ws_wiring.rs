@@ -381,3 +381,61 @@ async fn service_routine_runs_only_with_a_safety_token() {
         "{done}"
     );
 }
+
+/// Runs one gated request the way the web app does: ask for a token, then send.
+async fn gated(ws: &mut Ws, id: &str, tx: u32, rx: u32, sid: u8, payload: &str) -> Value {
+    let tid = format!("{id}-t");
+    send(
+        ws,
+        &json!({"type": "SafetyConfirmRequest", "request_id": tid, "tx_id": tx, "rx_id": rx,
+                "protocol": "UDS", "service_id": sid, "payload_hex": payload,
+                "user_ack_text": "Simulated service function; technician confirmed the checklist"}),
+    )
+    .await;
+    let grant = reply(ws, &tid).await;
+    assert_eq!(grant["type"], "SafetyConfirmResponse", "{grant}");
+    let mut run = diag(id, tx, rx, payload);
+    run["safety_token"] = grant["safety_token"].clone();
+    send(ws, &run).await;
+    reply(ws, id).await
+}
+
+#[tokio::test]
+async fn falcon_service_functions_run_in_extended_session_without_security_access() {
+    let now = unix_now();
+    let d = start(move |cfg, cloud| {
+        cfg.lease_token = Some(jws::sign(
+            &json!({"aud": "edge-daemon", "tenant_id": "t-1", "tier": "PRO", "features": ["UDS_ACTIVE"],
+                    "nbf": now - 60, "exp": now + 3_600}),
+            "cloud-test",
+            cloud,
+        ))
+    })
+    .await;
+    let mut ws = paired(&d).await;
+    send(
+        &mut ws,
+        &connect("c1", "virtual-ford-falcon-ba", "ACTIVE_CONFIRMED"),
+    )
+    .await;
+    assert_eq!(reply(&mut ws, "c1").await["state"], "CONNECTED");
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    // Oil reset on the instrument cluster: routine 0x0501.
+    send(&mut ws, &diag("e1", 0x720, 0x728, "1003")).await;
+    assert_eq!(reply(&mut ws, "e1").await["positive"], true);
+    let oil = gated(&mut ws, "oil", 0x720, 0x728, 0x31, "31010501").await;
+    assert_eq!(oil["response_hex"], "7101050100", "{oil}");
+
+    // ABS bleed: I/O control 0x4B01, handed back by leaving the session.
+    send(&mut ws, &diag("e2", 0x760, 0x768, "1003")).await;
+    assert_eq!(reply(&mut ws, "e2").await["positive"], true);
+    let bleed = gated(&mut ws, "bleed", 0x760, 0x768, 0x2F, "2F4B010301").await;
+    assert_eq!(bleed["response_hex"], "6F4B010301", "{bleed}");
+    send(&mut ws, &diag("x2", 0x760, 0x768, "1001")).await;
+    assert_eq!(reply(&mut ws, "x2").await["positive"], true);
+
+    // Outside the extended session the routine is refused by the ECU (NRC 0x7F).
+    let late = gated(&mut ws, "late", 0x760, 0x768, 0x31, "31010602").await;
+    assert_eq!(late["positive"], false, "{late}");
+}

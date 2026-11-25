@@ -62,7 +62,7 @@ fn pcm() -> EcuSpec {
 
 fn ic() -> EcuSpec {
     let mut spec = EcuSpec::new("IC", Dialect::Uds);
-    spec.routines = vec![ROUTINE_OIL_RESET];
+    spec.session_routines = vec![ROUTINE_OIL_RESET];
     spec.p2_ms = 25;
     spec
 }
@@ -74,8 +74,8 @@ fn abs() -> EcuSpec {
         ftb: 0,
         status: DTC_CONFIRMED,
     }]; // C1145
-    spec.routines = vec![ROUTINE_SAS_CAL];
-    spec.io_ids = vec![IO_ABS_BLEED];
+    spec.session_routines = vec![ROUTINE_SAS_CAL];
+    spec.session_io_ids = vec![IO_ABS_BLEED];
     spec.p2_ms = 18;
     spec
 }
