@@ -48,7 +48,7 @@ export function Menu({
       <button
         ref={btn}
         type="button"
-        aria-label={label}
+        aria-label={label || undefined}
         aria-expanded={open}
         aria-controls={id}
         onClick={() => setOpen((o) => !o)}

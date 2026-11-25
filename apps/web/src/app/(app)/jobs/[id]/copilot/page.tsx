@@ -135,7 +135,7 @@ export default function CopilotPage() {
             {!codes.length ? (
               <EmptyState
                 title="No codes to diagnose"
-                action={<Link href={`/jobs/${job.id}`} className="text-sm font-semibold text-accent underline">Scan on Overview</Link>}
+                action={<Link href={`/jobs/${job.id}`} className="text-sm font-semibold text-accent-ink underline">Scan on Overview</Link>}
               >
                 Scan the vehicle first. With no stored codes, ask the Copilot about the symptoms instead.
               </EmptyState>

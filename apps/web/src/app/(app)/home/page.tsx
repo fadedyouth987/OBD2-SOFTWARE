@@ -89,7 +89,7 @@ export default function HomePage() {
             </Card>
           ) : null}
 
-          <Card title="Open jobs" actions={<Link href="/jobs" className="text-sm font-semibold text-accent underline">All jobs</Link>}>
+          <Card title="Open jobs" actions={<Link href="/jobs" className="text-sm font-semibold text-accent-ink underline">All jobs</Link>}>
             {error ? (
               <Banner tone="danger">{error.offline ? "You're offline; jobs will load when you're back." : error.message}</Banner>
             ) : !open ? (
@@ -102,7 +102,7 @@ export default function HomePage() {
               <ul className="divide-y divide-line">
                 {open.jobs.map((j) => (
                   <li key={j.id}>
-                    <Link href={`/jobs/${j.id}`} className="flex min-h-[56px] items-center justify-between gap-3 py-2 hover:text-accent">
+                    <Link href={`/jobs/${j.id}`} className="flex min-h-[56px] items-center justify-between gap-3 py-2 hover:text-accent-ink">
                       <span className="min-w-0">
                         <span className="block truncate font-semibold">{j.vehicle_label ?? "Unnamed vehicle"}</span>
                         <span className="block truncate text-xs text-muted">
@@ -122,7 +122,7 @@ export default function HomePage() {
         </div>
 
         <div className="space-y-4">
-          <Card title="Vehicle link" actions={<Link href="/devices" className="text-sm font-semibold text-accent underline">Devices</Link>}>
+          <Card title="Vehicle link" actions={<Link href="/devices" className="text-sm font-semibold text-accent-ink underline">Devices</Link>}>
             {connected ? (
               <p className="text-sm">
                 <Badge tone="ok">Connected</Badge> {edge.link?.adapter?.display_name ?? edge.link?.adapterId}
@@ -136,7 +136,7 @@ export default function HomePage() {
               <p className="text-sm text-muted">{edge.mode === "browser-sim" ? "Browser demo is off." : "Daemon not connected."}</p>
             )}
           </Card>
-          <Card title="This month" actions={<Link href="/workshop/billing" className="text-sm font-semibold text-accent underline">Plan</Link>}>
+          <Card title="This month" actions={<Link href="/workshop/billing" className="text-sm font-semibold text-accent-ink underline">Plan</Link>}>
             <div className="space-y-3">
               <Meter label="AI diagnoses & questions" used={me.usage.ai_diagnoses_used} limit={me.entitlements.ai_diagnoses} />
               <Meter label="Schematic pages" used={me.usage.schematic_pages_used} limit={me.entitlements.schematic_pages} />

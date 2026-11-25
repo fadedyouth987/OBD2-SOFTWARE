@@ -190,7 +190,7 @@ export function SafetyConfirmModal(props: SafetyConfirmProps) {
                     aria-hidden
                     className={cx(
                       "font-bold",
-                      c.state === "ok" ? "text-ok" : c.state === "fail" ? "text-danger" : "text-warn",
+                      c.state === "ok" ? "text-ok" : c.state === "fail" ? "text-danger-ink" : "text-warn",
                     )}
                   >
                     {c.state === "ok" ? "✓" : c.state === "fail" ? "✕" : "?"}

@@ -63,7 +63,7 @@ export function ActiveModeNotice({ what }: { what: string }) {
       }
     >
       {what} needs Active mode. Every action still asks for its own safety confirmation.
-      {error ? <span className="mt-1 block text-danger">{error}</span> : null}
+      {error ? <span className="mt-1 block text-danger-ink">{error}</span> : null}
     </Banner>
   );
 }

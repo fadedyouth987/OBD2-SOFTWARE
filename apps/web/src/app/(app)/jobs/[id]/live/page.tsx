@@ -93,7 +93,7 @@ export default function LivePage() {
 
   if (!connected) {
     return (
-      <EmptyState title="No live data" action={<Link href="/devices" className="text-sm font-semibold text-accent underline">Connect a device</Link>}>
+      <EmptyState title="No live data" action={<Link href="/devices" className="text-sm font-semibold text-accent-ink underline">Connect a device</Link>}>
         Live data streams while a vehicle is connected. {edge.ready ? "Choose an adapter on Devices." : "The diagnostic daemon isn't connected."}
       </EmptyState>
     );

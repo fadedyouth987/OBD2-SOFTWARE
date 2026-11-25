@@ -144,7 +144,7 @@ export default function CloseoutPage() {
             {form.publish_case ? (
               <Field label="Engine family" value={form.engine_family} onChange={(e) => setForm({ ...form, engine_family: e.target.value })} hint="e.g. Barra 4.0 I6" />
             ) : null}
-            {publishErr ? <p className="mt-2 text-sm text-danger">{publishErr}</p> : null}
+            {publishErr ? <p className="mt-2 text-sm text-danger-ink">{publishErr}</p> : null}
           </fieldset>
           {error ? <Banner tone="danger" title="Couldn't close the job">{error}</Banner> : null}
           <div className="flex flex-wrap gap-2">

@@ -12,7 +12,7 @@ const BUTTON_TONE: Record<string, string> = {
   primary: "bg-accent text-white hover:brightness-110 border-transparent",
   blue: "bg-blue text-white hover:brightness-110 border-transparent",
   secondary: "bg-raised text-text border-line hover:border-muted",
-  danger: "bg-danger-soft text-danger border-danger/50 hover:bg-danger/20",
+  danger: "bg-danger-soft text-danger-ink border-danger/50 hover:bg-danger/20",
   ghost: "bg-transparent text-muted border-transparent hover:text-text hover:bg-raised",
 };
 
@@ -123,8 +123,8 @@ const BADGE_TONE: Record<Tone, string> = {
   neutral: "bg-raised text-muted border-line",
   ok: "bg-ok-soft text-ok border-ok/40",
   warn: "bg-warn-soft text-warn border-warn/40",
-  danger: "bg-danger-soft text-danger border-danger/40",
-  info: "bg-blue-soft text-blue border-blue/40",
+  danger: "bg-danger-soft text-danger-ink border-danger/40",
+  info: "bg-blue-soft text-blue-ink border-blue/40",
   accent: "bg-accent text-white border-transparent",
 };
 
@@ -235,7 +235,7 @@ export const Field = forwardRef<HTMLInputElement, FieldProps>(function Field(
         {...rest}
       />
       {error || hint ? (
-        <p id={`${fid}-help`} className={cx("mt-1 text-xs", error ? "text-danger" : "text-faint")}>
+        <p id={`${fid}-help`} className={cx("mt-1 text-xs", error ? "text-danger-ink" : "text-faint")}>
           {error ?? hint}
         </p>
       ) : null}
@@ -257,7 +257,7 @@ export function TextArea({
     <div className={className}>
       <label htmlFor={fid} className="block text-xs font-semibold text-muted">
         {label}
-        {rest.required ? <span className="text-danger"> *</span> : null}
+        {rest.required ? <span className="text-danger-ink"> *</span> : null}
       </label>
       <textarea
         id={fid}
@@ -270,7 +270,7 @@ export function TextArea({
         {...rest}
       />
       {error || hint ? (
-        <p id={`${fid}-help`} className={cx("mt-1 text-xs", error ? "text-danger" : "text-faint")}>
+        <p id={`${fid}-help`} className={cx("mt-1 text-xs", error ? "text-danger-ink" : "text-faint")}>
           {error ?? hint}
         </p>
       ) : null}

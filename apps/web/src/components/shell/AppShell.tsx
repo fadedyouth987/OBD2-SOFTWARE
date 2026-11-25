@@ -60,12 +60,13 @@ function WorkshopSwitcher() {
   if (!me) return null;
   const label = (
     <span className="flex min-w-0 flex-col items-start leading-tight">
-      <span className="max-w-[160px] truncate">{me.workspace.name}</span>
+      <span className="max-w-[160px] truncate">{me.workspace.name}</span>{" "}
       <span className="text-[11px] font-normal text-muted">{(ROLE_LABEL[me.workspace.role as TeamRole] ?? me.workspace.role).toLowerCase()}</span>
+      <span className="sr-only">. Switch workshop</span>
     </span>
   );
   return (
-    <Menu label={`Workshop: ${me.workspace.name}. Switch workshop`} button={label} align="left">
+    <Menu label="" button={label} align="left">
       {(close) => (
         <div>
           <p className="px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-faint">Workshops</p>
@@ -87,7 +88,7 @@ function WorkshopSwitcher() {
               {w.tenant_id === me.workspace.tenant_id ? <span aria-label="current">✓</span> : null}
             </MenuItem>
           ))}
-          {error ? <p className="px-2.5 py-1 text-xs text-danger">{error}</p> : null}
+          {error ? <p className="px-2.5 py-1 text-xs text-danger-ink">{error}</p> : null}
         </div>
       )}
     </Menu>
@@ -150,12 +151,12 @@ function DeviceChip() {
     <Link
       href="/devices"
       className="flex min-h-[40px] max-w-[220px] items-center gap-2 rounded-lg border border-line bg-raised px-2.5 text-xs hover:border-muted"
-      aria-label={`Device: ${text}${sub ? `, ${sub}` : ""}. Open Devices`}
     >
       <span aria-hidden className={cx("h-2.5 w-2.5 shrink-0 rounded-full", tone)} />
       <span className="flex min-w-0 flex-col leading-tight">
-        <span className="truncate font-semibold">{text}</span>
+        <span className="truncate font-semibold">{text}</span>{" "}
         {sub ? <span className="truncate text-[11px] text-muted">{sub}</span> : null}
+        <span className="sr-only">. Open Devices</span>
       </span>
       {mode === "browser-sim" ? <Badge tone="warn">DEMO</Badge> : null}
     </Link>
@@ -208,7 +209,7 @@ function UsageChip() {
       title="Plan and usage"
     >
       <span className="font-semibold">{TIER_LABEL[me.entitlements.tier]} plan</span>
-      <span className={cx("tabular text-[11px]", pct >= 1 ? "text-danger" : pct >= 0.8 ? "text-warn" : "text-muted")}>
+      <span className={cx("tabular text-[11px]", pct >= 1 ? "text-danger-ink" : pct >= 0.8 ? "text-warn" : "text-muted")}>
         AI {used}/{limit} this month
       </span>
     </Link>

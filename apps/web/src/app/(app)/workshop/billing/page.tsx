@@ -144,7 +144,7 @@ function BillingInner() {
               {state.immo_entitled ? <Badge tone="accent">IMMO add-on</Badge> : null}
             </p>
             {state.trial_ends_at ? <p>Trial ends {formatDate(state.trial_ends_at)}.</p> : null}
-            {state.billing_grace_until ? <p className="text-danger">Paid features stay on until {formatDateTime(state.billing_grace_until)}.</p> : null}
+            {state.billing_grace_until ? <p className="text-danger-ink">Paid features stay on until {formatDateTime(state.billing_grace_until)}.</p> : null}
             <p className="text-muted">
               {state.seats} seat{state.seats === 1 ? "" : "s"} · {state.sites} site{state.sites === 1 ? "" : "s"}
             </p>
