@@ -1,22 +1,32 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { AuthProvider } from "@/context/auth";
+import { THEME_BOOT_SCRIPT } from "@/components/shell/theme";
+import { APP_NAME } from "@/lib/config";
 
-// System font stack for now; DESIGN.md (A-DES-5) picks the type before Task 4.1.
-// Avoids next/font/google, which needs network access at build time.
+// DESIGN.md asks for Inter + JetBrains Mono; they're used when installed and
+// fall back to the system stack (no build-time font download).
 
 export const metadata: Metadata = {
-  title: "OBD2 Diagnostics",
-  description: "AI automotive diagnostics",
+  title: { default: APP_NAME, template: `%s · ${APP_NAME}` },
+  description: "Workshop diagnostics: scan, live data, AI root cause and customer reports.",
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export const viewport: Viewport = {
+  themeColor: "#0c0f14",
+  width: "device-width",
+  initialScale: 1,
+};
+
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
-      <body className="antialiased">{children}</body>
+    <html lang="en-AU" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
+      </head>
+      <body className="antialiased">
+        <AuthProvider>{children}</AuthProvider>
+      </body>
     </html>
   );
 }
