@@ -49,6 +49,7 @@ def _row_json(r: CustomDbcFile) -> dict:
         "message_count": r.message_count,
         "sha256": r.sha256,
         "created_at": r.created_at.isoformat() if r.created_at else None,
+        "created_by": str(r.created_by) if r.created_by else None,
     }
 
 

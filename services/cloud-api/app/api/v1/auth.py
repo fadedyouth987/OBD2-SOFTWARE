@@ -437,6 +437,19 @@ def switch_workspace(req: SwitchWorkspaceRequest, principal: RequirePrincipal) -
     }
 
 
+def _ai_engine() -> dict:
+    from app.services.llm import configured_llm
+
+    try:
+        provider = configured_llm()
+    except Exception:  # noqa: BLE001 - a misconfigured model must not break /me
+        provider = None
+    return {
+        "model_configured": provider is not None,
+        "model_label": provider.label if provider else None,
+    }
+
+
 @router.get("/me")
 def me(principal: RequirePrincipal) -> dict:
     """Everything the app shell shows: who, which workshop, plan, usage, entitlements."""
@@ -476,4 +489,6 @@ def me(principal: RequirePrincipal) -> dict:
         "immo_feature_enabled": immo_feature_enabled(),
         "platform_admin": is_platform_admin(principal.user_id),
         "dev_login_enabled": _dev_login_enabled(),
+        # Which engine a diagnosis will use: a model (counts against quota) or the free rules.
+        "ai": _ai_engine(),
     }

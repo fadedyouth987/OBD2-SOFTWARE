@@ -229,11 +229,7 @@ def _attach_diagnosis(principal, session_id: str, req: DiagnoseRequest, result: 
         row.diagnosis = {
             "dtcs": list(req.dtcs),
             "vehicle_profile": req.vehicle_profile,
-            "result": {
-                k: v
-                for k, v in result.items()
-                if not k.startswith("quota_") and k not in {"fallback_text"}
-            },
+            "result": {k: v for k, v in result.items() if k not in {"quota_used", "quota_limit"}},
             "at": datetime.now(UTC).isoformat(),
         }
 

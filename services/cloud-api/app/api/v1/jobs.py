@@ -205,6 +205,14 @@ def _with_access(row: DiagnosticSession, principal) -> dict[str, Any]:
     return out
 
 
+def _detail(store, row: DiagnosticSession, principal) -> dict[str, Any]:
+    """``_with_access`` plus the technician's name (single-job responses)."""
+    out = _with_access(row, principal)
+    tech = store.get(User, row.user_id) if row.user_id else None
+    out["technician_name"] = (tech.display_name or tech.email) if tech else None
+    return out
+
+
 def _get(store, tenant_id: UUID, job_id: str) -> DiagnosticSession:
     try:
         jid = UUID(job_id)
@@ -234,7 +242,7 @@ def start_job(req: JobStart, principal: RequirePrincipal) -> dict[str, Any]:
                 .one_or_none()
             )
             if existing is not None:
-                return _with_access(existing, principal)
+                return _detail(store, existing, principal)
         row = DiagnosticSession(
             id=uuid4(),
             tenant_id=principal.tenant_id,
@@ -264,7 +272,7 @@ def start_job(req: JobStart, principal: RequirePrincipal) -> dict[str, Any]:
         store.flush()
         store.refresh(row)
         inc("jobs_started")
-        return _with_access(row, principal)
+        return _detail(store, row, principal)
 
 
 @router.get("")
@@ -308,10 +316,7 @@ def list_jobs(
 def get_job(job_id: str, principal: RequirePrincipal) -> dict[str, Any]:
     with tenant_session(principal.tenant_id) as store:
         row = _get(store, principal.tenant_id, job_id)
-        out = _with_access(row, principal)
-        tech = store.get(User, row.user_id) if row.user_id else None
-        out["technician_name"] = (tech.display_name or tech.email) if tech else None
-        return out
+        return _detail(store, row, principal)
 
 
 @router.post("/{job_id}/assign")
@@ -328,11 +333,8 @@ def assign_job(job_id: str, req: JobAssign, principal: RequirePrincipal) -> dict
         row.user_id = req.user_id
         row.updated_at = datetime.now(UTC)
         store.flush()
-        out = _with_access(row, principal)
-        tech = store.get(User, req.user_id)
-        out["technician_name"] = (tech.display_name or tech.email) if tech else None
         inc("jobs_reassigned")
-        return out
+        return _detail(store, row, principal)
 
 
 @router.patch("/{job_id}")
@@ -385,7 +387,7 @@ def update_job(job_id: str, req: JobUpdate, principal: RequirePrincipal) -> dict
             row.diagnosis = req.diagnosis
         row.updated_at = datetime.now(UTC)
         store.flush()
-        return _with_access(row, principal)
+        return _detail(store, row, principal)
 
 
 @router.post("/{job_id}/close")
@@ -453,7 +455,7 @@ def close_job(job_id: str, req: JobClose, principal: RequirePrincipal) -> dict[s
         row.updated_at = now
         store.flush()
         inc("jobs_closed")
-        return _with_access(row, principal)
+        return _detail(store, row, principal)
 
 
 @router.get("/{job_id}/report")
