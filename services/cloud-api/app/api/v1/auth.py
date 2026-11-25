@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, status
@@ -277,6 +278,8 @@ def signup(req: SignupRequest) -> dict:
                     email=email,
                     display_name=display[:120],
                     password_hash=hash_password(req.password),
+                    # Signing up signs you in.
+                    last_login_at=datetime.now(UTC),
                 )
             )
             session.flush()
