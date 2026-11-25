@@ -15,7 +15,9 @@ interface AuthValue {
   offline: boolean;
   error: string | null;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (input: { email: string; password: string; display_name: string; workshop_name: string }) => Promise<void>;
+  signUp: (input: { email: string; password: string; display_name: string; workshop_name: string; invite_token?: string }) => Promise<void>;
+  /** Join a workshop from an invite link while signed in; switches to it. */
+  acceptInvite: (inviteToken: string) => Promise<void>;
   signOut: () => void;
   switchWorkspace: (tenantId: string) => Promise<void>;
   refresh: () => Promise<void>;
@@ -155,7 +157,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const signUp = useCallback(
-    async (input: { email: string; password: string; display_name: string; workshop_name: string }) => {
+    async (input: { email: string; password: string; display_name: string; workshop_name: string; invite_token?: string }) => {
       const grant = await api<SessionGrant>("/api/v1/auth/signup", { body: input });
       await adopt(grant);
     },
@@ -173,13 +175,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [adopt, token],
   );
 
+  const acceptInvite = useCallback(
+    async (inviteToken: string) => {
+      const grant = await api<SessionGrant>("/api/v1/team/invites/accept", { body: { token: inviteToken }, token });
+      await adopt(grant);
+    },
+    [adopt, token],
+  );
+
   const refresh = useCallback(async () => {
     if (token) await load(token);
   }, [load, token]);
 
   const value = useMemo<AuthValue>(
-    () => ({ status, token, me, offline, error, signIn, signUp, signOut: clear, switchWorkspace, refresh }),
-    [status, token, me, offline, error, signIn, signUp, clear, switchWorkspace, refresh],
+    () => ({ status, token, me, offline, error, signIn, signUp, acceptInvite, signOut: clear, switchWorkspace, refresh }),
+    [status, token, me, offline, error, signIn, signUp, acceptInvite, clear, switchWorkspace, refresh],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

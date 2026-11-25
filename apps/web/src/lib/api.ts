@@ -396,3 +396,57 @@ export interface ImmoSessionStart {
   ecu_rx: number;
   profile_id: string;
 }
+
+// --- Team (seats, sites, invites) ---------------------------------------------
+
+export type TeamRole = "OWNER" | "LEAD_TECH" | "TECH";
+
+export interface TeamMember {
+  user_id: string;
+  email: string;
+  display_name: string;
+  role: TeamRole;
+  site_id: string | null;
+  joined_at: string | null;
+  you: boolean;
+}
+
+export interface TeamInvite {
+  id: string;
+  email: string;
+  role: TeamRole;
+  site_id: string | null;
+  created_at: string | null;
+  expires_at: string;
+  expired: boolean;
+}
+
+export interface TeamSite {
+  id: string;
+  name: string;
+  members: number;
+}
+
+export interface Team {
+  can_manage: boolean;
+  seats: { used: number; pending: number; limit: number };
+  sites_cap: { used: number; limit: number };
+  members: TeamMember[];
+  invites: TeamInvite[];
+  sites: TeamSite[];
+}
+
+export interface CreatedInvite {
+  invite: TeamInvite;
+  token: string;
+  invite_url: string;
+}
+
+export interface InviteLookup {
+  workshop: string;
+  email: string;
+  role: TeamRole;
+  state: "open" | "expired" | "used" | "revoked";
+}
+
+export const ROLE_LABEL: Record<TeamRole, string> = { OWNER: "Owner", LEAD_TECH: "Lead technician", TECH: "Technician" };

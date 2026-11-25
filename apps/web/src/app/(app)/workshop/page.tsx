@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { TeamCard } from "@/components/team/TeamCard";
 import { Badge, Banner, Button, ButtonLink, Card, PageHeader } from "@/components/ui";
 import { useAuth } from "@/context/auth";
 import { TIER_LABEL } from "@/lib/entitlements";
@@ -54,6 +55,7 @@ export default function WorkshopPage() {
             <dd>{me.user.last_login_at ? formatDateTime(me.user.last_login_at) : "—"}</dd>
           </dl>
         </Card>
+        <TeamCard />
         {me.workspaces.length > 1 ? (
           <Card title="Your workshops" subtitle="Switch to work in another workshop you belong to.">
             {error ? <Banner tone="danger">{error}</Banner> : null}

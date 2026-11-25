@@ -9,6 +9,7 @@ import { useTheme } from "@/components/shell/theme";
 import { useActiveJob } from "@/context/active-job";
 import { useAuth } from "@/context/auth";
 import { useEdge } from "@/context/edge";
+import { ROLE_LABEL, type TeamRole } from "@/lib/api";
 import { APP_NAME } from "@/lib/config";
 import { TIER_LABEL } from "@/lib/entitlements";
 import { formatDateTime, relative } from "@/lib/format";
@@ -60,7 +61,7 @@ function WorkshopSwitcher() {
   const label = (
     <span className="flex min-w-0 flex-col items-start leading-tight">
       <span className="max-w-[160px] truncate">{me.workspace.name}</span>
-      <span className="text-[11px] font-normal text-muted">{me.workspace.role.toLowerCase()}</span>
+      <span className="text-[11px] font-normal text-muted">{(ROLE_LABEL[me.workspace.role as TeamRole] ?? me.workspace.role).toLowerCase()}</span>
     </span>
   );
   return (
@@ -234,7 +235,7 @@ function UserMenu() {
             <p className="truncate text-sm font-semibold">{name}</p>
             <p className="truncate text-xs text-muted">{me?.user.email}</p>
             <p className="mt-1 text-xs text-muted">
-              {me?.workspace.role.toLowerCase()} at {me?.workspace.name}
+              {me ? (ROLE_LABEL[me.workspace.role as TeamRole] ?? me.workspace.role).toLowerCase() : ""} at {me?.workspace.name}
             </p>
           </div>
           <MenuItem

@@ -22,7 +22,7 @@ function Step({ done, title, children, href, cta }: { done: boolean; title: stri
         <p className="text-sm text-muted">{children}</p>
       </div>
       {!done && href ? (
-        <ButtonLink href={href} size="sm">
+        <ButtonLink href={href} size="sm" className="self-center">
           {cta}
         </ButtonLink>
       ) : null}
