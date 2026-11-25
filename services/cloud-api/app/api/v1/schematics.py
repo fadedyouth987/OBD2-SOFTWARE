@@ -1,7 +1,9 @@
 """Wiring schematic uploads: PDF or image, stored privately per workshop.
 
 Pages count against the plan's monthly schematic allowance when they're
-uploaded (a PDF's page count; an image is one page). The file is checked by
+uploaded (a PDF's page count; an image is one page). Deleting a file in the
+same quota month (calendar month, Australia/Adelaide) gives its pages back;
+files from an earlier month have already been counted, so there's no refund. The file is checked by
 its content, not its name, and stored before the pages are charged; if the
 allowance is used up the stored file is deleted again, so nothing is charged
 for a refused upload.
@@ -21,7 +23,14 @@ from app.db.models import WiringSchematic
 from app.db.session import tenant_session
 from app.observability.metrics import inc
 from app.services import object_store
-from app.services.billing import charge_schematic_pages, quotas_for
+from app.services.billing import (
+    charge_schematic_pages,
+    current_quota_period,
+    quotas_for,
+    refund_schematic_pages,
+    schematic_pages_used,
+)
+from app.services.permissions import Permission, require_own_or
 
 router = APIRouter(prefix="/api/v1/schematics", tags=["schematics"])
 
@@ -69,7 +78,11 @@ def count_pages(data: bytes, content_type: str) -> int:
 
 
 def _row_json(r: WiringSchematic) -> dict:
+    refundable = bool(r.pages_charged) and r.charged_period == current_quota_period()
     return {
+        "pages_charged": int(r.pages_charged or 0),
+        "refundable_pages": int(r.pages_charged or 0) if refundable else 0,
+        "uploaded_by": str(r.uploaded_by) if r.uploaded_by else None,
         "id": str(r.id),
         "title": r.title,
         "vehicle_profile": r.vehicle_profile,
@@ -88,7 +101,12 @@ def list_schematics(principal: RequirePrincipal, vehicle_profile: str | None = N
         if vehicle_profile:
             query = query.filter(WiringSchematic.vehicle_profile == vehicle_profile)
         rows = query.order_by(WiringSchematic.created_at.desc()).limit(200).all()
-        return {"items": [_row_json(r) for r in rows], "pages_limit": q.schematic_pages}
+        return {
+            "items": [_row_json(r) for r in rows],
+            "pages_limit": q.schematic_pages,
+            "pages_used": schematic_pages_used(session, principal.tenant_id),
+            "period_start": current_quota_period().isoformat(),
+        }
 
 
 @router.post("", status_code=201)
@@ -128,6 +146,7 @@ async def upload_schematic(
         raise HTTPException(
             status_code=503, detail="File storage is unavailable. Try again shortly."
         ) from exc
+    period = current_quota_period()
     ok, used, limit = charge_schematic_pages(principal.tenant_id, pages)
     if not ok:
         try:
@@ -156,6 +175,8 @@ async def upload_schematic(
             size_bytes=len(data),
             sha256=hashlib.sha256(data).hexdigest(),
             uploaded_by=principal.user_id,
+            pages_charged=pages,
+            charged_period=period,
         )
         session.add(row)
         session.flush()
@@ -193,13 +214,24 @@ def download_schematic(schematic_id: UUID, principal: RequirePrincipal) -> Respo
     )
 
 
-@router.delete("/{schematic_id}", status_code=204)
-def delete_schematic(schematic_id: UUID, principal: RequirePrincipal) -> None:
+@router.delete("/{schematic_id}")
+def delete_schematic(schematic_id: UUID, principal: RequirePrincipal) -> dict:
+    """Delete a file; pages charged this quota month come back to the allowance."""
+    q = quotas_for(principal.tier)
     with tenant_session(principal.tenant_id) as session:
         row = _owned(session, principal, schematic_id)
+        require_own_or(principal, row.uploaded_by, Permission.MANAGE_SHARED_FILES)
         key = row.s3_key
+        refunded = refund_schematic_pages(
+            session, principal.tenant_id, int(row.pages_charged or 0), row.charged_period
+        )
         session.delete(row)
+        session.flush()
+        used = schematic_pages_used(session, principal.tenant_id)
     try:
         object_store.delete(key)
     except object_store.StorageError:
         pass  # The row is gone, so the object is unreachable; storage lifecycle can sweep it.
+    if refunded:
+        inc("schematic_pages_refunded", refunded)
+    return {"refunded_pages": refunded, "pages_used": used, "pages_limit": q.schematic_pages}

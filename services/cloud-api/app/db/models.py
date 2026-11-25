@@ -148,6 +148,34 @@ class TenantInvite(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class OwnershipTransfer(Base):
+    """An Owner's offer to hand the workshop to a member (migration 008)."""
+
+    __tablename__ = "ownership_transfers"
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"))
+    from_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    to_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = _created()
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(Text, default="PENDING")
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class TeamAuditEvent(Base):
+    """Append-only team change log (migration 008)."""
+
+    __tablename__ = "team_audit_events"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"))
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    action: Mapped[str] = mapped_column(Text)
+    subject_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    subject_email: Mapped[str | None] = mapped_column(Text)
+    detail: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+
 class Vehicle(Base):
     __tablename__ = "vehicles"
     id: Mapped[uuid.UUID] = _uuid_pk()
@@ -250,6 +278,8 @@ class WiringSchematic(Base):
     size_bytes: Mapped[int | None] = mapped_column(Integer)
     sha256: Mapped[str | None] = mapped_column(Text)
     uploaded_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    pages_charged: Mapped[int] = mapped_column(Integer, default=0)
+    charged_period: Mapped[date | None] = mapped_column(Date)
     created_at: Mapped[datetime] = _created()
 
 

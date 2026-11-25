@@ -56,6 +56,39 @@ try:
         stripe_past_due_grace_days: int = 7
         public_app_url: str = "http://localhost:3000"
         immo_feature_enabled: bool = False
+        # Connection pools: one engine per role for the whole process.
+        db_pool_size: int = 5
+        db_max_overflow: int = 10
+        db_pool_recycle_s: int = 1800
+        db_pool_timeout_s: int = 10
+        owner_db_pool_size: int = 2
+        owner_db_max_overflow: int = 3
+        # Sign-in. Password accounts are for dev and self-hosted installs; production
+        # uses OIDC (AWS Cognito in ap-southeast-2). See docs/dev/sign-in-oidc.md.
+        auth_password_enabled: bool = True
+        oidc_issuer: str = ""
+        oidc_client_id: str = ""
+        oidc_client_secret: str = ""
+        oidc_redirect_uri: str = ""
+        oidc_scopes: str = "openid email profile"
+        oidc_provider_name: str = "AWS Cognito"
+        oidc_logout_url: str = ""
+        # Email: none | console | file | ses. See docs/dev/email.md.
+        email_provider: str = "none"
+        email_from: str = ""
+        email_reply_to: str = ""
+        email_mailbox_dir: str = ""
+        ses_configuration_set: str = ""
+        # AI: none | bedrock. With none, diagnoses use the built-in rules (no quota).
+        llm_provider: str = "none"
+        bedrock_model_id: str = ""
+        llm_timeout_s: float = 25.0
+        # Licensed OEM procedure feed (optional). See docs/dev/oem-procedures.md.
+        procedure_provider_name: str = ""
+        procedure_provider_feed_url: str = ""
+        procedure_provider_api_key: str = ""
+        # Days before an accreditation lapses that reminders go out.
+        accreditation_reminder_days: str = "30,7"
 
         @model_validator(mode="after")
         def _check_residency(self) -> "Settings":
@@ -122,6 +155,39 @@ except ImportError:
         stripe_past_due_grace_days: int = 7
         public_app_url: str = "http://localhost:3000"
         immo_feature_enabled: bool = False
+        # Connection pools: one engine per role for the whole process.
+        db_pool_size: int = 5
+        db_max_overflow: int = 10
+        db_pool_recycle_s: int = 1800
+        db_pool_timeout_s: int = 10
+        owner_db_pool_size: int = 2
+        owner_db_max_overflow: int = 3
+        # Sign-in. Password accounts are for dev and self-hosted installs; production
+        # uses OIDC (AWS Cognito in ap-southeast-2). See docs/dev/sign-in-oidc.md.
+        auth_password_enabled: bool = True
+        oidc_issuer: str = ""
+        oidc_client_id: str = ""
+        oidc_client_secret: str = ""
+        oidc_redirect_uri: str = ""
+        oidc_scopes: str = "openid email profile"
+        oidc_provider_name: str = "AWS Cognito"
+        oidc_logout_url: str = ""
+        # Email: none | console | file | ses. See docs/dev/email.md.
+        email_provider: str = "none"
+        email_from: str = ""
+        email_reply_to: str = ""
+        email_mailbox_dir: str = ""
+        ses_configuration_set: str = ""
+        # AI: none | bedrock. With none, diagnoses use the built-in rules (no quota).
+        llm_provider: str = "none"
+        bedrock_model_id: str = ""
+        llm_timeout_s: float = 25.0
+        # Licensed OEM procedure feed (optional). See docs/dev/oem-procedures.md.
+        procedure_provider_name: str = ""
+        procedure_provider_feed_url: str = ""
+        procedure_provider_api_key: str = ""
+        # Days before an accreditation lapses that reminders go out.
+        accreditation_reminder_days: str = "30,7"
 
         class Config:
             env_file = _ENV_FILES

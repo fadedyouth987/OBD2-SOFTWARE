@@ -27,6 +27,8 @@ from app.db.models import (
     DiagnosticSession,
     ResolvedCase,
     TelemetrySample,
+    TenantMembership,
+    User,
 )
 from app.db.session import tenant_session
 from app.db.vin import normalize_vin, resolve_secret, vin_hmac
@@ -34,6 +36,7 @@ from app.observability.metrics import inc
 from app.services.anonymizer import anonymize_case, scrub_text, scrub_value
 from app.services.embeddings import EMBEDDING_MODEL, embed_canonical_text
 from app.services.identity import user_profile
+from app.services.permissions import Permission, can, require, require_own_or
 
 router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
 
@@ -88,6 +91,10 @@ class JobUpdate(BaseModel):
     dtcs: list[DtcIn] | None = None
     alerts: list[AlertIn] | None = None
     diagnosis: dict[str, Any] | None = None
+
+
+class JobAssign(BaseModel):
+    user_id: UUID
 
 
 class JobClose(BaseModel):
@@ -167,6 +174,13 @@ def _job_dict(row: DiagnosticSession) -> dict[str, Any]:
     }
 
 
+def _with_access(row: DiagnosticSession, principal) -> dict[str, Any]:
+    """The job plus whether this user may change it (their own, or lead tech / owner)."""
+    out = _job_dict(row)
+    out["can_edit"] = row.user_id == principal.user_id or can(principal, Permission.MANAGE_ALL_JOBS)
+    return out
+
+
 def _get(store, tenant_id: UUID, job_id: str) -> DiagnosticSession:
     try:
         jid = UUID(job_id)
@@ -196,7 +210,7 @@ def start_job(req: JobStart, principal: RequirePrincipal) -> dict[str, Any]:
                 .one_or_none()
             )
             if existing is not None:
-                return _job_dict(existing)
+                return _with_access(existing, principal)
         row = DiagnosticSession(
             id=uuid4(),
             tenant_id=principal.tenant_id,
@@ -223,7 +237,7 @@ def start_job(req: JobStart, principal: RequirePrincipal) -> dict[str, Any]:
         store.flush()
         store.refresh(row)
         inc("jobs_started")
-        return _job_dict(row)
+        return _with_access(row, principal)
 
 
 @router.get("")
@@ -245,8 +259,19 @@ def list_jobs(
             .group_by(DiagnosticSession.status)
             .all()
         )
+        names = dict(
+            store.query(User.id, func.coalesce(func.nullif(User.display_name, ""), User.email))
+            .join(TenantMembership, TenantMembership.user_id == User.id)
+            .filter(TenantMembership.tenant_id == principal.tenant_id)
+            .all()
+        )
+        jobs = []
+        for r in rows:
+            item = _with_access(r, principal)
+            item["technician_name"] = names.get(r.user_id) if r.user_id else None
+            jobs.append(item)
         return {
-            "jobs": [_job_dict(r) for r in rows],
+            "jobs": jobs,
             "open": int(counts.get("OPEN", 0)),
             "closed": int(counts.get("CLOSED", 0)),
         }
@@ -255,13 +280,39 @@ def list_jobs(
 @router.get("/{job_id}")
 def get_job(job_id: str, principal: RequirePrincipal) -> dict[str, Any]:
     with tenant_session(principal.tenant_id) as store:
-        return _job_dict(_get(store, principal.tenant_id, job_id))
+        row = _get(store, principal.tenant_id, job_id)
+        out = _with_access(row, principal)
+        tech = store.get(User, row.user_id) if row.user_id else None
+        out["technician_name"] = (tech.display_name or tech.email) if tech else None
+        return out
+
+
+@router.post("/{job_id}/assign")
+def assign_job(job_id: str, req: JobAssign, principal: RequirePrincipal) -> dict[str, Any]:
+    """Hand an open job to another technician (lead tech or owner)."""
+    require(principal, Permission.MANAGE_ALL_JOBS)
+    with tenant_session(principal.tenant_id) as store:
+        row = _get(store, principal.tenant_id, job_id)
+        if row.status != "OPEN":
+            raise HTTPException(status_code=409, detail="Only open jobs can be reassigned")
+        member = store.get(TenantMembership, (principal.tenant_id, req.user_id))
+        if member is None:
+            raise HTTPException(status_code=422, detail="That person isn't on your team")
+        row.user_id = req.user_id
+        row.updated_at = datetime.now(UTC)
+        store.flush()
+        out = _with_access(row, principal)
+        tech = store.get(User, req.user_id)
+        out["technician_name"] = (tech.display_name or tech.email) if tech else None
+        inc("jobs_reassigned")
+        return out
 
 
 @router.patch("/{job_id}")
 def update_job(job_id: str, req: JobUpdate, principal: RequirePrincipal) -> dict[str, Any]:
     with tenant_session(principal.tenant_id) as store:
         row = _get(store, principal.tenant_id, job_id)
+        require_own_or(principal, row.user_id, Permission.MANAGE_ALL_JOBS)
         if row.status != "OPEN":
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -298,7 +349,7 @@ def update_job(job_id: str, req: JobUpdate, principal: RequirePrincipal) -> dict
             row.diagnosis = req.diagnosis
         row.updated_at = datetime.now(UTC)
         store.flush()
-        return _job_dict(row)
+        return _with_access(row, principal)
 
 
 @router.post("/{job_id}/close")
@@ -306,6 +357,7 @@ def close_job(job_id: str, req: JobClose, principal: RequirePrincipal) -> dict[s
     case_id: str | None = None
     with tenant_session(principal.tenant_id) as store:
         row = _get(store, principal.tenant_id, job_id)
+        require_own_or(principal, row.user_id, Permission.MANAGE_ALL_JOBS)
         if row.status != "OPEN":
             raise HTTPException(status_code=409, detail="This session is already closed")
         parts = [scrub_text(p.strip())[:120] for p in req.parts_replaced if p.strip()]
@@ -365,7 +417,7 @@ def close_job(job_id: str, req: JobClose, principal: RequirePrincipal) -> dict[s
         row.updated_at = now
         store.flush()
         inc("jobs_closed")
-        return _job_dict(row)
+        return _with_access(row, principal)
 
 
 @router.get("/{job_id}/report")

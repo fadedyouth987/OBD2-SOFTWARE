@@ -17,9 +17,36 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 
 
+def _pooled(url: str, *, size: int, overflow: int) -> Engine:
+    settings = get_settings()
+    return create_engine(
+        url,
+        pool_pre_ping=True,
+        pool_size=max(1, size),
+        max_overflow=max(0, overflow),
+        pool_recycle=settings.db_pool_recycle_s,
+        pool_timeout=settings.db_pool_timeout_s,
+    )
+
+
 @lru_cache
 def get_engine() -> Engine:
-    return create_engine(get_settings().database_url, pool_pre_ping=True)
+    """The tenant-scoped (RLS) role's pool, shared by every request in the process."""
+    s = get_settings()
+    return _pooled(s.database_url, size=s.db_pool_size, overflow=s.db_max_overflow)
+
+
+@lru_cache
+def owner_engine() -> Engine:
+    """The owner role's pool, for the few lookups that happen before a tenant is known.
+
+    Kept small: sign-in by email, invite lookups, Stripe webhook tenant lookups,
+    and platform-admin reviews. Everything else goes through ``tenant_session``.
+    """
+    s = get_settings()
+    return _pooled(
+        s.migration_database_url, size=s.owner_db_pool_size, overflow=s.owner_db_max_overflow
+    )
 
 
 @contextmanager

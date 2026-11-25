@@ -8,17 +8,15 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as OrmSession
 
 from app.api.deps import RequirePrincipal
-from app.config import get_settings
 from app.db.models import MembershipRole, SubscriptionTier, Tenant, TenantMembership, User
-from app.db.session import tenant_session
+from app.db.session import owner_engine, tenant_session
 from app.observability.metrics import inc
 from app.services.aasra import default_verifier
-from app.services.billing import entitlement_for, maybe_expire_grace
+from app.services.billing import entitlement_for, maybe_expire_grace, schematic_pages_used
 from app.services.flags import immo_feature_enabled
 from app.services.identity import (
     IdentityError,
@@ -30,6 +28,7 @@ from app.services.identity import (
     user_profile,
     workspaces_for,
 )
+from app.services.permissions import permission_list
 from app.services.signing import (
     SigningKeyError,
     get_public_jwk,
@@ -88,13 +87,9 @@ class DevGrantPlanRequest(BaseModel):
 
 def _existing_user_id(email: str):
     """Owner-role lookup: RLS hides users until they belong to the current tenant."""
-    engine = create_engine(get_settings().migration_database_url)
-    try:
-        with OrmSession(engine) as session:
-            row = session.query(User).filter(User.email == email).one_or_none()
-            return None if row is None else row.id
-    finally:
-        engine.dispose()
+    with OrmSession(owner_engine()) as session:
+        row = session.query(User).filter(User.email == email).one_or_none()
+        return None if row is None else row.id
 
 
 def _dev_login_enabled() -> bool:
@@ -380,7 +375,7 @@ def me(principal: RequirePrincipal) -> dict:
         ent = entitlement_for(tenant)
         usage = {
             "ai_diagnoses_used": int(tenant.ai_diagnoses_used or 0),
-            "schematic_pages_used": int(tenant.schematic_pages_used or 0),
+            "schematic_pages_used": schematic_pages_used(session, principal.tenant_id),
             "quota_period_start": (
                 tenant.ai_quota_period_start.isoformat() if tenant.ai_quota_period_start else None
             ),
@@ -399,6 +394,7 @@ def me(principal: RequirePrincipal) -> dict:
             "name": principal.tenant_name,
             "role": principal.role.value,
             "aasra_verified": principal.aasra_verified,
+            "permissions": permission_list(principal.role),
         },
         "workspaces": _workspace_list(principal.user_id),
         "entitlements": ent,

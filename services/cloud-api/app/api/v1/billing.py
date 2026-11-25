@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from app.api.deps import Principal, RequirePrincipal
 from app.config import get_settings
-from app.db.models import MembershipRole, SubscriptionTier, Tenant
+from app.db.models import SubscriptionTier, Tenant
 from app.db.session import tenant_session
 from app.services.billing import (
     ACTIONABLE_EVENTS,
@@ -26,6 +26,7 @@ from app.services.billing import (
     maybe_expire_grace,
     resolve_event_tenant_id,
 )
+from app.services.permissions import Permission, require
 
 router = APIRouter(prefix="/api/v1/billing", tags=["billing"])
 log = logging.getLogger(__name__)
@@ -40,11 +41,8 @@ __all__ = [
 
 
 def require_owner(principal: Principal) -> None:
-    if principal.role != MembershipRole.OWNER:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the workspace owner can change the billing plan",
-        )
+    """Billing and plan changes are the Owner's alone (lead techs included out)."""
+    require(principal, Permission.MANAGE_BILLING)
 
 
 BILLING_PATH = "/workshop/billing"

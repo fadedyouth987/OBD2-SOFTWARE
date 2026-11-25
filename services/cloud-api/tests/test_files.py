@@ -15,6 +15,7 @@ os.environ.setdefault("CLOUD_SIGNING_PRIVATE_KEY_HEX", "cd" * 32)
 
 from app.api.v1.dbc import message_count  # noqa: E402
 from app.api.v1.schematics import count_pages, sniff_type  # noqa: E402
+from app.config import get_settings  # noqa: E402
 from app.main import app  # noqa: E402
 from app.services.object_store import key_belongs_to, object_key  # noqa: E402
 
@@ -175,8 +176,62 @@ def test_schematic_upload_charges_pages_and_streams_back(client):
         client.delete(f"/api/v1/schematics/{sid}", headers=_auth(other["access_token"])).status_code
         == 404
     )
-    assert client.delete(f"/api/v1/schematics/{sid}", headers=_auth(tok)).status_code == 204
+    assert listed["items"][0]["refundable_pages"] == 3
+    deleted = client.delete(f"/api/v1/schematics/{sid}", headers=_auth(tok))
+    assert deleted.status_code == 200, deleted.text
+    # Deleted in the same quota month: the 3 pages come back.
+    assert deleted.json() == {"refunded_pages": 3, "pages_used": 0, "pages_limit": 25}
     assert client.get(f"/api/v1/schematics/{sid}/file", headers=_auth(tok)).status_code == 404
+    me = client.get("/api/v1/auth/me", headers=_auth(tok)).json()
+    assert me["usage"]["schematic_pages_used"] == 0
+
+
+def test_schematic_from_an_earlier_month_is_not_refunded(client):
+    o = _owner(client, "PRO")
+    tok = o["access_token"]
+    res = client.post(
+        "/api/v1/schematics",
+        files={"file": ("loom.pdf", _pdf(4), "application/pdf")},
+        headers=_auth(tok),
+    )
+    assert res.status_code == 201, res.text
+    sid = res.json()["schematic"]["id"]
+    engine = create_engine(get_settings().migration_database_url)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE wiring_schematics SET charged_period = charged_period - interval '1 month'"
+                " WHERE id = :id"
+            ),
+            {"id": sid},
+        )
+    engine.dispose()
+    listed = client.get("/api/v1/schematics", headers=_auth(tok)).json()
+    assert listed["items"][0]["refundable_pages"] == 0
+    deleted = client.delete(f"/api/v1/schematics/{sid}", headers=_auth(tok)).json()
+    assert deleted["refunded_pages"] == 0 and deleted["pages_used"] == 4
+
+
+def test_refund_never_takes_usage_below_zero(client):
+    from app.db.session import tenant_session
+    from app.services.billing import current_quota_period, refund_schematic_pages
+
+    o = _owner(client, "PRO")
+    tenant_id = uuid.UUID(o["tenant_id"])
+    with tenant_session(tenant_id) as session:
+        session.execute(
+            text(
+                "UPDATE tenants SET schematic_pages_used = 2, ai_quota_period_start = :p "
+                "WHERE id = :id"
+            ),
+            {"p": current_quota_period(), "id": tenant_id},
+        )
+        assert refund_schematic_pages(session, tenant_id, 5, current_quota_period()) == 5
+        used = session.execute(
+            text("SELECT schematic_pages_used FROM tenants WHERE id = :id"), {"id": tenant_id}
+        ).scalar_one()
+        assert used == 0
+        assert refund_schematic_pages(session, tenant_id, 5, None) == 0
 
 
 def test_dbc_storage_is_can_studio_only_and_round_trips(client):

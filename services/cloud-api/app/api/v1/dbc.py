@@ -19,6 +19,7 @@ from app.db.models import CustomDbcFile
 from app.db.session import tenant_session
 from app.services import object_store
 from app.services.billing import quotas_for
+from app.services.permissions import Permission, require_own_or
 
 router = APIRouter(prefix="/api/v1/dbc", tags=["dbc"])
 
@@ -141,6 +142,7 @@ def download_dbc(dbc_id: UUID, principal: RequirePrincipal) -> Response:
 def delete_dbc(dbc_id: UUID, principal: RequirePrincipal) -> None:
     with tenant_session(principal.tenant_id) as session:
         row = _owned(session, principal, dbc_id)
+        require_own_or(principal, row.created_by, Permission.MANAGE_SHARED_FILES)
         key = row.s3_key
         session.delete(row)
     try:

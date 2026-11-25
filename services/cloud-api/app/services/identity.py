@@ -19,12 +19,11 @@ import os
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from functools import lru_cache
 from uuid import UUID
 
-from sqlalchemy import Engine, create_engine, text
+from sqlalchemy import text
 
-from app.config import get_settings
+from app.db.session import owner_engine
 
 SCRYPT_N = 2**15
 SCRYPT_R = 8
@@ -44,11 +43,6 @@ class IdentityError(Exception):
         super().__init__(message)
         self.message = message
         self.status_code = status_code
-
-
-@lru_cache
-def owner_engine() -> Engine:
-    return create_engine(get_settings().migration_database_url, pool_pre_ping=True, pool_size=2)
 
 
 def normalize_email(email: str) -> str:
