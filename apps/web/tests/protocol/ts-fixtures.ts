@@ -113,4 +113,23 @@ export const tsFixtures: Fixtures = {
     hint: errorHint("VERSION_UNSUPPORTED"),
     detail_json: null,
   },
+  LeaseStatusRequest: {
+    type: "LeaseStatusRequest",
+    request_id: "web_07",
+  },
+  LeaseInstallRequest: {
+    type: "LeaseInstallRequest",
+    request_id: "web_08",
+    kind: "DIAGNOSTIC",
+    lease_token: "eyJhbGciOiJFZERTQSJ9.eyJ0aWVyIjoiV09SS1NIT1AifQ.c2ln",
+  },
+  LeaseStatus: {
+    type: "LeaseStatus",
+    request_id: "web_08",
+    lease_tier: "WORKSHOP",
+    features: ["UDS_ACTIVE", "CAN_RE_PRO", "J2534"],
+    expires_at: "2026-11-25T14:00:00Z",
+    immo_expires_at: null,
+    cloud_keys_pinned: true,
+  },
 };

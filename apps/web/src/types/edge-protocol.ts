@@ -338,6 +338,69 @@ export const HeuristicAlert = z
   .describe("Pushed by the daemon.");
 export type HeuristicAlert = z.infer<typeof HeuristicAlert>;
 
+/** Which lease a LeaseInstallRequest carries: the offline diagnostic lease (lease.jwt) or a short immobilizer lease (immo_lease.jwt). */
+export const LeaseKind = z
+  .enum(["DIAGNOSTIC", "IMMO"])
+  .describe(
+    "Which lease a LeaseInstallRequest carries: the offline diagnostic lease (lease.jwt) or a short immobilizer lease (immo_lease.jwt).",
+  );
+export type LeaseKind = z.infer<typeof LeaseKind>;
+
+/** Installs a cloud-signed lease (POST /auth/edge-lease, or an immobilizer job token). The daemon verifies it against the pinned cloud keys before saving it. Request -> LeaseStatus. */
+export const LeaseInstallRequest = z
+  .object({
+    type: z.literal("LeaseInstallRequest"),
+    request_id: RequestId,
+    kind: LeaseKind,
+    lease_token: z.string().min(16).max(8192).describe("Compact JWS signed by the cloud API."),
+  })
+  .strict()
+  .describe(
+    "Installs a cloud-signed lease (POST /auth/edge-lease, or an immobilizer job token). The daemon verifies it against the pinned cloud keys before saving it. Request -> LeaseStatus.",
+  );
+export type LeaseInstallRequest = z.infer<typeof LeaseInstallRequest>;
+
+/** RFC 3339 timestamp in UTC, e.g. 2026-11-19T06:15:58Z. */
+export const Rfc3339Utc = z
+  .string()
+  .regex(new RegExp("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"))
+  .describe("RFC 3339 timestamp in UTC, e.g. 2026-11-19T06:15:58Z.");
+export type Rfc3339Utc = z.infer<typeof Rfc3339Utc>;
+
+/** The lease this connection runs under. Response to LeaseStatusRequest and LeaseInstallRequest. */
+export const LeaseStatus = z
+  .object({
+    type: z.literal("LeaseStatus"),
+    request_id: RequestId,
+    lease_tier: LeaseTier,
+    features: z
+      .array(Feature)
+      .refine((arr) => arr.every((item, i) => arr.indexOf(item) == i), "All items must be unique!"),
+    expires_at: z
+      .union([Rfc3339Utc, z.null()])
+      .describe("When the offline lease ends; null on the built-in COMMUNITY tier."),
+    immo_expires_at: z
+      .union([Rfc3339Utc, z.null()])
+      .describe("When the installed immobilizer lease ends; null when there is none."),
+    cloud_keys_pinned: z
+      .boolean()
+      .describe(
+        "False when no cloud signing key is pinned, so cloud leases and pairing tokens cannot verify (COMMUNITY tier, local pairing codes only).",
+      ),
+  })
+  .strict()
+  .describe(
+    "The lease this connection runs under. Response to LeaseStatusRequest and LeaseInstallRequest.",
+  );
+export type LeaseStatus = z.infer<typeof LeaseStatus>;
+
+/** Request -> LeaseStatus. */
+export const LeaseStatusRequest = z
+  .object({ type: z.literal("LeaseStatusRequest"), request_id: RequestId })
+  .strict()
+  .describe("Request -> LeaseStatus.");
+export type LeaseStatusRequest = z.infer<typeof LeaseStatusRequest>;
+
 export const PidSample = z
   .object({
     timestamp_us: TimestampUs,
@@ -369,13 +432,6 @@ export const Preconditions = z
     "Live readings the safety token was issued against. Null means the value could not be read (Rule 5: fail closed).",
   );
 export type Preconditions = z.infer<typeof Preconditions>;
-
-/** RFC 3339 timestamp in UTC, e.g. 2026-11-19T06:15:58Z. */
-export const Rfc3339Utc = z
-  .string()
-  .regex(new RegExp("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"))
-  .describe("RFC 3339 timestamp in UTC, e.g. 2026-11-19T06:15:58Z.");
-export type Rfc3339Utc = z.infer<typeof Rfc3339Utc>;
 
 /** Asks for a single-use safety token for one gated request. Request -> SafetyConfirmResponse. */
 export const SafetyConfirmRequest = z
@@ -429,10 +485,13 @@ export const EdgeMessage = z.discriminatedUnion("type", [
   DiagCommandResponse,
   HeuristicAlert,
   ErrorResponse,
+  LeaseStatusRequest,
+  LeaseInstallRequest,
+  LeaseStatus,
 ]);
 export type EdgeMessage = z.infer<typeof EdgeMessage>;
 /** Wire protocol version, from `x-protocol-version` in edge_ws.schema.json. */
-export const PROTOCOL_VERSION = "1.0.0";
+export const PROTOCOL_VERSION = "1.1.0";
 
 /** Every message type in the envelope. */
 export const MESSAGE_TYPES = [
@@ -451,6 +510,9 @@ export const MESSAGE_TYPES = [
   "DiagCommandResponse",
   "HeuristicAlert",
   "ErrorResponse",
+  "LeaseStatusRequest",
+  "LeaseInstallRequest",
+  "LeaseStatus",
 ] as const;
 export type MessageType = (typeof MESSAGE_TYPES)[number];
 
@@ -462,4 +524,6 @@ export const REQUEST_RESPONSE = {
   DisconnectRequest: "AdapterStatus",
   SafetyConfirmRequest: "SafetyConfirmResponse",
   DiagCommandRequest: "DiagCommandResponse",
+  LeaseStatusRequest: "LeaseStatus",
+  LeaseInstallRequest: "LeaseStatus",
 } as const satisfies Partial<Record<MessageType, MessageType>>;

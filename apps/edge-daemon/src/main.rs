@@ -24,7 +24,7 @@ use std::{
 };
 
 use edge_daemon::{
-    auth::{cloud_keys::KeyRing, unix_now},
+    auth::unix_now,
     protocol,
     safety::audit::JsonlAudit,
     server::{
@@ -67,7 +67,7 @@ fn pair(dir: &std::path::Path) -> ExitCode {
 
 async fn serve(dir: PathBuf) -> ExitCode {
     let mut cfg = ServerConfig::new(
-        KeyRing::production(),
+        edge_daemon::auth::dev_keys::keyring(),
         Arc::new(PairingStore::at(dir.join("pairing.json"))),
         Arc::new(JsonlAudit::new(dir.join("audit.jsonl"))),
     );
@@ -85,6 +85,10 @@ async fn serve(dir: PathBuf) -> ExitCode {
     }
     cfg.lease_token = std::fs::read_to_string(dir.join("lease.jwt")).ok();
     cfg.immo_lease_token = std::fs::read_to_string(dir.join("immo_lease.jwt")).ok();
+    cfg.data_dir = Some(dir.clone());
+    if let Ok(mut immo) = cfg.live_immo_lease.lock() {
+        immo.clone_from(&cfg.immo_lease_token);
+    }
     if let Ok(id) = std::env::var("EDGE_DEVICE_ID") {
         let id = id.trim();
         if !id.is_empty() {
@@ -113,21 +117,21 @@ async fn serve(dir: PathBuf) -> ExitCode {
     let min_ver = Arc::clone(&cfg.lease_min_version);
     let lease_path = dir.join("lease.jwt");
     let min_path = dir.join("lease.min_ver");
-    let mut last_lease = cfg.lease_token.clone();
     let mut last_min = min_ver.load(Ordering::SeqCst);
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(2));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tick.tick().await;
-            let new_lease = std::fs::read_to_string(&lease_path).ok();
-            if new_lease != last_lease {
-                last_lease = new_lease.clone();
-                if let Ok(mut guard) = live.lock() {
+            // Compared with the live lease under its lock: a LeaseInstallRequest
+            // writes the file and the live value together, so it is not seen as a change.
+            if let Ok(mut guard) = live.lock() {
+                let new_lease = std::fs::read_to_string(&lease_path).ok();
+                if new_lease != *guard {
                     *guard = new_lease;
+                    epoch.fetch_add(1, Ordering::SeqCst);
+                    tracing::info!("lease.jwt changed; open sessions will be asked to reconnect");
                 }
-                epoch.fetch_add(1, Ordering::SeqCst);
-                tracing::info!("lease.jwt changed; open sessions will be asked to reconnect");
             }
             if let Ok(s) = std::fs::read_to_string(&min_path) {
                 if let Ok(n) = s.trim().parse::<i64>() {

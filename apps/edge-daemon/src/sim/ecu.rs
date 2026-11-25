@@ -93,6 +93,9 @@ pub struct EcuSpec {
     pub security: Option<SecuritySpec>,
     /// Routine identifiers (UDS 0x31 two-byte; KWP 0x31 one-byte).
     pub routines: Vec<u16>,
+    /// UDS service routines (maintenance resets, relearns) that run in the
+    /// extended session without SecurityAccess, as on many real modules.
+    pub session_routines: Vec<u16>,
     /// I/O control identifiers (UDS 0x2F DIDs; KWP 0x30 local ids).
     pub io_ids: Vec<u16>,
     /// Normal response time.
@@ -118,6 +121,7 @@ impl EcuSpec {
             dtcs: Vec::new(),
             security: None,
             routines: Vec::new(),
+            session_routines: Vec::new(),
             io_ids: Vec::new(),
             p2_ms: 15,
             slow_ms: 120,
@@ -446,6 +450,21 @@ impl EcuSim {
             0x31 => {
                 if req.len() < 4 {
                     return self.now_reply(negative(sid, nrc::INCORRECT_LENGTH));
+                }
+                let rid = u16::from_be_bytes([req[2], req[3]]);
+                if self.spec.session_routines.contains(&rid) {
+                    if let Some(r) = self.require_session(sid) {
+                        return r;
+                    }
+                    let sub = req[1] & 0x7F;
+                    return match sub {
+                        0x01 | 0x02 => {
+                            self.slow_reply(sid, positive(sid, &[sub, req[2], req[3], 0x00]))
+                        }
+                        // Results: 0x00 = completed successfully.
+                        0x03 => self.now_reply(positive(sid, &[sub, req[2], req[3], 0x00])),
+                        _ => self.now_reply(negative(sid, nrc::SUB_FUNCTION_NOT_SUPPORTED)),
+                    };
                 }
                 if let Some(r) = self
                     .require_session(sid)

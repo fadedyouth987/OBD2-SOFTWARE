@@ -195,11 +195,33 @@ fn rust_messages() -> Vec<EdgeMessage> {
         }
         .into(),
         protocol::error_response(
-            Some(request_id),
+            Some(request_id.clone()),
             ErrorCode::SafetyBlocked,
             "0x2F InputOutputControlByIdentifier is gated; the session is SILENT.",
             Some(object(json!({ "service_id": 47, "tier": "A" }))),
         )
+        .into(),
+        LeaseStatusRequest {
+            request_id: request_id.clone(),
+            type_: LeaseStatusRequestType::LeaseStatusRequest,
+        }
+        .into(),
+        LeaseInstallRequest {
+            kind: LeaseKind::Diagnostic,
+            lease_token: p("eyJhbGciOiJFZERTQSJ9.eyJ0aWVyIjoiV09SS1NIT1AifQ.c2ln"),
+            request_id: request_id.clone(),
+            type_: LeaseInstallRequestType::LeaseInstallRequest,
+        }
+        .into(),
+        LeaseStatus {
+            cloud_keys_pinned: true,
+            expires_at: Some(p("2026-11-25T14:00:00Z")),
+            features: vec![p("UDS_ACTIVE"), p("CAN_RE_PRO")],
+            immo_expires_at: None,
+            lease_tier: p("WORKSHOP"),
+            request_id: request_id.clone(),
+            type_: LeaseStatusType::LeaseStatus,
+        }
         .into(),
     ]
 }

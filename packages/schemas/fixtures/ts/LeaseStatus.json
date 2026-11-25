@@ -1,0 +1,13 @@
+{
+  "cloud_keys_pinned": true,
+  "expires_at": "2026-11-25T14:00:00Z",
+  "features": [
+    "UDS_ACTIVE",
+    "CAN_RE_PRO",
+    "J2534"
+  ],
+  "immo_expires_at": null,
+  "lease_tier": "WORKSHOP",
+  "request_id": "web_08",
+  "type": "LeaseStatus"
+}

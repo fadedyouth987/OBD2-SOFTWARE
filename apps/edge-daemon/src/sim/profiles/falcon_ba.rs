@@ -13,6 +13,12 @@ pub const IC: (u32, u32) = (0x720, 0x728);
 pub const ABS: (u32, u32) = (0x760, 0x768);
 /// Ford enhanced PID (simulated): fuel rail pressure, kPa x 10, 2 bytes.
 pub const DID_FUEL_RAIL: u16 = 0x1166;
+/// Simulated service routines and I/O ids (stand-ins for the service-function UI).
+pub const ROUTINE_THROTTLE_RELEARN: u16 = 0x0401;
+pub const ROUTINE_CKP_RELEARN: u16 = 0x0403;
+pub const ROUTINE_OIL_RESET: u16 = 0x0501;
+pub const ROUTINE_SAS_CAL: u16 = 0x0602;
+pub const IO_ABS_BLEED: u16 = 0x4B01;
 
 pub fn pcm_key(seed: &[u8]) -> Vec<u8> {
     seed.iter()
@@ -48,12 +54,15 @@ fn pcm() -> EcuSpec {
         lockout_ms: 10_000,
     });
     spec.routines = vec![0x0301];
+    // Simulated service routines (plausible stand-ins, not Ford data).
+    spec.session_routines = vec![ROUTINE_THROTTLE_RELEARN, ROUTINE_CKP_RELEARN];
     spec.p2_ms = 20;
     spec
 }
 
 fn ic() -> EcuSpec {
     let mut spec = EcuSpec::new("IC", Dialect::Uds);
+    spec.routines = vec![ROUTINE_OIL_RESET];
     spec.p2_ms = 25;
     spec
 }
@@ -65,6 +74,8 @@ fn abs() -> EcuSpec {
         ftb: 0,
         status: DTC_CONFIRMED,
     }]; // C1145
+    spec.routines = vec![ROUTINE_SAS_CAL];
+    spec.io_ids = vec![IO_ABS_BLEED];
     spec.p2_ms = 18;
     spec
 }

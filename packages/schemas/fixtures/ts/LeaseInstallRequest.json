@@ -1,0 +1,6 @@
+{
+  "kind": "DIAGNOSTIC",
+  "lease_token": "eyJhbGciOiJFZERTQSJ9.eyJ0aWVyIjoiV09SS1NIT1AifQ.c2ln",
+  "request_id": "web_08",
+  "type": "LeaseInstallRequest"
+}

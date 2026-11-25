@@ -3,14 +3,16 @@
   "$id": "https://obd2-diag.local/schemas/edge_ws.schema.json",
   "title": "EdgeMessage",
   "description": "Every message exchanged over the local edge WebSocket (ws://127.0.0.1:8765). Tagged union on `type`. Source of truth for the generated Rust types (typify) and Zod validators (json-schema-to-zod). Edit this file, then run `just codegen`.",
-  "x-protocol-version": "1.0.0",
+  "x-protocol-version": "1.1.0",
   "x-request-response": {
     "HelloRequest": "HelloResponse",
     "AdapterListRequest": "AdapterListResponse",
     "ConnectRequest": "AdapterStatus",
     "DisconnectRequest": "AdapterStatus",
     "SafetyConfirmRequest": "SafetyConfirmResponse",
-    "DiagCommandRequest": "DiagCommandResponse"
+    "DiagCommandRequest": "DiagCommandResponse",
+    "LeaseStatusRequest": "LeaseStatus",
+    "LeaseInstallRequest": "LeaseStatus"
   },
   "oneOf": [
     { "$ref": "#/definitions/HelloRequest" },
@@ -27,7 +29,10 @@
     { "$ref": "#/definitions/DiagCommandRequest" },
     { "$ref": "#/definitions/DiagCommandResponse" },
     { "$ref": "#/definitions/HeuristicAlert" },
-    { "$ref": "#/definitions/ErrorResponse" }
+    { "$ref": "#/definitions/ErrorResponse" },
+    { "$ref": "#/definitions/LeaseStatusRequest" },
+    { "$ref": "#/definitions/LeaseInstallRequest" },
+    { "$ref": "#/definitions/LeaseStatus" }
   ],
   "definitions": {
     "RequestId": {
@@ -420,6 +425,74 @@
         },
         "detail_json": {
           "anyOf": [{ "type": "object" }, { "type": "null" }]
+        }
+      }
+    },
+    "LeaseKind": {
+      "description": "Which lease a LeaseInstallRequest carries: the offline diagnostic lease (lease.jwt) or a short immobilizer lease (immo_lease.jwt).",
+      "type": "string",
+      "enum": ["DIAGNOSTIC", "IMMO"]
+    },
+    "LeaseStatusRequest": {
+      "description": "Request -> LeaseStatus.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "request_id"],
+      "properties": {
+        "type": { "type": "string", "enum": ["LeaseStatusRequest"] },
+        "request_id": { "$ref": "#/definitions/RequestId" }
+      }
+    },
+    "LeaseInstallRequest": {
+      "description": "Installs a cloud-signed lease (POST /auth/edge-lease, or an immobilizer job token). The daemon verifies it against the pinned cloud keys before saving it. Request -> LeaseStatus.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "request_id", "kind", "lease_token"],
+      "properties": {
+        "type": { "type": "string", "enum": ["LeaseInstallRequest"] },
+        "request_id": { "$ref": "#/definitions/RequestId" },
+        "kind": { "$ref": "#/definitions/LeaseKind" },
+        "lease_token": {
+          "description": "Compact JWS signed by the cloud API.",
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 8192
+        }
+      }
+    },
+    "LeaseStatus": {
+      "description": "The lease this connection runs under. Response to LeaseStatusRequest and LeaseInstallRequest.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "request_id",
+        "lease_tier",
+        "features",
+        "expires_at",
+        "immo_expires_at",
+        "cloud_keys_pinned"
+      ],
+      "properties": {
+        "type": { "type": "string", "enum": ["LeaseStatus"] },
+        "request_id": { "$ref": "#/definitions/RequestId" },
+        "lease_tier": { "$ref": "#/definitions/LeaseTier" },
+        "features": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/Feature" }
+        },
+        "expires_at": {
+          "description": "When the offline lease ends; null on the built-in COMMUNITY tier.",
+          "anyOf": [{ "$ref": "#/definitions/Rfc3339Utc" }, { "type": "null" }]
+        },
+        "immo_expires_at": {
+          "description": "When the installed immobilizer lease ends; null when there is none.",
+          "anyOf": [{ "$ref": "#/definitions/Rfc3339Utc" }, { "type": "null" }]
+        },
+        "cloud_keys_pinned": {
+          "description": "False when no cloud signing key is pinned, so cloud leases and pairing tokens cannot verify (COMMUNITY tier, local pairing codes only).",
+          "type": "boolean"
         }
       }
     }

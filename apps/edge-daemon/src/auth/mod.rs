@@ -9,6 +9,7 @@
 //!   cloud pairing tokens for the local WebSocket (`aud=edge-ws`, up to 5 min).
 
 pub mod cloud_keys;
+pub mod dev_keys;
 pub mod jws;
 pub mod lease;
 

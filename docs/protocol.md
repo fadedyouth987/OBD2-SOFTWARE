@@ -2,7 +2,7 @@
 
 # Edge WebSocket protocol reference
 
-Protocol version **1.0.0**. Every message exchanged over the local edge WebSocket (ws://127.0.0.1:8765). Tagged union on `type`. Source of truth for the generated Rust types (typify) and Zod validators (json-schema-to-zod). Edit this file, then run `just codegen`.
+Protocol version **1.1.0**. Every message exchanged over the local edge WebSocket (ws://127.0.0.1:8765). Tagged union on `type`. Source of truth for the generated Rust types (typify) and Zod validators (json-schema-to-zod). Edit this file, then run `just codegen`.
 
 Every message is a JSON object with a `type` field naming one of the messages below. Requests carry a client-generated `request_id`; the response, or an `ErrorResponse`, echoes it. Gated diagnostic services are listed in [`safety_policy.json`](../packages/schemas/safety_policy.json); error hints are in [`error_hints.json`](../packages/schemas/error_hints.json).
 
@@ -16,6 +16,8 @@ Every message is a JSON object with a `type` field naming one of the messages be
 | `DisconnectRequest`    | `AdapterStatus` or `ErrorResponse`         |
 | `SafetyConfirmRequest` | `SafetyConfirmResponse` or `ErrorResponse` |
 | `DiagCommandRequest`   | `DiagCommandResponse` or `ErrorResponse`   |
+| `LeaseStatusRequest`   | `LeaseStatus` or `ErrorResponse`           |
+| `LeaseInstallRequest`  | `LeaseStatus` or `ErrorResponse`           |
 
 ## Messages
 
@@ -176,6 +178,37 @@ Any request can fail with this. request_id is null when the failed message could
 | `hint`        | string              | One line of fix-it text (A-DX-4); defaults come from error_hints.json. |
 | `detail_json` | object or null      |                                                                        |
 
+### LeaseStatusRequest
+
+Request -> LeaseStatus.
+
+| Field        | Type        | Notes |
+| ------------ | ----------- | ----- |
+| `request_id` | `RequestId` |       |
+
+### LeaseInstallRequest
+
+Installs a cloud-signed lease (POST /auth/edge-lease, or an immobilizer job token). The daemon verifies it against the pinned cloud keys before saving it. Request -> LeaseStatus.
+
+| Field         | Type        | Notes                                |
+| ------------- | ----------- | ------------------------------------ |
+| `request_id`  | `RequestId` |                                      |
+| `kind`        | `LeaseKind` |                                      |
+| `lease_token` | string      | Compact JWS signed by the cloud API. |
+
+### LeaseStatus
+
+The lease this connection runs under. Response to LeaseStatusRequest and LeaseInstallRequest.
+
+| Field               | Type                 | Notes                                                                                                                                   |
+| ------------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `request_id`        | `RequestId`          |                                                                                                                                         |
+| `lease_tier`        | `LeaseTier`          |                                                                                                                                         |
+| `features`          | array of `Feature`   |                                                                                                                                         |
+| `expires_at`        | `Rfc3339Utc` or null | When the offline lease ends; null on the built-in COMMUNITY tier.                                                                       |
+| `immo_expires_at`   | `Rfc3339Utc` or null | When the installed immobilizer lease ends; null when there is none.                                                                     |
+| `cloud_keys_pinned` | boolean              | False when no cloud signing key is pinned, so cloud leases and pairing tokens cannot verify (COMMUNITY tier, local pairing codes only). |
+
 ## Shared types
 
 - **RequestId**: string matching `^[A-Za-z0-9_-]{1,64}$`. Client-generated id carried by every request and echoed by its response or error.
@@ -199,3 +232,4 @@ Any request can fail with this. request_id is null when the failed message could
 - **PidSample**: object: `timestamp_us`, `pid`, `name`, `value`, `unit`.
 - **Preconditions**: object: `speed_kmh`, `speed_age_ms`, `rpm`, `battery_v`. Live readings the safety token was issued against. Null means the value could not be read (Rule 5: fail closed).
 - **Nrc**: object: `code`, `name`. Negative response code from the ECU.
+- **LeaseKind**: `DIAGNOSTIC`, `IMMO`. Which lease a LeaseInstallRequest carries: the offline diagnostic lease (lease.jwt) or a short immobilizer lease (immo_lease.jwt).

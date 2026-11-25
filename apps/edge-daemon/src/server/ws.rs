@@ -49,6 +49,10 @@ use tokio_tungstenite::{
 
 use super::pairing::{looks_like_code, PairingStore};
 use crate::{
+    analytics::{
+        did_maps::{self, ModuleAddr},
+        heuristics,
+    },
     auth::{
         cloud_keys::KeyRing,
         lease::{self, ImmoLease, Lease},
@@ -94,6 +98,8 @@ pub const DIAG_PER_SECOND: u32 = 20;
 pub const STREAM_PERIOD: Duration = Duration::from_millis(50);
 /// PIDs polled for the live view and the interlock (max six per request).
 const LIVE_PIDS: [u8; 6] = [0x0C, 0x0D, 0x05, 0x0F, 0x06, 0x07];
+/// PID samples kept for the live heuristics: about two minutes at 20 Hz.
+const HEURISTIC_HISTORY: usize = 20 * 6 * 120;
 
 pub struct ServerConfig {
     pub port: u16,
@@ -111,6 +117,10 @@ pub struct ServerConfig {
     pub lease_min_version: Arc<AtomicI64>,
     /// Optional immobilizer lease; verified at Hello and bound on Connect.
     pub immo_lease_token: Option<String>,
+    /// Live immobilizer lease, replaced by `LeaseInstallRequest { kind: IMMO }`.
+    pub live_immo_lease: Arc<Mutex<Option<String>>>,
+    /// Where installed leases are saved (`lease.jwt`, `immo_lease.jwt`); None keeps them in memory (tests).
+    pub data_dir: Option<std::path::PathBuf>,
     pub immo_registry: ImmoRegistry,
     pub pairing: Arc<PairingStore>,
     pub audit: Arc<dyn AuditSink>,
@@ -132,6 +142,8 @@ impl ServerConfig {
             device_id: None,
             lease_min_version: Arc::new(AtomicI64::new(0)),
             immo_lease_token: None,
+            live_immo_lease: Arc::new(Mutex::new(None)),
+            data_dir: None,
             immo_registry: ImmoRegistry::new(),
             pairing,
             audit,
@@ -321,7 +333,7 @@ async fn handle(cfg: Arc<ServerConfig>, stream: TcpStream) {
         }
     };
 
-    let my_epoch = cfg.lease_epoch.load(Ordering::SeqCst);
+    let mut my_epoch = cfg.lease_epoch.load(Ordering::SeqCst);
     while let Some(text) = next_text(&mut source).await {
         if cfg.lease_epoch.load(Ordering::SeqCst) != my_epoch {
             let _ = tx
@@ -335,6 +347,10 @@ async fn handle(cfg: Arc<ServerConfig>, stream: TcpStream) {
             break;
         }
         let reply = session.handle(&text).await;
+        if let Some(epoch) = session.adopted_epoch.take() {
+            // This connection installed the new lease itself, so it stays open.
+            my_epoch = epoch;
+        }
         if tx.send(Outbound::Msg(reply)).await.is_err() {
             break;
         }
@@ -367,7 +383,7 @@ where
 // Runs once per connection; the refusal is sent straight back, so boxing buys nothing.
 #[allow(clippy::result_large_err)]
 fn authenticate(
-    cfg: &ServerConfig,
+    cfg: &Arc<ServerConfig>,
     origin: Option<&str>,
     text: &str,
     tx: mpsc::Sender<Outbound>,
@@ -445,7 +461,13 @@ fn authenticate(
         cfg.device_id.as_deref(),
         cfg.lease_min_version.load(Ordering::SeqCst),
     );
-    let immo_lease = match cfg.immo_lease_token.as_deref() {
+    let immo_token = cfg
+        .live_immo_lease
+        .lock()
+        .ok()
+        .and_then(|g| g.clone())
+        .or_else(|| cfg.immo_lease_token.clone());
+    let immo_lease = match immo_token.as_deref() {
         None => None,
         Some(token) => match lease::verify_immo_lease(token, &cfg.keys, now) {
             Ok(immo) => Some(immo),
@@ -490,6 +512,8 @@ fn authenticate(
         bucket: Bucket::new(cfg.diag_per_second),
         tx,
         stream_period: cfg.stream_period,
+        cfg: Arc::clone(cfg),
+        adopted_epoch: None,
     };
     Ok((session, hello_resp.into()))
 }
@@ -541,6 +565,7 @@ impl BusHandle {
 struct Connected {
     adapter_id: String,
     bus: BusHandle,
+    bus_lock: Arc<tokio::sync::Mutex<()>>,
     tasks: Vec<JoinHandle<()>>,
     channels: HashMap<(u32, u32), DiagChannel>,
 }
@@ -561,10 +586,25 @@ struct Session {
     bucket: Bucket,
     tx: mpsc::Sender<Outbound>,
     stream_period: Duration,
+    cfg: Arc<ServerConfig>,
+    /// Set when this connection installed a lease: it adopts the new epoch instead of closing.
+    adopted_epoch: Option<u64>,
 }
 
 /// A diagnostic channel on its own port of the virtual or shared physical bus.
 async fn open_channel(
+    bus: BusHandle,
+    bitrate: u32,
+    addr: CanAddressing,
+    interlock: Arc<SafetyInterlock>,
+    lock: Arc<tokio::sync::Mutex<()>>,
+) -> Result<DiagChannel, HalError> {
+    Ok(open_channel_unlocked(bus, bitrate, addr, interlock)
+        .await?
+        .with_bus_lock(lock))
+}
+
+async fn open_channel_unlocked(
     bus: BusHandle,
     bitrate: u32,
     addr: CanAddressing,
@@ -647,12 +687,136 @@ impl Session {
             EdgeMessage::DisconnectRequest(r) => self.disconnect(r),
             EdgeMessage::SafetyConfirmRequest(r) => self.confirm(r),
             EdgeMessage::DiagCommandRequest(r) => self.diag(r).await,
+            EdgeMessage::LeaseStatusRequest(r) => self.lease_status(r.request_id),
+            EdgeMessage::LeaseInstallRequest(r) => self.install_lease(r),
             _ => err(
                 request_id_of(text),
                 ErrorCode::ProtocolError,
                 "that message type is sent by the daemon, not the app",
             ),
         }
+    }
+
+    fn lease_status(&self, request_id: RequestId) -> EdgeMessage {
+        let at = |secs: u64| {
+            m::Rfc3339Utc::try_from(
+                crate::safety::rfc3339(UNIX_EPOCH + Duration::from_secs(secs)).as_str(),
+            )
+            .ok()
+        };
+        m::LeaseStatus {
+            cloud_keys_pinned: !self.cfg.keys.is_empty(),
+            expires_at: self.lease.expires_at.and_then(at),
+            features: self.lease.features.clone(),
+            immo_expires_at: self.immo_lease.as_ref().and_then(|l| at(l.expires_at)),
+            lease_tier: self.lease.tier,
+            request_id,
+            type_: m::LeaseStatusType::LeaseStatus,
+        }
+        .into()
+    }
+
+    /// Verifies a cloud-signed lease, saves it, and switches this connection to it.
+    /// Other open connections are asked to reconnect (lease epoch bump).
+    fn install_lease(&mut self, r: m::LeaseInstallRequest) -> EdgeMessage {
+        let rid = Some(r.request_id.clone());
+        let token = r.lease_token.as_str().trim().to_owned();
+        let now = unix_now();
+        if self.cfg.keys.is_empty() {
+            return err(
+                rid,
+                ErrorCode::LeaseRequired,
+                "this daemon has no cloud signing key pinned, so it cannot accept cloud leases",
+            );
+        }
+        match r.kind {
+            m::LeaseKind::Diagnostic => {
+                let lease = match lease::verify_lease(&token, &self.cfg.keys, now) {
+                    Ok(l) => l,
+                    Err(e) => {
+                        return err(
+                            rid,
+                            ErrorCode::TokenInvalid,
+                            &format!("lease rejected: {e}"),
+                        )
+                    }
+                };
+                if lease.immo {
+                    return err(
+                        rid,
+                        ErrorCode::TokenInvalid,
+                        "that is an immobilizer lease; install it with kind IMMO",
+                    );
+                }
+                let constrained = lease::constrain_lease(
+                    lease.clone(),
+                    self.cfg.device_id.as_deref(),
+                    self.cfg.lease_min_version.load(Ordering::SeqCst),
+                );
+                if constrained != lease {
+                    return err(
+                        rid,
+                        ErrorCode::TokenInvalid,
+                        "lease is for another device or has been superseded; fetch a new one",
+                    );
+                }
+                {
+                    let Ok(mut live) = self.cfg.live_lease.lock() else {
+                        return err(rid, ErrorCode::AdapterError, "lease store unavailable");
+                    };
+                    if let Err(e) = self.save("lease.jwt", &token) {
+                        return err(rid, ErrorCode::AdapterError, &e);
+                    }
+                    *live = Some(token);
+                }
+                let epoch = self.cfg.lease_epoch.fetch_add(1, Ordering::SeqCst) + 1;
+                self.adopted_epoch = Some(epoch);
+                tracing::info!(tier = %constrained.tier, "diagnostic lease installed");
+                self.lease = constrained;
+            }
+            m::LeaseKind::Immo => {
+                if self.conn.is_some() {
+                    return err(
+                        rid,
+                        ErrorCode::AdapterError,
+                        "disconnect the vehicle, install the key-learn lease, then reconnect",
+                    );
+                }
+                let immo = match lease::verify_immo_lease(&token, &self.cfg.keys, now) {
+                    Ok(l) => l,
+                    Err(e) => {
+                        return err(
+                            rid,
+                            ErrorCode::TokenInvalid,
+                            &format!("immobilizer lease rejected: {e}"),
+                        )
+                    }
+                };
+                {
+                    let Ok(mut live) = self.cfg.live_immo_lease.lock() else {
+                        return err(rid, ErrorCode::AdapterError, "lease store unavailable");
+                    };
+                    if let Err(e) = self.save("immo_lease.jwt", &token) {
+                        return err(rid, ErrorCode::AdapterError, &e);
+                    }
+                    *live = Some(token);
+                }
+                tracing::info!(session = %immo.session_id, "immobilizer lease installed");
+                self.immo_lease = Some(immo);
+            }
+        }
+        self.lease_status(r.request_id)
+    }
+
+    /// Atomically writes a lease file under the data directory (no-op without one).
+    fn save(&self, name: &str, token: &str) -> Result<(), String> {
+        let Some(dir) = self.cfg.data_dir.as_ref() else {
+            return Ok(());
+        };
+        let tmp = dir.join(format!(".{name}.tmp"));
+        std::fs::write(&tmp, token)
+            .and_then(|()| std::fs::rename(&tmp, dir.join(name)))
+            .map_err(|e| format!("could not save {name}: {e}"))
     }
 
     fn adapter_list(&self, request_id: RequestId) -> EdgeMessage {
@@ -797,6 +961,7 @@ impl Session {
                 Err(e) => return err(rid, ErrorCode::AdapterError, &e.to_string()),
             };
             let bus = BusHandle::Physical(shared.clone());
+            let bus_lock = Arc::new(tokio::sync::Mutex::new(()));
             let mut tasks = vec![tokio::spawn(stream_can(
                 shared.port(),
                 self.tx.clone(),
@@ -808,6 +973,7 @@ impl Session {
                 bitrate,
                 CanAddressing::obd_functional(0x7E8),
                 Arc::clone(&self.interlock),
+                Arc::clone(&bus_lock),
             )
             .await
             {
@@ -819,10 +985,20 @@ impl Session {
                 ))),
                 Err(e) => tracing::warn!("no OBD poller on physical adapter: {e}"),
             }
+            // No identifier map for an unidentified real vehicle yet: say so (Rule 6).
+            tasks.push(tokio::spawn(run_audit(
+                bus.clone(),
+                bitrate,
+                None,
+                Arc::clone(&self.interlock),
+                Arc::clone(&bus_lock),
+                self.tx.clone(),
+            )));
             self.interlock.set_mode(r.safety_mode);
             self.conn = Some(Connected {
                 adapter_id: adapter_id.to_owned(),
                 bus,
+                bus_lock,
                 tasks,
                 channels: HashMap::new(),
             });
@@ -849,6 +1025,7 @@ impl Session {
                 &format!("{} is not a CAN protocol for this vehicle", r.protocol),
             );
         };
+        let profile_id = profile.id;
         let bus = match VirtualBus::new(profile) {
             Ok(bus) => bus,
             Err(e) => return err(rid, ErrorCode::AdapterError, &e.to_string()),
@@ -858,6 +1035,7 @@ impl Session {
             return err(rid, ErrorCode::AdapterError, &e.to_string());
         }
         let bus_handle = BusHandle::Virtual(bus.clone());
+        let bus_lock = Arc::new(tokio::sync::Mutex::new(()));
         let mut tasks = vec![tokio::spawn(stream_can(
             frames,
             self.tx.clone(),
@@ -869,6 +1047,7 @@ impl Session {
             bitrate,
             CanAddressing::obd_functional(0x7E8),
             Arc::clone(&self.interlock),
+            Arc::clone(&bus_lock),
         )
         .await
         {
@@ -880,6 +1059,14 @@ impl Session {
             ))),
             Err(e) => tracing::warn!("no OBD poller: {e}"),
         }
+        tasks.push(tokio::spawn(run_audit(
+            bus_handle.clone(),
+            bitrate,
+            Some(profile_id),
+            Arc::clone(&self.interlock),
+            Arc::clone(&bus_lock),
+            self.tx.clone(),
+        )));
         self.interlock.set_mode(r.safety_mode);
         let battery = bus.with_vehicle(|v| v.battery_v);
         let vin = bus.with_vehicle(|v| v.vin.clone());
@@ -893,12 +1080,16 @@ impl Session {
                 self.interlock
                     .begin_immo(immo, &vin, immo::canonical_device_id(adapter_id))
             {
+                for t in &tasks {
+                    t.abort();
+                }
                 return err(rid, refusal_code(refusal.code), &refusal.message);
             }
         }
         self.conn = Some(Connected {
             adapter_id: adapter_id.to_owned(),
             bus: bus_handle,
+            bus_lock,
             tasks,
             channels: HashMap::new(),
         });
@@ -996,7 +1187,11 @@ impl Session {
         };
         let key = (r.tx_id.0, r.rx_id.0);
         if !conn.channels.contains_key(&key) {
-            let (bus, bitrate) = (conn.bus.clone(), conn.bus.bitrate());
+            let (bus, bitrate, lock) = (
+                conn.bus.clone(),
+                conn.bus.bitrate(),
+                Arc::clone(&conn.bus_lock),
+            );
             // Local box fix: r.protocol is DiagProtocol, not BusProtocol.
             // BMW D-CAN extended addressing is detected from IDs (0x6F1 / 0x6xx).
             let addressing = if key.0 == 0x6F1 && (0x600..=0x6FF).contains(&key.1) {
@@ -1006,7 +1201,7 @@ impl Session {
             } else {
                 CanAddressing::normal(key.0, key.1)
             };
-            match open_channel(bus, bitrate, addressing, Arc::clone(&self.interlock)).await {
+            match open_channel(bus, bitrate, addressing, Arc::clone(&self.interlock), lock).await {
                 Ok(ch) => {
                     self.conn
                         .as_mut()
@@ -1063,6 +1258,125 @@ impl Session {
     }
 }
 
+/// Cross-module audit (Task 1.3) once per connect: VIN and odometer from every
+/// mapped module, distance since codes cleared and readiness monitors. Pushes
+/// each `HeuristicAlert`. A clean result is reported as `audit.consistent` only
+/// when every mapped identifier was actually read; otherwise `audit.incomplete`
+/// names the modules that did not answer (Rule 6: never a pass for an unverified check).
+async fn run_audit(
+    bus: BusHandle,
+    bitrate: u32,
+    profile_id: Option<&'static str>,
+    interlock: Arc<SafetyInterlock>,
+    lock: Arc<tokio::sync::Mutex<()>>,
+    tx: mpsc::Sender<Outbound>,
+) {
+    let alerts = audit_alerts(bus, bitrate, profile_id, interlock, lock).await;
+    for a in alerts {
+        if tx.send(Outbound::Msg(a.into())).await.is_err() {
+            return;
+        }
+    }
+}
+
+async fn audit_alerts(
+    bus: BusHandle,
+    bitrate: u32,
+    profile_id: Option<&'static str>,
+    interlock: Arc<SafetyInterlock>,
+    lock: Arc<tokio::sync::Mutex<()>>,
+) -> Vec<m::HeuristicAlert> {
+    use serde_json::json;
+    let map = profile_id.and_then(did_maps::for_profile);
+    let Some(map) = map else {
+        return heuristics::cross_module_audit(&heuristics::audit_input(
+            None,
+            Vec::new(),
+            (None, None),
+        ));
+    };
+    let mut readings = Vec::new();
+    let mut silent = Vec::new();
+    for module in &map.modules {
+        let ModuleAddr::Can(addr) = module.addr else {
+            silent.push(module.name);
+            continue;
+        };
+        match open_channel(
+            bus.clone(),
+            bitrate,
+            addr,
+            Arc::clone(&interlock),
+            Arc::clone(&lock),
+        )
+        .await
+        {
+            Ok(mut ch) => {
+                let reading = heuristics::collect_module(&mut ch, module).await;
+                let missing = (module.vin.is_some() && reading.vin.is_none())
+                    || (module.odometer.is_some() && reading.odometer_km.is_none());
+                if missing {
+                    silent.push(module.name);
+                }
+                readings.push(reading);
+            }
+            Err(e) => {
+                tracing::debug!("audit: no channel to {}: {e}", module.name);
+                silent.push(module.name);
+            }
+        }
+    }
+    let status = match map.modules.iter().find(|m| m.obd).map(|m| m.addr) {
+        Some(ModuleAddr::Can(_)) => {
+            match open_channel(
+                bus.clone(),
+                bitrate,
+                CanAddressing::obd_functional(0x7E8),
+                Arc::clone(&interlock),
+                Arc::clone(&lock),
+            )
+            .await
+            {
+                Ok(mut ch) => heuristics::collect_obd_status(&mut ch).await,
+                Err(_) => (None, None),
+            }
+        }
+        _ => (None, None),
+    };
+    let mut alerts = heuristics::cross_module_audit(&heuristics::audit_input(
+        Some(&map),
+        readings.clone(),
+        status,
+    ));
+    let modules: Vec<serde_json::Value> = readings
+        .iter()
+        .map(|r| json!({ "module": r.module, "vin": r.vin, "odometer_km": r.odometer_km }))
+        .collect();
+    if !silent.is_empty() {
+        alerts.push(heuristics::alert(
+            "audit.incomplete",
+            m::Severity::Info,
+            "VIN and odometer audit incomplete: some modules did not answer",
+            json!({ "modules_not_read": silent, "modules": modules }),
+            "Check the ignition is on and each module is powered, then reconnect to re-run the audit.",
+        ));
+    } else if alerts.is_empty() {
+        alerts.push(heuristics::alert(
+            "audit.consistent",
+            m::Severity::Info,
+            "VIN and odometer agree across modules; codes not recently cleared",
+            json!({
+                "modules": modules,
+                "distance_since_clear_km": status.0,
+                "incomplete_monitors": status.1,
+                "odometer_tolerance_km": heuristics::ODOMETER_TOLERANCE_KM,
+            }),
+            "",
+        ));
+    }
+    alerts
+}
+
 async fn stream_can(
     mut port: impl VehicleBusAdapter + 'static,
     tx: mpsc::Sender<Outbound>,
@@ -1113,6 +1427,9 @@ async fn stream_pids(
     let mut tick = tokio::time::interval(period);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut cycle = 0u32;
+    // Recent samples for the live heuristics (fuel-trim matrix, cold-soak).
+    let mut history: std::collections::VecDeque<m::PidSample> = std::collections::VecDeque::new();
+    let mut raised: std::collections::HashSet<String> = std::collections::HashSet::new();
     loop {
         tick.tick().await;
         cycle = cycle.wrapping_add(1);
@@ -1149,6 +1466,25 @@ async fn stream_pids(
                 })
             })
             .collect();
+        let samples: Vec<m::PidSample> = samples;
+        history.extend(samples.iter().cloned());
+        while history.len() > HEURISTIC_HISTORY {
+            history.pop_front();
+        }
+        if cycle.is_multiple_of(20) {
+            let snapshot: Vec<m::PidSample> = history.iter().cloned().collect();
+            let mut found = heuristics::fuel_trim(&snapshot);
+            found.extend(heuristics::cold_soak(&snapshot));
+            for alert in found {
+                if raised.insert(alert.rule_id.to_string()) {
+                    if let Err(mpsc::error::TrySendError::Closed(_)) =
+                        tx.try_send(Outbound::Msg(alert.into()))
+                    {
+                        return;
+                    }
+                }
+            }
+        }
         let stream = m::ObdPidStream {
             samples,
             type_: m::ObdPidStreamType::ObdPidStream,

@@ -1304,6 +1304,9 @@ pub enum EdgeMessage {
     DiagCommandResponse(DiagCommandResponse),
     HeuristicAlert(HeuristicAlert),
     ErrorResponse(ErrorResponse),
+    LeaseStatusRequest(LeaseStatusRequest),
+    LeaseInstallRequest(LeaseInstallRequest),
+    LeaseStatus(LeaseStatus),
 }
 impl ::std::convert::From<HelloRequest> for EdgeMessage {
     fn from(value: HelloRequest) -> Self {
@@ -1378,6 +1381,21 @@ impl ::std::convert::From<HeuristicAlert> for EdgeMessage {
 impl ::std::convert::From<ErrorResponse> for EdgeMessage {
     fn from(value: ErrorResponse) -> Self {
         Self::ErrorResponse(value)
+    }
+}
+impl ::std::convert::From<LeaseStatusRequest> for EdgeMessage {
+    fn from(value: LeaseStatusRequest) -> Self {
+        Self::LeaseStatusRequest(value)
+    }
+}
+impl ::std::convert::From<LeaseInstallRequest> for EdgeMessage {
+    fn from(value: LeaseInstallRequest) -> Self {
+        Self::LeaseInstallRequest(value)
+    }
+}
+impl ::std::convert::From<LeaseStatus> for EdgeMessage {
+    fn from(value: LeaseStatus) -> Self {
+        Self::LeaseStatus(value)
     }
 }
 ///Every code has a one-line fix-it hint in error_hints.json (A-DX-4).
@@ -2242,6 +2260,306 @@ impl<'de> ::serde::Deserialize<'de> for HexBytes {
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
+    }
+}
+///Installs a cloud-signed lease (POST /auth/edge-lease, or an immobilizer job token). The daemon verifies it against the pinned cloud keys before saving it. Request -> LeaseStatus.
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct LeaseInstallRequest {
+    pub kind: LeaseKind,
+    ///Compact JWS signed by the cloud API.
+    pub lease_token: LeaseInstallRequestLeaseToken,
+    pub request_id: RequestId,
+    #[serde(rename = "type")]
+    pub type_: LeaseInstallRequestType,
+}
+///Compact JWS signed by the cloud API.
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct LeaseInstallRequestLeaseToken(::std::string::String);
+impl ::std::ops::Deref for LeaseInstallRequestLeaseToken {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<LeaseInstallRequestLeaseToken> for ::std::string::String {
+    fn from(value: LeaseInstallRequestLeaseToken) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for LeaseInstallRequestLeaseToken {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for LeaseInstallRequestLeaseToken {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        if value.chars().count() > 8192usize {
+            return Err("longer than 8192 characters".into());
+        }
+        if value.chars().count() < 16usize {
+            return Err("shorter than 16 characters".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LeaseInstallRequestLeaseToken {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value.as_str())
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for LeaseInstallRequestLeaseToken {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
+///`LeaseInstallRequestType`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum LeaseInstallRequestType {
+    LeaseInstallRequest,
+}
+impl ::std::fmt::Display for LeaseInstallRequestType {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::LeaseInstallRequest => f.write_str("LeaseInstallRequest"),
+        }
+    }
+}
+impl ::std::str::FromStr for LeaseInstallRequestType {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "LeaseInstallRequest" => Ok(Self::LeaseInstallRequest),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for LeaseInstallRequestType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LeaseInstallRequestType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+///Which lease a LeaseInstallRequest carries: the offline diagnostic lease (lease.jwt) or a short immobilizer lease (immo_lease.jwt).
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum LeaseKind {
+    #[serde(rename = "DIAGNOSTIC")]
+    Diagnostic,
+    #[serde(rename = "IMMO")]
+    Immo,
+}
+impl ::std::fmt::Display for LeaseKind {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Diagnostic => f.write_str("DIAGNOSTIC"),
+            Self::Immo => f.write_str("IMMO"),
+        }
+    }
+}
+impl ::std::str::FromStr for LeaseKind {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "DIAGNOSTIC" => Ok(Self::Diagnostic),
+            "IMMO" => Ok(Self::Immo),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for LeaseKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LeaseKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+///The lease this connection runs under. Response to LeaseStatusRequest and LeaseInstallRequest.
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct LeaseStatus {
+    ///False when no cloud signing key is pinned, so cloud leases and pairing tokens cannot verify (COMMUNITY tier, local pairing codes only).
+    pub cloud_keys_pinned: bool,
+    ///When the offline lease ends; null on the built-in COMMUNITY tier.
+    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    pub expires_at: ::std::option::Option<Rfc3339Utc>,
+    pub features: ::std::vec::Vec<Feature>,
+    ///When the installed immobilizer lease ends; null when there is none.
+    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    pub immo_expires_at: ::std::option::Option<Rfc3339Utc>,
+    pub lease_tier: LeaseTier,
+    pub request_id: RequestId,
+    #[serde(rename = "type")]
+    pub type_: LeaseStatusType,
+}
+///Request -> LeaseStatus.
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct LeaseStatusRequest {
+    pub request_id: RequestId,
+    #[serde(rename = "type")]
+    pub type_: LeaseStatusRequestType,
+}
+///`LeaseStatusRequestType`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum LeaseStatusRequestType {
+    LeaseStatusRequest,
+}
+impl ::std::fmt::Display for LeaseStatusRequestType {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::LeaseStatusRequest => f.write_str("LeaseStatusRequest"),
+        }
+    }
+}
+impl ::std::str::FromStr for LeaseStatusRequestType {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "LeaseStatusRequest" => Ok(Self::LeaseStatusRequest),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for LeaseStatusRequestType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LeaseStatusRequestType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+///`LeaseStatusType`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum LeaseStatusType {
+    LeaseStatus,
+}
+impl ::std::fmt::Display for LeaseStatusType {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::LeaseStatus => f.write_str("LeaseStatus"),
+        }
+    }
+}
+impl ::std::str::FromStr for LeaseStatusType {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "LeaseStatus" => Ok(Self::LeaseStatus),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for LeaseStatusType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LeaseStatusType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
     }
 }
 ///`LeaseTier`
@@ -3208,7 +3526,7 @@ pub mod error {
 }
 
 /// Wire protocol version, from `x-protocol-version` in edge_ws.schema.json.
-pub const PROTOCOL_VERSION: &str = "1.0.0";
+pub const PROTOCOL_VERSION: &str = "1.1.0";
 
 /// Each request type and the response type it expects (`x-request-response`).
 /// Any request may also be answered with `ErrorResponse`.
@@ -3218,5 +3536,7 @@ pub const REQUEST_RESPONSE: &[(&str, &str)] = &[
     ("DiagCommandRequest", "DiagCommandResponse"),
     ("DisconnectRequest", "AdapterStatus"),
     ("HelloRequest", "HelloResponse"),
+    ("LeaseInstallRequest", "LeaseStatus"),
+    ("LeaseStatusRequest", "LeaseStatus"),
     ("SafetyConfirmRequest", "SafetyConfirmResponse"),
 ];
