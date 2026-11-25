@@ -108,11 +108,12 @@ export default function JobsPage() {
           </EmptyState>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[680px] text-left text-sm">
+            <table className="w-full min-w-[780px] text-left text-sm">
               <thead className="text-xs text-muted">
                 <tr className="border-b border-line">
                   <th className="py-2 pr-3 font-semibold">Vehicle</th>
                   <th className="py-2 pr-3 font-semibold">Customer</th>
+                  <th className="py-2 pr-3 font-semibold">Technician</th>
                   <th className="py-2 pr-3 font-semibold">Codes</th>
                   <th className="py-2 pr-3 font-semibold">Started</th>
                   <th className="py-2 font-semibold">Status</th>
@@ -128,6 +129,7 @@ export default function JobsPage() {
                       <div className="font-mono text-xs text-muted">{j.vin_redacted ?? "VIN not read"}</div>
                     </td>
                     <td className="py-2.5 pr-3 text-muted">{j.customer_ref || "—"}</td>
+                    <td className="py-2.5 pr-3 text-xs text-muted">{j.technician_name ?? "—"}</td>
                     <td className="py-2.5 pr-3">
                       {j.dtcs.length ? (
                         <span className="font-mono text-xs">

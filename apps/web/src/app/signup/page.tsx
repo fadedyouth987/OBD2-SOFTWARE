@@ -4,8 +4,10 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { AuthCard } from "@/components/AuthCard";
-import { Banner, Button, Field } from "@/components/ui";
+import { OrDivider, SsoButton } from "@/components/SsoButton";
+import { Banner, Button, Field, Skeleton } from "@/components/ui";
 import { useAuth } from "@/context/auth";
+import { useAuthConfig } from "@/lib/sso";
 
 const MIN_PASSWORD = 10;
 
@@ -19,6 +21,7 @@ function SignUpForm() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [touched, setTouched] = useState(false);
+  const config = useAuthConfig();
 
   useEffect(() => {
     if (status === "signed_in") router.replace(next);
@@ -46,8 +49,35 @@ function SignUpForm() {
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
+  if (!config) {
+    return (
+      <AuthCard title="Create your workshop" subtitle="Loading sign-up options…">
+        <Skeleton className="h-32" />
+      </AuthCard>
+    );
+  }
+  const ssoName = config.oidc.provider_name ?? "single sign-on";
+  if (!config.password_enabled) {
+    return (
+      <AuthCard title="Create your workshop" subtitle={`Accounts on this server use ${ssoName}. You'll be the owner of a new workshop.`}>
+        <div className="space-y-4">
+          <SsoButton config={config} returnTo={next} primary label={`Continue with ${ssoName}`} />
+          <p className="text-center text-sm text-muted">
+            Joining an existing workshop? Ask its owner for an invite link.
+          </p>
+        </div>
+      </AuthCard>
+    );
+  }
+
   return (
     <AuthCard title="Create your workshop" subtitle="You'll be the owner. You can invite your team later.">
+      {config.oidc.enabled ? (
+        <div className="mb-4 space-y-4">
+          <SsoButton config={config} returnTo={next} label={`Sign up with ${ssoName}`} />
+          <OrDivider />
+        </div>
+      ) : null}
       <form onSubmit={submit} className="space-y-4" noValidate>
         {error ? <Banner tone="danger">{error}</Banner> : null}
         <Field label="Your name" autoComplete="name" value={form.display_name} onChange={set("display_name")} />

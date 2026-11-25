@@ -6,7 +6,9 @@ import { BAND_TONE } from "@/components/job/DiagnosisSummary";
 import { Badge, Banner, Button, Card, EmptyState, Meter, Mono, TextArea } from "@/components/ui";
 import { useAuth } from "@/context/auth";
 import { useJob } from "@/context/job";
-import { api, ApiError, type CopilotAnswer, type DiagnosisResult } from "@/lib/api";
+import { api, ApiError, type AnalysisInfo, type CopilotAnswer, type DiagnosisResult } from "@/lib/api";
+import { engineView, nextRunNote } from "@/lib/analysis";
+import { can } from "@/lib/permissions";
 import { describeDtc } from "@/lib/dtc-library";
 import { formatDateTime, safetyTierLabel } from "@/lib/format";
 
@@ -18,18 +20,30 @@ interface Turn {
 
 const threadKey = (id: string) => `rootcause.copilot.${id}`;
 
-function QuotaBlock({ error }: { error: ApiError }) {
+function EngineBadge({ result }: { result: AnalysisInfo & { mode?: string } }) {
+  const v = engineView(result);
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2 text-xs text-muted">
+      <Badge tone={v.tone}>{v.label}</Badge>
+      <span>{v.detail}</span>
+    </span>
+  );
+}
+
+function QuotaUsedUp({ canUpgrade }: { canUpgrade: boolean }) {
   return (
     <Banner
-      tone="warn"
-      title="Monthly AI quota used up"
+      tone="info"
+      title="This month's AI diagnoses are used up"
       action={
-        <Link href="/workshop/billing" className="text-sm font-semibold underline">
-          Upgrade
-        </Link>
+        canUpgrade ? (
+          <Link href="/workshop/billing" className="text-sm font-semibold underline">
+            Upgrade
+          </Link>
+        ) : undefined
       }
     >
-      {error.message}. It resets at the start of next month (Adelaide time), or upgrade for more.
+      You can still diagnose and ask: the free built-in rules answer until the quota resets on the 1st (Adelaide time).
     </Banner>
   );
 }
@@ -59,7 +73,9 @@ export default function CopilotPage() {
   const profile = job.vehicle_profile ?? "generic_obd2_uds";
   const used = me?.usage.ai_diagnoses_used ?? 0;
   const limit = me?.entitlements.ai_diagnoses ?? 0;
-  const outOfQuota = limit > 0 && used >= limit;
+  const modelConfigured = me?.ai?.model_configured ?? false;
+  const outOfQuota = modelConfigured && limit > 0 && used >= limit;
+  const runNote = nextRunNote({ modelConfigured, used, limit });
   const open = job.status === "OPEN";
   const d = job.diagnosis;
   const stale = d && codes.length && codes.slice().sort().join(",") !== [...d.dtcs].sort().join(",");
@@ -111,7 +127,7 @@ export default function CopilotPage() {
           subtitle={d ? `Run ${formatDateTime(d.at)} on ${d.dtcs.join(", ") || "no codes"}` : "Ranks likely causes from this job's codes, the vehicle's wiring and resolved cases."}
           actions={
             open ? (
-              <Button size="sm" variant="blue" busy={busy} disabled={!codes.length || outOfQuota} onClick={() => void diagnose()}>
+              <Button size="sm" variant="blue" busy={busy} disabled={!codes.length} onClick={() => void diagnose()}>
                 {d ? "Run again" : "Diagnose"}
               </Button>
             ) : null
@@ -129,8 +145,10 @@ export default function CopilotPage() {
               </p>
             ) : null}
             {stale ? <Banner tone="info">The codes changed since this diagnosis. Run it again to include them.</Banner> : null}
-            {error?.quotaExceeded ? <QuotaBlock error={error} /> : error ? <Banner tone="danger" title="Diagnosis failed">{error.offline ? "You're offline. Nothing was charged." : error.message}</Banner> : null}
-            {outOfQuota && !error ? <QuotaBlock error={new ApiError(429, `${used} of ${limit} used`)} /> : null}
+            {error ? <Banner tone="danger" title="Diagnosis failed">{error.offline ? "You're offline. Nothing was charged." : error.message}</Banner> : null}
+            {outOfQuota && !error ? <QuotaUsedUp canUpgrade={can(me, "MANAGE_BILLING")} /> : null}
+            {d ? <EngineBadge result={d.result} /> : null}
+            {d && engineView(d.result).fallback ? <Banner tone="info">{engineView(d.result).fallback}</Banner> : null}
 
             {!codes.length ? (
               <EmptyState
@@ -140,12 +158,12 @@ export default function CopilotPage() {
                 Scan the vehicle first. With no stored codes, ask the Copilot about the symptoms instead.
               </EmptyState>
             ) : !d ? (
-              <EmptyState title="Not diagnosed yet">Each run uses one AI diagnosis from this month&apos;s quota.</EmptyState>
-            ) : d.result.mode === "FALLBACK_NO_LLM" ? (
-              <Banner tone="warn" title="AI summary unavailable">
-                {d.result.fallback_reason ?? "The model didn't answer."} Matching cases and shared circuits are listed below.
-              </Banner>
+              <EmptyState title="Not diagnosed yet">{runNote}</EmptyState>
+            ) : !d.result.ranked_causes.length ? (
+              <p className="text-sm text-muted">No ranked causes for these codes. Matching cases and shared circuits are listed alongside.</p>
             ) : (
+              <>
+              {d.result.summary ? <p className="text-sm">{d.result.summary}</p> : null}
               <ol className="space-y-3">
                 {d.result.ranked_causes.map((c, i) => (
                   <li key={`${c.dtc}-${i}`} className="rounded-lg border border-line bg-raised p-3">
@@ -180,11 +198,13 @@ export default function CopilotPage() {
                   </li>
                 ))}
               </ol>
+              </>
             )}
+            {d ? null : codes.length ? <p className="text-xs text-faint">{runNote}</p> : null}
           </div>
         </Card>
 
-        <Card title="Ask the Copilot" subtitle={`About ${job.vehicle_label ?? "this vehicle"}${codes.length ? ` and ${codes.join(", ")}` : ""}. Each question uses one AI credit.`}>
+        <Card title="Ask the Copilot" subtitle={`About ${job.vehicle_label ?? "this vehicle"}${codes.length ? ` and ${codes.join(", ")}` : ""}. ${runNote}`}>
           <div className="space-y-3">
             {thread.length ? (
               <ul className="space-y-3">
@@ -192,7 +212,7 @@ export default function CopilotPage() {
                   <li key={i} className="space-y-1.5">
                     <p className="ml-auto max-w-[85%] rounded-lg bg-blue-soft px-3 py-2 text-sm">{t.q}</p>
                     <div className="max-w-[90%] rounded-lg border border-line bg-raised px-3 py-2 text-sm">
-                      {t.a.mode === "FALLBACK_NO_LLM" || !t.a.answer ? (
+                      {!t.a.answer ? (
                         <p className="text-muted">No answer was available for this question.</p>
                       ) : (
                         <p>{t.a.answer}</p>
@@ -204,6 +224,10 @@ export default function CopilotPage() {
                         </p>
                       ) : null}
                       {t.a.cited_nodes.length ? <p className="mt-1 text-xs text-faint">Cites: {t.a.cited_nodes.join(" · ")}</p> : null}
+                      <p className="mt-1.5">
+                        <EngineBadge result={t.a} />
+                      </p>
+                      {engineView(t.a).fallback ? <p className="mt-1 text-xs text-muted">{engineView(t.a).fallback}</p> : null}
                     </div>
                   </li>
                 ))}
@@ -211,7 +235,7 @@ export default function CopilotPage() {
             ) : (
               <p className="text-sm text-muted">e.g. &quot;I have 0 V at the injector feed, what next?&quot;</p>
             )}
-            {askError?.quotaExceeded ? <QuotaBlock error={askError} /> : askError ? <Banner tone="danger">{askError.offline ? "You're offline." : askError.message}</Banner> : null}
+            {askError ? <Banner tone="danger">{askError.offline ? "You're offline." : askError.message}</Banner> : null}
             <form
               className="space-y-2"
               onSubmit={(e) => {
@@ -231,7 +255,7 @@ export default function CopilotPage() {
                   }
                 }}
               />
-              <Button type="submit" size="sm" busy={asking} disabled={question.trim().length < 2 || outOfQuota}>
+              <Button type="submit" size="sm" busy={asking} disabled={question.trim().length < 2}>
                 Ask
               </Button>
             </form>
@@ -242,9 +266,13 @@ export default function CopilotPage() {
       <div className="space-y-4">
         <Card title="AI usage this month">
           {me ? (
-            <Meter label="Diagnoses and questions" used={used} limit={limit} />
+            <Meter label="AI model answers" used={used} limit={limit} />
           ) : null}
-          <p className="mt-2 text-xs text-faint">Resets on the 1st (Adelaide time).</p>
+          <p className="mt-2 text-xs text-faint">
+            {modelConfigured
+              ? `Only answers from the AI model (${me?.ai?.model_label ?? "configured model"}) count. Built-in rule answers are free. Resets on the 1st (Adelaide time).`
+              : "No AI model is set up on this server, so the free built-in rules answer and nothing is counted."}
+          </p>
         </Card>
         {d ? (
           <Card title="Shared circuits & cases">

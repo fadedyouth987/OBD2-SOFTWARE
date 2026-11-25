@@ -119,9 +119,31 @@ export interface Entitlements {
   trial_used: boolean;
 }
 
+export type Permission =
+  | "MANAGE_BILLING"
+  | "TRANSFER_OWNERSHIP"
+  | "MANAGE_ROLES"
+  | "REMOVE_MEMBERS"
+  | "MANAGE_SITES"
+  | "INVITE_MEMBERS"
+  | "INVITE_LEAD_TECHS"
+  | "MANAGE_ALL_JOBS"
+  | "MANAGE_SHARED_FILES"
+  | "SUBMIT_WORKSHOP_ACCREDITATION"
+  | "VIEW_TEAM_AUDIT";
+
 export interface Me {
   user: { id: string; email: string | null; display_name: string | null; last_login_at: string | null };
-  workspace: { tenant_id: string; name: string; role: string; aasra_verified: boolean };
+  workspace: {
+    tenant_id: string;
+    name: string;
+    role: string;
+    aasra_verified: boolean;
+    /** What this role may do here (see services/cloud-api/app/services/permissions.py). */
+    permissions?: Permission[];
+  };
+  /** Operator of this RootCause deployment (accreditation review, procedure imports). */
+  platform_admin?: boolean;
   workspaces: Workspace[];
   entitlements: Entitlements;
   usage: {
@@ -132,6 +154,8 @@ export interface Me {
   };
   immo_feature_enabled: boolean;
   dev_login_enabled: boolean;
+  /** Whether diagnoses use an AI model (counts against quota) or only the free built-in rules. */
+  ai?: { model_configured: boolean; model_label: string | null };
 }
 
 export interface SessionGrant {
@@ -140,6 +164,17 @@ export interface SessionGrant {
   tenant_id: string;
   user_id: string;
   workspaces: Workspace[];
+}
+
+export interface AuthConfig {
+  password_enabled: boolean;
+  oidc: { enabled: boolean; provider_name: string | null; logout_url: string | null };
+  dev_login: boolean;
+}
+
+export interface OidcGrant extends SessionGrant {
+  return_to: string;
+  created: boolean;
 }
 
 export interface JobDtc {
@@ -176,28 +211,40 @@ export interface RankedCause {
   guided_steps: { step: string; action: string; safety_tier?: string }[];
 }
 
-export interface DiagnosisResult {
-  session_id: string;
-  vehicle: string;
-  engine?: string;
-  mode: "KG_RAG_SYNTHESIS" | "FALLBACK_NO_LLM" | string;
-  fallback_reason?: string;
-  shared_circuit_nodes: string[];
-  matched_cases: ResolvedCase[];
-  ranked_causes: RankedCause[];
+/** Which engine produced an answer: the AI model (uses quota) or the built-in rules (free). */
+export interface AnalysisInfo {
+  analysis?: "llm" | "rules";
+  /** e.g. "Amazon Bedrock · …" or "Built-in rules". */
+  analysis_label?: string;
+  /** True only when a real model diagnosis was counted against the monthly quota. */
+  quota_charged?: boolean;
+  /** Why the rules ran instead of the model: not_configured | quota_exhausted | llm_error. */
+  fallback_reason?: string | null;
+  /** Plain-English version of fallback_reason for the UI. */
+  fallback_text?: string | null;
   quota_used?: number;
   quota_limit?: number;
 }
 
-export interface CopilotAnswer {
+export interface DiagnosisResult extends AnalysisInfo {
+  session_id: string;
+  vehicle: string;
+  engine?: string;
+  mode: "LLM" | "RULES" | string;
+  /** Model-written overview (LLM runs only). */
+  summary?: string | null;
+  shared_circuit_nodes: string[];
+  matched_cases: ResolvedCase[];
+  ranked_causes: RankedCause[];
+}
+
+export interface CopilotAnswer extends AnalysisInfo {
   session_id: string;
   vehicle?: string;
   mode: string;
   cited_nodes: string[];
   answer: string;
   recommended_next_step?: string;
-  quota_used?: number;
-  quota_limit?: number;
 }
 
 export interface Closeout {
@@ -227,6 +274,10 @@ export interface Job {
   lease_tier: string | null;
   customer_ref: string | null;
   complaint: string | null;
+  /** Vehicle identity licensed procedures match on; prefilled from the VIN, confirmed by the tech. */
+  vehicle_make?: string | null;
+  vehicle_model?: string | null;
+  model_year?: number | null;
   dtcs: JobDtc[];
   alerts: JobAlert[];
   diagnosis: Diagnosis | null;
@@ -235,6 +286,9 @@ export interface Job {
   ended_at: string | null;
   updated_at: string | null;
   user_id: string | null;
+  technician_name?: string | null;
+  /** The signed-in user may edit/close this job (their own, or lead tech / owner). */
+  can_edit?: boolean;
 }
 
 export interface JobList {
@@ -296,14 +350,30 @@ export interface ServiceFunction {
   notes: string;
   conditions: "stationary" | "engine_off_battery";
   checklist: string[];
-  availability: "simulated" | "no_verified_procedure";
+  availability: "simulated" | "licensed" | "no_verified_procedure";
   procedure: ServiceProcedure | null;
+  /** Licensed source details (licensed procedures only). */
+  source?: ProcedureSourceInfo | null;
+}
+
+export interface ProcedureSourceInfo {
+  name: string;
+  licence: string;
+  licence_url: string | null;
+  source_ref: string;
+  version: number;
+  record_id: string;
+  imported_at: string | null;
+  notes: string | null;
 }
 
 export interface ServiceFunctionList {
   adapter_id: string | null;
-  source: "simulator" | "none";
+  source: "simulator" | "licensed" | "none";
   note: string;
+  vehicle?: { make: string; model: string; year: number | null } | null;
+  /** Active licensed procedures on this server (any vehicle). */
+  licensed_catalogue?: number;
   functions: ServiceFunction[];
 }
 
@@ -427,8 +497,49 @@ export interface TeamSite {
   members: number;
 }
 
+export interface TeamAbilities {
+  invite: boolean;
+  invite_roles: TeamRole[];
+  revoke_invites: boolean;
+  change_roles: boolean;
+  remove_members: boolean;
+  manage_sites: boolean;
+  transfer_ownership: boolean;
+  view_history: boolean;
+}
+
+export interface OwnershipTransfer {
+  id: string;
+  from_user_id: string;
+  from_name: string;
+  to_user_id: string;
+  to_name: string;
+  created_at: string | null;
+  expires_at: string;
+  for_you: boolean;
+}
+
+export interface TeamAuditEvent {
+  id: number;
+  at: string | null;
+  action: string;
+  actor: string | null;
+  subject: string | null;
+  detail: Record<string, unknown>;
+}
+
+export interface EmailResult {
+  sent: boolean;
+  provider: string;
+  error: string | null;
+}
+
 export interface Team {
   can_manage: boolean;
+  abilities?: TeamAbilities;
+  email_enabled?: boolean;
+  ownership_transfer?: OwnershipTransfer | null;
+  history?: TeamAuditEvent[];
   seats: { used: number; pending: number; limit: number };
   sites_cap: { used: number; limit: number };
   members: TeamMember[];
@@ -440,6 +551,7 @@ export interface CreatedInvite {
   invite: TeamInvite;
   token: string;
   invite_url: string;
+  email?: EmailResult;
 }
 
 export interface InviteLookup {
@@ -481,6 +593,116 @@ export interface Schematic {
   size_bytes: number | null;
   page_count: number | null;
   created_at: string | null;
+  /** Pages counted against the quota when uploaded. */
+  pages_charged?: number;
+  /** Pages handed back if deleted now (same billing month only). */
+  refundable_pages?: number;
+  /** User id of the uploader (they, a lead tech or the owner may delete it). */
+  uploaded_by?: string | null;
+}
+
+export interface SchematicDeleted {
+  refunded_pages: number;
+  pages_used: number;
+  pages_limit: number;
+}
+
+// --- Accreditation (AASRA / MVIS), reviewed by a platform admin --------------------
+
+export type AccreditationState =
+  | "not_submitted"
+  | "pending"
+  | "approved"
+  | "renewal_pending"
+  | "rejected"
+  | "expired"
+  | "revoked";
+
+export interface AccreditationEvidence {
+  id: string;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+}
+
+export interface AccreditationRequest {
+  id: string;
+  kind: "WORKSHOP" | "TECHNICIAN";
+  status: "PENDING" | "APPROVED" | "REJECTED" | "SUPERSEDED" | "EXPIRED" | "REVOKED";
+  aasra_member_id: string | null;
+  business_abn: string | null;
+  national_police_check_dated: string | null;
+  repairer_licence_renewed_at: string | null;
+  submitted_at: string | null;
+  reviewed_at: string | null;
+  decision_reason: string | null;
+  expires_at: string | null;
+  evidence: AccreditationEvidence[];
+}
+
+export interface AccreditationBlock {
+  state: AccreditationState;
+  /** Approved and still in date (may be expired if state says so). */
+  current: AccreditationRequest | null;
+  pending: AccreditationRequest | null;
+  latest: AccreditationRequest | null;
+}
+
+export interface AccreditationOverview {
+  technician: AccreditationBlock;
+  workshop: AccreditationBlock;
+  evidence_rules: { max_files: number; max_bytes: number; types: string[] };
+  reminder_days: number[];
+  dev_auto_approve: boolean;
+}
+
+export interface AdminAccreditation extends AccreditationRequest {
+  workshop: string | null;
+  tenant_id: string;
+  subject_name: string | null;
+  subject_email: string | null;
+  paperwork_limit: string | null;
+  events: { at: string | null; event: string; detail: Record<string, unknown> }[];
+}
+
+// --- Licensed procedures (platform admin) -------------------------------------------
+
+export interface ProcedureCatalogue {
+  feed_configured: boolean;
+  feed_name: string | null;
+  sources: {
+    id: string;
+    key: string;
+    name: string;
+    licence: string;
+    licence_url: string | null;
+    licensed_until: string | null;
+    provider: string;
+    active_procedures: number;
+    updated_at: string | null;
+  }[];
+  recent: {
+    id: string;
+    source: string | null;
+    source_ref: string;
+    version: number;
+    status: "ACTIVE" | "SUPERSEDED" | "WITHDRAWN";
+    function_id: string;
+    make: string;
+    model: string;
+    years: string;
+    module: string;
+    imported_at: string | null;
+  }[];
+}
+
+export interface ProcedureImportResult {
+  source: string;
+  created: number;
+  updated: number;
+  unchanged: number;
+  withdrawn: number;
+  feed?: string;
 }
 
 export interface StoredDbc {
@@ -491,4 +713,6 @@ export interface StoredDbc {
   message_count: number | null;
   sha256: string;
   created_at: string | null;
+  /** Uploader's user id (they, a lead tech or the owner may delete it). */
+  created_by?: string | null;
 }

@@ -4,8 +4,10 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { AuthCard } from "@/components/AuthCard";
+import { OrDivider, SsoButton } from "@/components/SsoButton";
 import { Banner, Button, Field, Skeleton, Spinner } from "@/components/ui";
 import { useAuth } from "@/context/auth";
+import { useAuthConfig } from "@/lib/sso";
 import { ApiError, ROLE_LABEL, api, type InviteLookup } from "@/lib/api";
 
 const MIN_PASSWORD = 10;
@@ -33,6 +35,7 @@ function JoinInner() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [joined, setJoined] = useState(false);
+  const config = useAuthConfig();
 
   useEffect(() => {
     if (!token) {
@@ -60,7 +63,7 @@ function JoinInner() {
       </AuthCard>
     );
   }
-  if (!invite || status === "loading") {
+  if (!invite || status === "loading" || !config) {
     return (
       <AuthCard title="Joining a workshop" subtitle="Checking your invite…">
         <Skeleton className="h-24" />
@@ -126,8 +129,37 @@ function JoinInner() {
   }
 
   const pwError = touched && form.password.length > 0 && form.password.length < MIN_PASSWORD ? `Use at least ${MIN_PASSWORD} characters.` : null;
+  const ssoName = config.oidc.provider_name ?? "single sign-on";
+  const sso = (
+    <SsoButton
+      config={config}
+      inviteToken={token}
+      returnTo="/home?joined=1"
+      primary={!config.password_enabled}
+      label={`Join with ${ssoName}`}
+    />
+  );
+  if (!config.password_enabled) {
+    return (
+      <AuthCard title={`Join ${invite.workshop}`} subtitle={subtitle}>
+        <div className="space-y-4">
+          <p className="text-sm text-muted">
+            Sign in with {ssoName} using <span className="font-semibold text-text">{invite.email}</span>. The invite only works for that
+            email.
+          </p>
+          {sso}
+        </div>
+      </AuthCard>
+    );
+  }
   return (
     <AuthCard title={`Join ${invite.workshop}`} subtitle={subtitle}>
+      {config.oidc.enabled ? (
+        <div className="mb-4 space-y-4">
+          {sso}
+          <OrDivider />
+        </div>
+      ) : null}
       <form
         className="space-y-4"
         noValidate

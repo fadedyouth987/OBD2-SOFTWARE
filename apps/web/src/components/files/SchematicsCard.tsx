@@ -4,8 +4,10 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Banner, Button, Card, EmptyState, Field, Meter, Select, Skeleton } from "@/components/ui";
 import { useAuth } from "@/context/auth";
-import { ApiError, api, apiBlob, type Schematic, type VehiclePlatform } from "@/lib/api";
+import { ApiError, api, apiBlob, type Schematic, type SchematicDeleted, type VehiclePlatform } from "@/lib/api";
 import { formatBytes, formatDateTime } from "@/lib/format";
+import { canDeleteFile } from "@/lib/permissions";
+import { chargeNote, deletePrompt, deletedText } from "@/lib/schematics";
 
 const ACCEPT = "application/pdf,image/png,image/jpeg";
 const MAX_BYTES = 25 * 1024 * 1024;
@@ -32,21 +34,24 @@ export function SchematicsCard({
   const [items, setItems] = useState<Schematic[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [usage, setUsage] = useState<{ used: number; limit: number } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
   const [profile, setProfile] = useState(vehicleProfile ?? "");
   const input = useRef<HTMLInputElement>(null);
 
-  const limit = me?.entitlements.schematic_pages ?? 0;
-  const used = me?.usage.schematic_pages_used ?? 0;
+  const limit = usage?.limit ?? me?.entitlements.schematic_pages ?? 0;
+  const used = usage?.used ?? me?.usage.schematic_pages_used ?? 0;
 
   const load = useCallback(async () => {
     setLoadError(null);
     try {
       const q = vehicleProfile ? `?vehicle_profile=${encodeURIComponent(vehicleProfile)}` : "";
-      const r = await api<{ items: Schematic[] }>(`/api/v1/schematics${q}`, { token });
+      const r = await api<{ items: Schematic[]; pages_used?: number; pages_limit?: number }>(`/api/v1/schematics${q}`, { token });
       setItems(r.items);
+      if (typeof r.pages_used === "number" && typeof r.pages_limit === "number") setUsage({ used: r.pages_used, limit: r.pages_limit });
     } catch (e) {
       setLoadError(errText(e));
     }
@@ -84,12 +89,19 @@ export function SchematicsCard({
     }
     setBusy("upload");
     setError(null);
+    setNotice(null);
     const form = new FormData();
     form.append("file", file);
     form.append("title", title.trim());
     form.append("vehicle_profile", vehicleProfile ?? profile);
     try {
-      await api("/api/v1/schematics", { form, token });
+      const made = await api<{ schematic: Schematic; pages_used: number; pages_limit: number }>("/api/v1/schematics", { form, token });
+      const n = made.schematic?.pages_charged ?? made.schematic?.page_count ?? 0;
+      setNotice(
+        n
+          ? `Uploaded. ${n} page${n === 1 ? "" : "s"} counted this month. Delete it before the month ends and they come back.`
+          : "Uploaded.",
+      );
       setFile(null);
       setTitle("");
       if (input.current) input.current.value = "";
@@ -115,7 +127,12 @@ export function SchematicsCard({
     >
       <div className="space-y-4">
         {limit > 0 ? (
-          <Meter label="Schematic pages this month" used={used} limit={limit} />
+          <div className="space-y-1">
+            <Meter label="Schematic pages this month" used={used} limit={limit} />
+            <p className="text-xs text-faint">
+              Pages count when you upload. Delete a file in the same month (Adelaide time) and its pages come back.
+            </p>
+          </div>
         ) : (
           <Banner tone="info" title="Included from the Pro plan" action={<Link className="text-sm underline" href="/workshop/billing">See plans</Link>}>
             Upload wiring diagrams and open them next to the job.
@@ -126,6 +143,7 @@ export function SchematicsCard({
             {error}
           </Banner>
         ) : null}
+        {notice ? <Banner tone="ok">{notice}</Banner> : null}
         {loadError ? (
           <Banner tone="danger" title="Couldn't load schematics" action={<Button size="sm" onClick={() => void load()}>Retry</Button>}>
             {loadError}
@@ -134,7 +152,7 @@ export function SchematicsCard({
           <Skeleton className="h-20" />
         ) : !items.length ? (
           <EmptyState title="No schematics yet">
-            {limit > 0 ? "Upload a PDF or a photo of a wiring diagram. Each page counts toward this month's allowance." : "Nothing uploaded."}
+            {limit > 0 ? "Upload a PDF or a photo of a wiring diagram. Each page counts toward this month's allowance when you upload it." : "Nothing uploaded."}
           </EmptyState>
         ) : (
           <ul className="divide-y divide-line rounded-lg border border-line">
@@ -148,6 +166,7 @@ export function SchematicsCard({
                       formatBytes(s.size_bytes),
                       vehicleProfile ? null : platformName(s.vehicle_profile),
                       s.created_at ? formatDateTime(s.created_at) : null,
+                      chargeNote(s),
                     ]
                       .filter(Boolean)
                       .join(" · ")}
@@ -157,27 +176,31 @@ export function SchematicsCard({
                   <Button size="sm" busy={busy === `open-${s.id}`} disabled={busy !== null} onClick={() => void open(s)}>
                     Open
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    busy={busy === `del-${s.id}`}
-                    disabled={busy !== null}
-                    onClick={async () => {
-                      if (!window.confirm(`Delete ${s.title}? Pages already used this month aren't given back.`)) return;
-                      setBusy(`del-${s.id}`);
-                      setError(null);
-                      try {
-                        await api(`/api/v1/schematics/${s.id}`, { method: "DELETE", token });
-                        await load();
-                      } catch (err) {
-                        setError(errText(err));
-                      } finally {
-                        setBusy(null);
-                      }
-                    }}
-                  >
-                    Delete
-                  </Button>
+                  {canDeleteFile(me, s.uploaded_by) ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      busy={busy === `del-${s.id}`}
+                      disabled={busy !== null}
+                      onClick={async () => {
+                        if (!window.confirm(deletePrompt(s))) return;
+                        setBusy(`del-${s.id}`);
+                        setError(null);
+                        setNotice(null);
+                        try {
+                          const r = await api<SchematicDeleted | null>(`/api/v1/schematics/${s.id}`, { method: "DELETE", token });
+                          setNotice(deletedText(s.title, r));
+                          await Promise.all([load(), refresh()]);
+                        } catch (err) {
+                          setError(errText(err));
+                        } finally {
+                          setBusy(null);
+                        }
+                      }}
+                    >
+                      Delete
+                    </Button>
+                  ) : null}
                 </span>
               </li>
             ))}

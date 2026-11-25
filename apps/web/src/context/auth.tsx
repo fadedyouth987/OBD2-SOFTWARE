@@ -1,7 +1,8 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, api, type Me, type SessionGrant } from "@/lib/api";
+import { ApiError, api, type Me, type OidcGrant, type SessionGrant } from "@/lib/api";
+import { SSO_FLAG, loadAuthConfig } from "@/lib/sso";
 
 export const SESSION_KEY = "rootcause.session";
 
@@ -18,6 +19,9 @@ interface AuthValue {
   signUp: (input: { email: string; password: string; display_name: string; workshop_name: string; invite_token?: string }) => Promise<void>;
   /** Join a workshop from an invite link while signed in; switches to it. */
   acceptInvite: (inviteToken: string) => Promise<void>;
+  /** Finish OIDC sign-in from the provider's callback; returns where to go next. */
+  completeSso: (code: string, state: string) => Promise<OidcGrant>;
+  /** Signs out here, and at the provider too when it was an SSO sign-in and a logout URL is set. */
   signOut: () => void;
   switchWorkspace: (tenantId: string) => Promise<void>;
   refresh: () => Promise<void>;
@@ -183,13 +187,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [adopt, token],
   );
 
+  const completeSso = useCallback(
+    async (code: string, state: string) => {
+      const grant = await api<OidcGrant>("/api/v1/auth/oidc/callback", { body: { code, state } });
+      try {
+        window.localStorage.setItem(SSO_FLAG, "1");
+      } catch {
+        /* private mode */
+      }
+      await adopt(grant);
+      return grant;
+    },
+    [adopt],
+  );
+
+  const signOut = useCallback(() => {
+    let sso = false;
+    try {
+      sso = window.localStorage.getItem(SSO_FLAG) === "1";
+      window.localStorage.removeItem(SSO_FLAG);
+    } catch {
+      /* private mode */
+    }
+    clear();
+    if (sso) {
+      // Without this the provider's own session would sign the next person straight back in.
+      void loadAuthConfig().then((c) => {
+        if (c.oidc.logout_url) window.location.assign(c.oidc.logout_url);
+      });
+    }
+  }, [clear]);
+
   const refresh = useCallback(async () => {
     if (token) await load(token);
   }, [load, token]);
 
   const value = useMemo<AuthValue>(
-    () => ({ status, token, me, offline, error, signIn, signUp, acceptInvite, signOut: clear, switchWorkspace, refresh }),
-    [status, token, me, offline, error, signIn, signUp, acceptInvite, clear, switchWorkspace, refresh],
+    () => ({ status, token, me, offline, error, signIn, signUp, acceptInvite, completeSso, signOut, switchWorkspace, refresh }),
+    [status, token, me, offline, error, signIn, signUp, acceptInvite, completeSso, signOut, switchWorkspace, refresh],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

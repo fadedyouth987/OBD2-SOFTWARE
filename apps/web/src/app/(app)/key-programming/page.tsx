@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { SafetyConfirmModal } from "@/components/safety/SafetyConfirmModal";
 import { useGatedRunner, useLiveReadings } from "@/components/safety/useGated";
+import { AccreditationCard } from "@/components/accreditation/AccreditationCard";
 import { Badge, Banner, Button, ButtonLink, Card, Field, Mono, PageHeader, Skeleton } from "@/components/ui";
 import { useAuth } from "@/context/auth";
 import { useEdge } from "@/context/edge";
@@ -26,73 +27,14 @@ const CHECK_TEXT: Record<keyof ImmoEligibility["checks"], { label: string; fix: 
   feature_enabled: { label: "Key programming is switched on for this service", fix: "It's off on this server. Ask your administrator." },
   plan: { label: "Workshop or Fleet plan", fix: <Link className="underline" href="/workshop/billing">See plans</Link> },
   addon: { label: "IMMO add-on", fix: <Link className="underline" href="/workshop/billing">Add it to your plan</Link> },
-  aasra: { label: "Workshop verified with AASRA", fix: <Link className="underline" href="/workshop">How verification works</Link> },
-  technician: { label: "You're an accredited technician", fix: "Enrol below." },
+  aasra: { label: "Workshop verified with AASRA", fix: <Link className="underline" href="/workshop#accreditation">The owner submits it on the Workshop page</Link> },
+  technician: { label: "You're an accredited technician", fix: "Send your AASRA details and evidence below for review." },
 };
 
 function errText(e: unknown): string {
   if (e instanceof ApiError) return e.offline ? "You're offline." : e.message;
   if (e instanceof EdgeRequestError) return `${e.message} ${e.hint}`.trim();
   return e instanceof Error ? e.message : String(e);
-}
-
-function EnrolForm({ onDone, status }: { onDone: () => void; status: ImmoEligibility["technician"] }) {
-  const { token } = useAuth();
-  const [member, setMember] = useState(status.aasra_member_id ?? "");
-  const [police, setPolice] = useState("");
-  const [licence, setLicence] = useState("");
-  const [declared, setDeclared] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(status.status === "pending");
-  return (
-    <form
-      className="space-y-3"
-      onSubmit={async (e) => {
-        e.preventDefault();
-        setBusy(true);
-        setError(null);
-        try {
-          const r = await api<{ accredited: boolean; vsp_status: string }>("/api/v1/immo/technicians/enrol", {
-            token,
-            body: {
-              aasra_member_id: member.trim(),
-              national_police_check_dated: police || null,
-              repairer_licence_renewed_at: licence || null,
-              declared,
-            },
-          });
-          setPending(!r.accredited);
-          onDone();
-        } catch (err) {
-          setError(errText(err));
-        } finally {
-          setBusy(false);
-        }
-      }}
-    >
-      {pending ? (
-        <Banner tone="info" title="Paperwork recorded; awaiting AASRA verification">
-          Your details are saved. You can program keys once AASRA confirms your security accreditation.
-        </Banner>
-      ) : status.status === "paperwork_expired" || status.status === "expired" ? (
-        <Banner tone="warn">Your accreditation or paperwork has expired. Update the dates below.</Banner>
-      ) : null}
-      <Field label="AASRA member ID" required value={member} onChange={(e) => setMember(e.target.value)} maxLength={64} />
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="National police check date" type="date" value={police} onChange={(e) => setPolice(e.target.value)} hint="Within the statutory period." />
-        <Field label="Or repairer licence renewal date" type="date" value={licence} onChange={(e) => setLicence(e.target.value)} />
-      </div>
-      <label className="flex min-h-[44px] items-start gap-3 text-sm">
-        <input type="checkbox" className="mt-1 h-5 w-5" checked={declared} onChange={(e) => setDeclared(e.target.checked)} />
-        <span>I declare these details are true and I&apos;ll only access security information for vehicles whose owners have authorised the work.</span>
-      </label>
-      {error ? <Banner tone="danger">{error}</Banner> : null}
-      <Button type="submit" busy={busy} disabled={!member.trim() || (!police && !licence) || !declared}>
-        Submit accreditation
-      </Button>
-    </form>
-  );
 }
 
 export default function KeyProgrammingPage() {
@@ -321,9 +263,7 @@ export default function KeyProgrammingPage() {
             </ul>
           </Card>
           {elig.checks.feature_enabled && !elig.checks.technician ? (
-            <Card title="Technician accreditation">
-              <EnrolForm status={elig.technician} onDone={() => void loadElig()} />
-            </Card>
+            <AccreditationCard kind="technician" onChange={() => void loadElig()} />
           ) : null}
         </div>
       </>

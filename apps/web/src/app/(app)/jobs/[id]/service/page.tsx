@@ -50,11 +50,15 @@ export default function ServicePage() {
   useEffect(() => {
     if (!token) return;
     setLoadError(null);
-    const q = adapterId ? `?adapter_id=${encodeURIComponent(adapterId)}` : "";
-    api<ServiceFunctionList>(`/api/v1/service-functions${q}`, { token })
+    const params = new URLSearchParams();
+    if (adapterId) params.set("adapter_id", adapterId);
+    if (job?.id) params.set("job_id", job.id);
+    const q = params.toString();
+    api<ServiceFunctionList>(`/api/v1/service-functions${q ? `?${q}` : ""}`, { token })
       .then(setList)
       .catch((e) => setLoadError(e instanceof ApiError ? e.message : String(e)));
-  }, [token, adapterId]);
+    // Re-match when the job's make/model/year change.
+  }, [token, adapterId, job?.id, job?.vehicle_make, job?.vehicle_model, job?.model_year]);
 
   useEffect(() => {
     if (phase.kind !== "running") return;
@@ -116,7 +120,9 @@ export default function ServicePage() {
       void edge.diag({ tx: p.tx_id, rx: p.rx_id, protocol: "UDS", payloadHex: "3E00" }).catch(() => undefined);
     }, 2000);
     setPhase({ kind: "starting", fn });
-    const [res] = await run([stepFor(fn, p.start_hex, `${fn.name}: start`)], `${fn.name} on ${p.module}`);
+    // Licensed runs record exactly which procedure version was used.
+    const via = fn.source ? ` (${fn.source.name} ${fn.source.source_ref} v${fn.source.version})` : "";
+    const [res] = await run([stepFor(fn, p.start_hex, `${fn.name}: start${via}`)], `${fn.name} on ${p.module}`);
     if (!res?.ok) {
       await exitSession(fn);
       setConfirmError(res?.message ?? "Not started.");
@@ -185,11 +191,26 @@ export default function ServicePage() {
       {!connected && open ? <Banner tone="neutral">Connect the vehicle to run a service function.</Banner> : null}
       {!open ? <Banner tone="neutral">This job is closed.</Banner> : null}
       {list?.source === "none" ? (
-        <Banner tone="info" title="No verified procedures for this vehicle">
+        <Banner
+          tone="info"
+          title="No verified procedures for this vehicle"
+          action={
+            list.licensed_catalogue ? (
+              <Link href={`/jobs/${job?.id ?? ""}`} className="text-sm font-semibold underline">
+                Check make, model and year
+              </Link>
+            ) : undefined
+          }
+        >
           {list.note}
+          {list.vehicle ? ` Looked up: ${[list.vehicle.year, list.vehicle.make, list.vehicle.model].filter(Boolean).join(" ")}.` : ""}
         </Banner>
       ) : list?.source === "simulator" ? (
         <Banner tone="info">{list.note}</Banner>
+      ) : list?.source === "licensed" ? (
+        <Banner tone="ok" title={`Licensed procedures for ${[list.vehicle?.year, list.vehicle?.make, list.vehicle?.model].filter(Boolean).join(" ")}`}>
+          {list.note}
+        </Banner>
       ) : null}
 
       {phase.kind !== "idle" && phase.kind !== "done" && phase.kind !== "running" && !confirming ? (
@@ -239,19 +260,41 @@ export default function ServicePage() {
       ) : (
         <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {list.functions.map((fn) => {
-            const available = fn.availability === "simulated" && !!fn.procedure;
+            const available = (fn.availability === "simulated" || fn.availability === "licensed") && !!fn.procedure;
             const canRun = open && connected && activeMode && access === "available" && available && !busy;
             return (
               <li key={fn.id} className="flex flex-col rounded-xl border border-line bg-panel p-4">
                 <div className="flex items-start justify-between gap-2">
                   <h3 className="font-semibold">{fn.name}</h3>
-                  {available ? <Badge tone="info">Simulator</Badge> : <Badge>No procedure</Badge>}
+                  {fn.availability === "licensed" && fn.procedure ? (
+                    <Badge tone="ok">Licensed</Badge>
+                  ) : available ? (
+                    <Badge tone="info">Simulator</Badge>
+                  ) : (
+                    <Badge>No verified procedure</Badge>
+                  )}
                 </div>
                 <p className="mt-1 text-sm text-muted">{fn.notes}</p>
                 <p className="mt-2 text-xs text-faint">
                   {fn.uds_service}
                   {fn.procedure ? ` · ${fn.procedure.module} ${hexId(fn.procedure.tx_id)} · ${fn.procedure.identifier}` : ""}
                 </p>
+                {fn.source ? (
+                  <p className="mt-1 text-xs text-muted">
+                    Source: {fn.source.name} · ref {fn.source.source_ref} v{fn.source.version}
+                    {fn.source.licence_url ? (
+                      <>
+                        {" · "}
+                        <a className="underline" href={fn.source.licence_url} target="_blank" rel="noopener noreferrer">
+                          licence
+                        </a>
+                      </>
+                    ) : (
+                      ` · ${fn.source.licence}`
+                    )}
+                    {fn.source.notes ? <span className="block">{fn.source.notes}</span> : null}
+                  </p>
+                ) : null}
                 <p className="mt-1 text-xs text-faint">
                   Conditions: {fn.conditions === "engine_off_battery" ? "stationary, engine off, battery ≥ 12.5 V" : "stationary"}
                 </p>

@@ -6,6 +6,7 @@ import { useAuth } from "@/context/auth";
 import { ApiError, api, apiBlob, type StoredDbc } from "@/lib/api";
 import { parseDbc, type Dbc } from "@/lib/dbc";
 import { formatBytes } from "@/lib/format";
+import { canDeleteFile } from "@/lib/permissions";
 
 const MAX_DBC_BYTES = 2 * 1024 * 1024;
 
@@ -34,7 +35,7 @@ export function DbcCard({
   liveIds: number[];
   vehicleProfile?: string | null;
 }) {
-  const { token } = useAuth();
+  const { token, me } = useAuth();
   const [saved, setSaved] = useState<StoredDbc[] | null>(null);
   const [savedError, setSavedError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -163,6 +164,7 @@ export function DbcCard({
                     >
                       {loaded?.savedId === d.id ? "Loaded" : "Load"}
                     </Button>
+                    {canDeleteFile(me, d.created_by) ? (
                     <Button
                       size="sm"
                       variant="ghost"
@@ -184,6 +186,7 @@ export function DbcCard({
                     >
                       Delete
                     </Button>
+                    ) : null}
                   </span>
                 </li>
               ))}

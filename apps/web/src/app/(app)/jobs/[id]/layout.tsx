@@ -5,6 +5,7 @@ import { useParams, usePathname } from "next/navigation";
 import { Badge, Banner, Button, ButtonLink, EmptyState, Skeleton, cx } from "@/components/ui";
 import { useAuth } from "@/context/auth";
 import { useEdge } from "@/context/edge";
+import { AssignControl } from "@/components/job/AssignControl";
 import { JobProvider, useJob } from "@/context/job";
 import { featureAccess } from "@/lib/entitlements";
 import { formatDateTime } from "@/lib/format";
@@ -97,6 +98,9 @@ function Header() {
           {job.odometer_km !== null ? ` · ${job.odometer_km.toLocaleString("en-AU")} km` : ""}
           {job.customer_ref ? ` · ${job.customer_ref}` : ""} · started {formatDateTime(job.started_at)}
         </p>
+        <div className="no-print mt-2">
+          <AssignControl />
+        </div>
       </div>
       <div className="no-print flex gap-2">
         <ButtonLink href={`/report/${job.id}`} size="sm" target="_blank" rel="noopener">
@@ -104,6 +108,17 @@ function Header() {
         </ButtonLink>
       </div>
     </div>
+  );
+}
+
+/** A technician looking at someone else's job: viewing is fine, changes are theirs. */
+function NotYoursBar() {
+  const { job } = useJob();
+  if (!job || job.can_edit !== false || job.status !== "OPEN") return null;
+  return (
+    <Banner tone="info" title={`${job.technician_name ?? "Another technician"}'s job`}>
+      You can look through it. Only they, a lead technician or the owner can change or close it.
+    </Banner>
   );
 }
 
@@ -133,6 +148,7 @@ function Body({ id, children }: { id: string; children: React.ReactNode }) {
     <div className="space-y-4">
       <Header />
       <Tabs id={id} />
+      <NotYoursBar />
       <LinkBar />
       {children}
     </div>

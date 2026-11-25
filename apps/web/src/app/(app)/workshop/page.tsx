@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { AccreditationCard } from "@/components/accreditation/AccreditationCard";
 import { TeamCard } from "@/components/team/TeamCard";
 import { Badge, Banner, Button, ButtonLink, Card, PageHeader } from "@/components/ui";
 import { useAuth } from "@/context/auth";
 import { TIER_LABEL } from "@/lib/entitlements";
 import { formatDateTime } from "@/lib/format";
+import { can } from "@/lib/permissions";
 
 const ROLE: Record<string, string> = { OWNER: "Owner", LEAD_TECH: "Lead technician", TECH: "Technician" };
 
@@ -38,7 +40,14 @@ export default function WorkshopPage() {
                 <>
                   <Badge>Not verified</Badge>
                   <span className="mt-1 block text-xs text-muted">
-                    Needed for security-related work such as key programming. Verification is done through AASRA; contact support with your AASRA membership to have it recorded.
+                    Needed for security-related work such as key programming.{" "}
+                    {can(me, "SUBMIT_WORKSHOP_ACCREDITATION") ? (
+                      <a className="underline" href="#accreditation">
+                        Submit it below
+                      </a>
+                    ) : (
+                      "The owner submits it for review."
+                    )}
                   </span>
                 </>
               )}
@@ -56,6 +65,7 @@ export default function WorkshopPage() {
           </dl>
         </Card>
         <TeamCard />
+        {can(me, "SUBMIT_WORKSHOP_ACCREDITATION") ? <AccreditationCard kind="workshop" className="lg:col-span-2" /> : null}
         {me.workspaces.length > 1 ? (
           <Card title="Your workshops" subtitle="Switch to work in another workshop you belong to.">
             {error ? <Banner tone="danger">{error}</Banner> : null}

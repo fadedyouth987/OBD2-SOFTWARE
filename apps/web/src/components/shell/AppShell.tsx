@@ -23,12 +23,19 @@ const NAV = [
   { href: "/workshop", label: "Workshop", icon: "⚙" },
 ];
 
+const ADMIN_NAV = [
+  { href: "/admin/accreditations", label: "Accreditation review", icon: "✓" },
+  { href: "/admin/procedures", label: "OEM procedures", icon: "☰" },
+];
+
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const path = usePathname();
+  const { me } = useAuth();
+  const items = me?.platform_admin ? [...NAV, ...ADMIN_NAV] : NAV;
   return (
     <nav aria-label="Main">
       <ul className="space-y-1">
-        {NAV.map((item) => {
+        {items.map((item) => {
           const active = path === item.href || path.startsWith(`${item.href}/`);
           return (
             <li key={item.href}>

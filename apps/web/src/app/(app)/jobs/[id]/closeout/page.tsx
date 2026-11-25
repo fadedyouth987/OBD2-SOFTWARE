@@ -148,7 +148,7 @@ export default function CloseoutPage() {
           </fieldset>
           {error ? <Banner tone="danger" title="Couldn't close the job">{error}</Banner> : null}
           <div className="flex flex-wrap gap-2">
-            <Button type="submit" busy={busy}>
+            <Button type="submit" busy={busy} disabled={job.can_edit === false}>
               Close job
             </Button>
             <ButtonLink href={reportHref} variant="ghost">
