@@ -106,6 +106,9 @@ class User(Base):
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     platform_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    # The identity provider's stable id (ID token iss + sub) for OIDC sign-in.
+    oidc_issuer: Mapped[str | None] = mapped_column(Text)
+    oidc_subject: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _created()
 
 

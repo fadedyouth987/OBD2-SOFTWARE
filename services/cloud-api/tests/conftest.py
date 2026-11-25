@@ -22,3 +22,10 @@ os.environ.setdefault("VIN_HMAC_KEY", "test-only-vin-hmac-key-0123456789")
 # exists behind this explicit local flag (with AUTH_ALLOW_DEV_LOGIN). Tests of
 # the reviewed workflow switch it off.
 os.environ.setdefault("AASRA_DEV_AUTO_APPROVE", "true")
+# Keep tests independent of a developer's local .env (which may turn on the dev
+# OIDC provider or a file mailbox). Tests that need these set them themselves.
+os.environ["EMAIL_PROVIDER"] = "none"
+os.environ["OIDC_ISSUER"] = ""
+os.environ["AUTH_PASSWORD_ENABLED"] = "true"
+os.environ["PROCEDURE_PROVIDER_FEED_URL"] = ""
+os.environ["LLM_PROVIDER"] = "none"

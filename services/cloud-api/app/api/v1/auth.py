@@ -1,20 +1,23 @@
-"""Edge lease, pairing, JWKS, and (dev-only) session issuance."""
+"""Sign-in (password and OIDC), edge lease, pairing, JWKS, and dev-only sessions."""
 
 from __future__ import annotations
 
 import os
 from datetime import UTC, datetime, timedelta
+from typing import Annotated
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as OrmSession
 
 from app.api.deps import RequirePrincipal
+from app.config import get_settings
 from app.db.models import MembershipRole, SubscriptionTier, Tenant, TenantMembership, User
 from app.db.session import owner_engine, tenant_session
 from app.observability.metrics import inc
+from app.services import oidc
 from app.services.aasra import default_verifier
 from app.services.accreditation import is_platform_admin
 from app.services.billing import entitlement_for, maybe_expire_grace, schematic_pages_used
@@ -253,9 +256,77 @@ def _workspace_list(user_id: UUID) -> list[dict]:
     ]
 
 
+def _require_password_auth() -> None:
+    if not get_settings().auth_password_enabled:
+        cfg = oidc.config()
+        via = f" Use “Sign in with {cfg.provider_name}”." if cfg else ""
+        raise HTTPException(
+            status_code=403, detail=f"Password sign-in is turned off on this server.{via}"
+        )
+
+
+@router.get("/config")
+def auth_config() -> dict:
+    """What the sign-in page offers. Public: no secrets, only switches and names."""
+    cfg = oidc.config()
+    return {
+        "password_enabled": get_settings().auth_password_enabled,
+        "oidc": (
+            {
+                "enabled": True,
+                "provider_name": cfg.provider_name,
+                "logout_url": cfg.logout_url or None,
+            }
+            if cfg
+            else {"enabled": False, "provider_name": None, "logout_url": None}
+        ),
+        "dev_login": _dev_login_enabled(),
+    }
+
+
+@router.get("/oidc/start")
+def oidc_start(
+    return_to: Annotated[str | None, Query(max_length=500)] = None,
+    invite_token: Annotated[str | None, Query(min_length=20, max_length=200)] = None,
+) -> dict:
+    """The provider URL to send the browser to (state, nonce and PKCE are set up here)."""
+    return oidc.start(return_to=return_to, invite_token=invite_token)
+
+
+class OidcCallbackRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=4096)
+    state: str = Field(min_length=20, max_length=200)
+
+
+@router.post("/oidc/callback")
+def oidc_callback(req: OidcCallbackRequest) -> dict:
+    """Finish provider sign-in: checks the ID token, then signs in like /login."""
+    try:
+        done = oidc.finish(code=req.code, state=req.state)
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=409, detail="An account with this email already exists. Sign in instead."
+        ) from exc
+    spaces = workspaces_for(done.user_id)
+    if not spaces:
+        raise HTTPException(
+            status_code=403, detail="This account is not a member of any workshop yet"
+        )
+    chosen = next((w for w in spaces if w.tenant_id == done.tenant_id), spaces[0])
+    return {
+        **_issue(chosen.tenant_id, done.user_id),
+        "tenant_id": str(chosen.tenant_id),
+        "user_id": str(done.user_id),
+        "workspaces": _workspace_list(done.user_id),
+        "return_to": done.return_to,
+        "created": done.created,
+    }
+
+
 @router.post("/signup", status_code=201)
 def signup(req: SignupRequest) -> dict:
     """Create an account and its workshop (the new user is the Owner)."""
+    _require_password_auth()
     try:
         email = normalize_email(req.email)
         check_password_policy(req.password)
@@ -332,6 +403,7 @@ def _signup_from_invite(req: SignupRequest, email: str, display: str) -> dict:
 @router.post("/login")
 def login(req: LoginRequest) -> dict:
     """Email + password sign-in. Picks the requested workspace or the first one."""
+    _require_password_auth()
     try:
         user_id = authenticate(req.email, req.password)
     except IdentityError as exc:
