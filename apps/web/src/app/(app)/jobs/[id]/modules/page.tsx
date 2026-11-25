@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { SchematicsCard } from "@/components/files/SchematicsCard";
 import { useScanTargets } from "@/components/job/useScanTargets";
 import { Badge, Banner, Button, Card, EmptyState, Mono, Skeleton, Spinner, type Tone } from "@/components/ui";
 import { useAuth } from "@/context/auth";
@@ -165,49 +166,56 @@ export default function ModulesPage() {
         )}
       </Card>
 
-      <Card title="Wiring knowledge" subtitle={platform ? `${platform.make} ${platform.model}` : undefined}>
-        {platformState === "loading" ? (
-          <Skeleton className="h-24" />
-        ) : platformState === "error" ? (
-          <Banner tone="warn">Couldn&apos;t load the vehicle registry. Check your connection.</Banner>
-        ) : !platform ? (
-          <EmptyState title="No platform wiring on file">
-            This job uses generic OBD-II. AI diagnosis still works from the codes; shared-circuit hints need a decoded platform.
-          </EmptyState>
-        ) : (
-          <div className="space-y-3 text-sm">
-            <p className="text-muted">{platform.engine}</p>
-            <div>
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-faint">Shared circuit nodes</h3>
-              {platform.shared_nodes.length ? (
-                <ul className="mt-1 space-y-1">
-                  {platform.shared_nodes.map((n) => (
-                    <li key={n} className="font-mono text-xs">
-                      {n}
+      <div className="space-y-4">
+        <Card title="Wiring knowledge" subtitle={platform ? `${platform.make} ${platform.model}` : undefined}>
+          {platformState === "loading" ? (
+            <Skeleton className="h-24" />
+          ) : platformState === "error" ? (
+            <Banner tone="warn">Couldn&apos;t load the vehicle registry. Check your connection.</Banner>
+          ) : !platform ? (
+            <EmptyState title="No platform wiring on file">
+              This job uses generic OBD-II. AI diagnosis still works from the codes; shared-circuit hints need a decoded platform.
+            </EmptyState>
+          ) : (
+            <div className="space-y-3 text-sm">
+              <p className="text-muted">{platform.engine}</p>
+              <div>
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-faint">Shared circuit nodes</h3>
+                {platform.shared_nodes.length ? (
+                  <ul className="mt-1 space-y-1">
+                    {platform.shared_nodes.map((n) => (
+                      <li key={n} className="font-mono text-xs">
+                        {n}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-1 text-muted">None recorded.</p>
+                )}
+                <p className="mt-1 text-xs text-faint">One fault on a shared feed or ground can set codes in several modules.</p>
+              </div>
+              <div>
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-faint">Registry modules</h3>
+                <ul className="mt-1 space-y-0.5 text-xs">
+                  {platform.modules.map((m) => (
+                    <li key={m.id}>
+                      <span className="font-semibold">{m.id}</span> <span className="text-muted">· {m.bus}</span>{" "}
+                      <span className="font-mono text-faint">
+                        {m.tx} → {m.rx}
+                      </span>
                     </li>
                   ))}
                 </ul>
-              ) : (
-                <p className="mt-1 text-muted">None recorded.</p>
-              )}
-              <p className="mt-1 text-xs text-faint">One fault on a shared feed or ground can set codes in several modules.</p>
+              </div>
             </div>
-            <div>
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-faint">Registry modules</h3>
-              <ul className="mt-1 space-y-0.5 text-xs">
-                {platform.modules.map((m) => (
-                  <li key={m.id}>
-                    <span className="font-semibold">{m.id}</span> <span className="text-muted">· {m.bus}</span>{" "}
-                    <span className="font-mono text-faint">
-                      {m.tx} → {m.rx}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
+          )}
+        </Card>
+        {job.vehicle_profile ? (
+          <SchematicsCard vehicleProfile={job.vehicle_profile} platforms={platform ? [platform] : null} />
+        ) : (
+          <SchematicsCard platforms={null} />
         )}
-      </Card>
+      </div>
     </div>
   );
 }

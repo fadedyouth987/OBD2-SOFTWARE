@@ -84,3 +84,11 @@ export function safetyTierLabel(tier: string): { label: string; tone: "ok" | "wa
   const parts = t.replace(/^TIER\s*/, "").split(/\s*\/\s*/).map((p) => p.replace(/^TIER\s*/, ""));
   return { label: `Confirm · Tier ${parts.join("/")}`, tone: "warn" };
 }
+
+/** 1.2 MB / 340 KB / 900 B */
+export function formatBytes(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
+  if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  if (n >= 1024) return `${Math.round(n / 1024)} KB`;
+  return `${n} B`;
+}

@@ -450,3 +450,45 @@ export interface InviteLookup {
 }
 
 export const ROLE_LABEL: Record<TeamRole, string> = { OWNER: "Owner", LEAD_TECH: "Lead technician", TECH: "Technician" };
+
+/** Fetch a private file (schematic, DBC) with the session token. */
+export async function apiBlob(path: string, token: string | null): Promise<Blob> {
+  let res: Response;
+  try {
+    res = await fetch(`${CLOUD_API_URL}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  } catch {
+    throw new ApiError(0, "Can't reach the RootCause cloud. Check your internet connection.");
+  }
+  if (!res.ok) {
+    let detail: unknown = null;
+    try {
+      detail = ((await res.json()) as { detail?: unknown }).detail;
+    } catch {
+      /* not JSON */
+    }
+    throw new ApiError(res.status, detailMessage(detail, `Couldn't open the file (HTTP ${res.status}).`), detail);
+  }
+  return res.blob();
+}
+
+// --- Stored files -----------------------------------------------------------------
+
+export interface Schematic {
+  id: string;
+  title: string;
+  vehicle_profile: string | null;
+  content_type: string | null;
+  size_bytes: number | null;
+  page_count: number | null;
+  created_at: string | null;
+}
+
+export interface StoredDbc {
+  id: string;
+  name: string;
+  vehicle_profile: string | null;
+  size_bytes: number | null;
+  message_count: number | null;
+  sha256: string;
+  created_at: string | null;
+}

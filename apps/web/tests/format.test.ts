@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatReading, safetyTierLabel } from "../src/lib/format";
+import { formatBytes, formatReading, safetyTierLabel } from "../src/lib/format";
 
 describe("formatReading", () => {
   it("shows whole numbers without trailing zeros", () => {
@@ -19,5 +19,14 @@ describe("safetyTierLabel", () => {
     expect(safetyTierLabel("SILENT")).toEqual({ label: "Read-only", tone: "ok" });
     expect(safetyTierLabel("TIER A")).toEqual({ label: "Confirm · Tier A", tone: "warn" });
     expect(safetyTierLabel("TIER A / B")).toEqual({ label: "Confirm · Tier A/B", tone: "warn" });
+  });
+});
+
+describe("formatBytes", () => {
+  it("picks a sensible unit", () => {
+    expect(formatBytes(900)).toBe("900 B");
+    expect(formatBytes(348_160)).toBe("340 KB");
+    expect(formatBytes(1_258_291)).toBe("1.2 MB");
+    expect(formatBytes(null)).toBe("—");
   });
 });

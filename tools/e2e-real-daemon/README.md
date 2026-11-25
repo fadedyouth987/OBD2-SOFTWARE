@@ -11,6 +11,7 @@ cd tools/e2e-real-daemon
 npm install          # or: PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install, then set E2E_CHROME
 node p0-community.mjs   # sign up → devices → new job (VIN read) → scan → AI → live data → close-out → report
 node p1-workshop.mjs    # dev plan grant → lease sync → Active mode → clear codes (hold) → oil reset → CAN Studio
+node p2-files.mjs       # schematic upload (page quota) + open; DBC saved to the workshop and decoding live frames
 node p2-team.mjs        # seat cap on Community → Fleet → add site → invite → invitee joins (mobile) → single-use link
 ```
 

@@ -1,16 +1,19 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Badge, Banner, Card, EmptyState, Field, Mono, PageHeader, Skeleton } from "@/components/ui";
+import { Badge, Banner, Button, Card, EmptyState, Field, Mono, PageHeader, Skeleton } from "@/components/ui";
+import { SchematicsCard } from "@/components/files/SchematicsCard";
 import { useAuth } from "@/context/auth";
 import { api, ApiError, type ResolvedCase, type VehiclePlatform } from "@/lib/api";
 import { describeDtc } from "@/lib/dtc-library";
 
 const DTC_RE = /^[PCBU][0-3][0-9A-F]{3}$/;
+const PAGE = 15;
 
 export default function KnowledgePage() {
   const { token } = useAuth();
   const [query, setQuery] = useState("");
+  const [caseLimit, setCaseLimit] = useState(PAGE);
   const [cases, setCases] = useState<ResolvedCase[] | null>(null);
   const [casesError, setCasesError] = useState<ApiError | null>(null);
   const [platforms, setPlatforms] = useState<VehiclePlatform[] | null>(null);
@@ -61,7 +64,10 @@ export default function KnowledgePage() {
     <>
       <PageHeader title="Knowledge" subtitle="Fault codes, fixes other workshops verified, and the vehicles with wiring data on file." />
       <div className="mb-4 max-w-xl">
-        <Field label="Search codes, symptoms or vehicles" placeholder="e.g. P0171, misfire, Ranger" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <Field label="Search codes, symptoms or vehicles" placeholder="e.g. P0171, misfire, Ranger" value={query} onChange={(e) => {
+            setQuery(e.target.value);
+            setCaseLimit(PAGE);
+          }} />
       </div>
       {info ? (
         <Card title={code} subtitle={info.kind === "generic" ? "Generic SAE J2012 meaning" : "Manufacturer-specific code"}>
@@ -79,8 +85,9 @@ export default function KnowledgePage() {
               {query ? "Nobody has published a fix for that yet." : "When a job is closed out with “Publish this fix”, it appears here for every workshop."}
             </EmptyState>
           ) : (
+            <>
             <ul className="space-y-2">
-              {shownCases.map((c) => (
+              {shownCases.slice(0, caseLimit).map((c) => (
                 <li key={c.case_id} className="rounded-lg border border-line bg-raised p-3 text-sm">
                   <p className="flex flex-wrap items-center gap-1.5">
                     {c.dtcs.map((d) => (
@@ -98,6 +105,12 @@ export default function KnowledgePage() {
                 </li>
               ))}
             </ul>
+            {shownCases.length > caseLimit ? (
+              <Button size="sm" className="mt-3" onClick={() => setCaseLimit((n) => n + PAGE)}>
+                Show more ({shownCases.length - caseLimit} left)
+              </Button>
+            ) : null}
+            </>
           )}
         </Card>
         <Card title="Vehicles with wiring data">
@@ -125,6 +138,7 @@ export default function KnowledgePage() {
             </ul>
           )}
         </Card>
+        <SchematicsCard platforms={platforms} className="xl:col-span-2" />
       </div>
     </>
   );

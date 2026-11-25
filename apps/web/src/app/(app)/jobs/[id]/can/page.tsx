@@ -3,16 +3,17 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge, Banner, Button, ButtonLink, Card, EmptyState, Field, Mono, cx } from "@/components/ui";
+import { DbcCard, type LoadedDbc } from "@/components/files/DbcCard";
 import { useAuth } from "@/context/auth";
+import { useJob } from "@/context/job";
 import { useEdge } from "@/context/edge";
 import { candidateIds, classifyBits, ingest, rateHz, type BitClass, type FrameIn, type IdStats } from "@/lib/can-analysis";
-import { decodeSignal, parseDbc, signalBits, type Dbc } from "@/lib/dbc";
+import { decodeSignal, signalBits } from "@/lib/dbc";
 import { hexId } from "@/lib/diag";
 import { FEATURE_INFO, featureAccess } from "@/lib/entitlements";
 import { formatReading } from "@/lib/format";
 
 type Capture = "idle" | "baseline" | "action";
-const MAX_DBC_BYTES = 2 * 1024 * 1024;
 
 const BIT_STYLE: Record<BitClass, string> = {
   static: "bg-bg text-faint",
@@ -28,6 +29,7 @@ function idText(id: number, extended: boolean) {
 
 export default function CanStudioPage() {
   const { me } = useAuth();
+  const { job } = useJob();
   const edge = useEdge();
   const access = featureAccess(me, edge.lease, "CAN_RE_PRO");
   const connected = edge.ready && edge.link?.state === "CONNECTED";
@@ -44,8 +46,7 @@ export default function CanStudioPage() {
   const [tick, setTick] = useState(0);
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState<number | null>(null);
-  const [dbc, setDbc] = useState<{ name: string; dbc: Dbc } | null>(null);
-  const [dbcError, setDbcError] = useState<string | null>(null);
+  const [dbc, setDbc] = useState<LoadedDbc | null>(null);
   const totalFrames = useRef(0);
   const connectedSince = edge.link?.since ?? 0;
 
@@ -250,41 +251,7 @@ export default function CanStudioPage() {
             ) : null}
           </Card>
 
-          <Card title="DBC file" subtitle="Decode frames with a CAN database. The file stays in this browser.">
-            <label className="block text-sm">
-              <span className="sr-only">Load a DBC file</span>
-              <input
-                type="file"
-                accept=".dbc,text/plain"
-                className="block w-full text-sm file:mr-3 file:min-h-[40px] file:rounded-lg file:border file:border-line file:bg-raised file:px-3 file:text-text"
-                onChange={async (e) => {
-                  const f = e.target.files?.[0];
-                  setDbcError(null);
-                  if (!f) return;
-                  if (f.size > MAX_DBC_BYTES) {
-                    setDbcError("That file is over 2 MB; DBC files are usually much smaller.");
-                    return;
-                  }
-                  const parsed = parseDbc(await f.text());
-                  if (!parsed.messages.size) {
-                    setDbcError("No messages (BO_) found. Is this a DBC file?");
-                    return;
-                  }
-                  setDbc({ name: f.name, dbc: parsed });
-                }}
-              />
-            </label>
-            {dbcError ? <Banner tone="danger">{dbcError}</Banner> : null}
-            {dbc ? (
-              <p className="mt-2 text-sm">
-                <Badge tone="ok">Loaded</Badge> {dbc.name}: {dbc.dbc.messages.size} messages
-                {dbc.dbc.warnings.length ? <span className="block text-xs text-warn">{dbc.dbc.warnings.length} lines couldn&apos;t be read and were skipped.</span> : null}
-                <span className="block text-xs text-muted">
-                  {rows.filter((r) => dbc.dbc.messages.has(r.id)).length} of {rows.length} live IDs are defined in it.
-                </span>
-              </p>
-            ) : null}
-          </Card>
+          <DbcCard loaded={dbc} onLoad={setDbc} liveIds={rows.map((r) => r.id)} vehicleProfile={job?.vehicle_profile} />
         </div>
       </div>
 

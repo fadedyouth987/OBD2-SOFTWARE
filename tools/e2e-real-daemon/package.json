@@ -6,7 +6,8 @@
   "scripts": {
     "community": "node p0-community.mjs",
     "workshop": "node p1-workshop.mjs",
-    "team": "node p2-team.mjs"
+    "team": "node p2-team.mjs",
+    "files": "node p2-files.mjs"
   },
   "dependencies": {
     "playwright": "1.65.1"
