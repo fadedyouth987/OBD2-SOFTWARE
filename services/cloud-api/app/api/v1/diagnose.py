@@ -11,13 +11,19 @@ from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from app.api.deps import RequirePrincipal
-from app.api.v1.billing import charge_ai_quota
 from app.api.v1.sessions import list_published_cases
 from app.db.models import DiagnosticSession
 from app.db.session import tenant_session
 from app.db.vin import wmi_vds
 from app.observability.metrics import inc
-from app.services.ai_diagnostic_agent import answer_technician_followup, diagnose_session
+from app.services.ai_diagnostic_agent import (
+    answer_technician_followup,
+    diagnose_session,
+    llm_diagnosis,
+    llm_followup,
+)
+from app.services.billing import charge_ai_quota, refund_ai_quota
+from app.services.llm import LlmError, configured_llm
 from app.services.service_procedures import service_functions_for
 from app.services.vehicle_registry import (
     SERVICE_FUNCTIONS_CATALOG,
@@ -108,6 +114,57 @@ def get_service_functions(
     return service_functions_for(adapter_id)
 
 
+# Why a diagnosis came from the rules rather than the model (shown in the UI).
+FALLBACK_TEXT = {
+    "not_configured": "No AI model is set up on this server, so the built-in rules ran.",
+    "quota_exhausted": (
+        "This month's AI diagnoses are used up, so the built-in rules ran. "
+        "Rule-based results don't count against your quota."
+    ),
+    "llm_error": "The AI model didn't answer in time, so the built-in rules ran.",
+}
+
+
+def run_with_quota(principal, rules: dict[str, Any], call_llm) -> dict[str, Any]:
+    """Run the model when there is one and quota left; otherwise return the rules.
+
+    One diagnosis is reserved before the model is called and refunded if it
+    fails, so only a delivered model answer counts. Rule results are free.
+    """
+    provider = configured_llm()
+    reason: str | None = None
+    used = limit = None
+    charged = False
+    result = rules
+    if provider is None:
+        reason = "not_configured"
+    else:
+        charged, used, limit = charge_ai_quota(principal.tenant_id)
+        if not charged:
+            reason = "quota_exhausted"
+        else:
+            try:
+                result = call_llm(provider)
+            except LlmError as exc:
+                log.warning("AI model failed for tenant=%s: %s", principal.tenant_id, exc)
+                inc("ai_llm_failed")
+                used = refund_ai_quota(principal.tenant_id)
+                charged = False
+                reason = "llm_error"
+                result = rules
+    if charged:
+        inc("ai_llm_answers")
+    else:
+        inc("ai_rules_answers")
+    result = dict(result)
+    result["quota_charged"] = charged
+    result["fallback_reason"] = reason
+    result["fallback_text"] = FALLBACK_TEXT.get(reason or "")
+    result["quota_used"] = used
+    result["quota_limit"] = limit
+    return result
+
+
 @router.post("/diagnose/{session_id}")
 def run_diagnosis(
     session_id: str, req: DiagnoseRequest, principal: RequirePrincipal
@@ -118,26 +175,18 @@ def run_diagnosis(
         if req.matched_cases is not None
         else list_published_cases(principal.tenant_id, req.dtcs)
     )
-    charged, used, limit = charge_ai_quota(principal.tenant_id)
-    if not charged:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={
-                "message": "AI diagnosis monthly quota exceeded",
-                "used": used,
-                "limit": limit,
-            },
-        )
-    result = diagnose_session(
+    rules = diagnose_session(
         session_id=session_id,
         dtcs=req.dtcs,
         shared_graph_nodes=req.shared_graph_nodes,
         matched_cases=cases,
         vehicle_profile=req.vehicle_profile,
     )
-    result["quota_charged"] = True
-    result["quota_used"] = used
-    result["quota_limit"] = limit
+    result = run_with_quota(
+        principal,
+        rules,
+        lambda provider: llm_diagnosis(provider, rules, req.dtcs, req.vehicle_profile),
+    )
     _attach_diagnosis(principal, session_id, req, result)
     return result
 
@@ -162,7 +211,11 @@ def _attach_diagnosis(principal, session_id: str, req: DiagnoseRequest, result: 
         row.diagnosis = {
             "dtcs": list(req.dtcs),
             "vehicle_profile": req.vehicle_profile,
-            "result": {k: v for k, v in result.items() if not k.startswith("quota_")},
+            "result": {
+                k: v
+                for k, v in result.items()
+                if not k.startswith("quota_") and k not in {"fallback_text"}
+            },
             "at": datetime.now(UTC).isoformat(),
         }
 
@@ -172,23 +225,14 @@ def ask_copilot(
     session_id: str, req: FollowupRequest, principal: RequirePrincipal
 ) -> dict[str, Any]:
     inc("ai_copilot_followups")
-    charged, used, limit = charge_ai_quota(principal.tenant_id)
-    if not charged:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={
-                "message": "AI diagnosis monthly quota exceeded",
-                "used": used,
-                "limit": limit,
-            },
-        )
-    result = answer_technician_followup(
+    rules = answer_technician_followup(
         session_id=session_id,
         question=req.question,
         vehicle_profile=req.vehicle_profile,
         dtcs=req.dtcs,
     )
-    result["quota_charged"] = True
-    result["quota_used"] = used
-    result["quota_limit"] = limit
-    return result
+    return run_with_quota(
+        principal,
+        rules,
+        lambda provider: llm_followup(provider, rules, req.question, req.vehicle_profile, req.dtcs),
+    )

@@ -722,6 +722,28 @@ def charge_ai_quota(tenant_id: UUID) -> tuple[bool, int, int]:
         return True, int(row[0]), limit
 
 
+def refund_ai_quota(tenant_id: UUID) -> int:
+    """Give back one AI diagnosis reserved by ``charge_ai_quota`` when the model failed.
+
+    Only within the same quota month; never below zero. Returns the new count.
+    """
+    period = current_quota_period()
+    with tenant_session(tenant_id) as session:
+        row = session.execute(
+            text(
+                """
+                UPDATE tenants
+                   SET ai_diagnoses_used = GREATEST(0, ai_diagnoses_used - 1)
+                 WHERE id = :id
+                   AND ai_quota_period_start >= :period
+             RETURNING ai_diagnoses_used
+                """
+            ),
+            {"id": tenant_id, "period": period},
+        ).first()
+        return int(row[0]) if row else 0
+
+
 def charge_schematic_pages(tenant_id: UUID, pages: int) -> tuple[bool, int, int]:
     """Atomically consume schematic page views. ``pages`` must be >= 1."""
     if pages < 1:

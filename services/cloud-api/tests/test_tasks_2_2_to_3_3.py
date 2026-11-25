@@ -81,8 +81,10 @@ class TestCloudServices(unittest.TestCase):
         self.assertEqual(score_to_confidence_band(0.2), "LOW")
 
         ok = diagnose_session("sess-1", ["P2463"])
-        self.assertEqual(ok["mode"], "KG_RAG_SYNTHESIS")
-        self.assertTrue(ok["quota_charged"])
+        self.assertEqual(ok["mode"], "RULES")
+        self.assertEqual(ok["analysis"], "rules")
+        # The built-in rules are free: only a model answer is charged (by the route).
+        self.assertFalse(ok["quota_charged"])
         self.assertEqual(ok["ranked_causes"][0]["cited_case_ids"], [])
         self.assertIn(ok["ranked_causes"][0]["confidence_band"], {"LOW", "MEDIUM", "HIGH"})
 
@@ -99,11 +101,6 @@ class TestCloudServices(unittest.TestCase):
             ["CASE-REAL-7", "CASE-REAL-8"],
         )
         self.assertEqual(supported["ranked_causes"][0]["confidence_band"], "HIGH")
-
-        fb = diagnose_session("sess-1", ["P2463"], llm_error="timeout")
-        self.assertEqual(fb["mode"], "FALLBACK_NO_LLM")
-        self.assertFalse(fb["quota_charged"])
-        self.assertEqual(fb["ranked_causes"], [])
 
     def test_fleet_is_a_real_tier_and_paid_leases_are_short(self):
         import time
