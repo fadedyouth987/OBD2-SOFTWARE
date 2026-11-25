@@ -230,6 +230,9 @@ class CustomDbcFile(Base):
     s3_key: Mapped[str] = mapped_column(Text)
     sha256: Mapped[str] = mapped_column(Text)
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    vehicle_profile: Mapped[str | None] = mapped_column(Text)
+    size_bytes: Mapped[int | None] = mapped_column(Integer)
+    message_count: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = _created()
 
 
@@ -242,6 +245,11 @@ class WiringSchematic(Base):
     s3_key: Mapped[str] = mapped_column(Text)
     page_count: Mapped[int | None] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(Text, default="UPLOADED")
+    vehicle_profile: Mapped[str | None] = mapped_column(Text)
+    content_type: Mapped[str | None] = mapped_column(Text)
+    size_bytes: Mapped[int | None] = mapped_column(Integer)
+    sha256: Mapped[str | None] = mapped_column(Text)
+    uploaded_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = _created()
 
 

@@ -8,7 +8,18 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 
-from app.api.v1 import auth, billing, dbc, diagnose, gateways, immo, jobs, sessions, team
+from app.api.v1 import (
+    auth,
+    billing,
+    dbc,
+    diagnose,
+    gateways,
+    immo,
+    jobs,
+    schematics,
+    sessions,
+    team,
+)
 from app.config import get_settings
 from app.observability.metrics import render_prometheus
 
@@ -41,6 +52,7 @@ app.include_router(gateways.router)
 app.include_router(diagnose.router)
 app.include_router(immo.router)
 app.include_router(team.router)
+app.include_router(schematics.router)
 
 
 @app.get("/healthz")

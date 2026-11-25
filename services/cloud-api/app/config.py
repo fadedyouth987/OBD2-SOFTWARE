@@ -33,6 +33,9 @@ try:
         redis_url: str = "redis://localhost:6379/0"
         s3_endpoint_url: str = "http://localhost:8333"
         s3_bucket: str = "automotive-traces-au"
+        # Static keys for the local S3 stand-in; empty in AWS, where the task role is used.
+        s3_access_key_id: str = ""
+        s3_secret_access_key: str = ""
         # Empty by default: signing and Stripe fail closed until set in the environment.
         cloud_signing_private_key_hex: str = ""
         auth_allow_dev_login: bool = False
@@ -97,6 +100,9 @@ except ImportError:
         redis_url: str = "redis://localhost:6379/0"
         s3_endpoint_url: str = "http://localhost:8333"
         s3_bucket: str = "automotive-traces-au"
+        # Static keys for the local S3 stand-in; empty in AWS, where the task role is used.
+        s3_access_key_id: str = ""
+        s3_secret_access_key: str = ""
         cloud_signing_private_key_hex: str = ""
         auth_allow_dev_login: bool = False
         stripe_webhook_secret: str = ""
