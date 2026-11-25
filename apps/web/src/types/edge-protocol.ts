@@ -265,10 +265,12 @@ export const ErrorResponse = z
   );
 export type ErrorResponse = z.infer<typeof ErrorResponse>;
 
-/** Features unlocked by the offline lease (Task 1.4). */
+/** Features unlocked by the offline lease (Task 1.4). IMMO_PROGRAM is issued only on a short immobilizer lease or a diagnostic lease when the shop holds the IMMO add-on. */
 export const Feature = z
-  .enum(["J2534", "UDS_ACTIVE", "CAN_RE_PRO"])
-  .describe("Features unlocked by the offline lease (Task 1.4).");
+  .enum(["J2534", "UDS_ACTIVE", "CAN_RE_PRO", "IMMO_PROGRAM"])
+  .describe(
+    "Features unlocked by the offline lease (Task 1.4). IMMO_PROGRAM is issued only on a short immobilizer lease or a diagnostic lease when the shop holds the IMMO add-on.",
+  );
 export type Feature = z.infer<typeof Feature>;
 
 /** Semantic version, MAJOR.MINOR.PATCH. */
@@ -298,7 +300,7 @@ export const HelloRequest = z
   .describe("First message on every connection (Rule 4). Request -> HelloResponse.");
 export type HelloRequest = z.infer<typeof HelloRequest>;
 
-export const LeaseTier = z.enum(["COMMUNITY", "PRO", "WORKSHOP"]);
+export const LeaseTier = z.enum(["COMMUNITY", "PRO", "WORKSHOP", "FLEET"]);
 export type LeaseTier = z.infer<typeof LeaseTier>;
 
 export const HelloResponse = z

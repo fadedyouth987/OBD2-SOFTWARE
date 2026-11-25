@@ -23,7 +23,10 @@
 
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicI64, AtomicU64, Ordering},
+        Arc, Mutex,
+    },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -48,10 +51,20 @@ use super::pairing::{looks_like_code, PairingStore};
 use crate::{
     auth::{
         cloud_keys::KeyRing,
-        lease::{self, Lease},
+        lease::{self, ImmoLease, Lease},
         unix_now,
     },
-    hal::{discovery, to_hex, virtual_bus::VirtualBus, HalError, VehicleBusAdapter},
+    hal::{
+        discovery,
+        serial::SystemSerial,
+        shared_bus::SharedBus,
+        slcan_serial::SlcanSerialAdapter,
+        stn_elm::{StnElmAdapter, StnProtocol},
+        to_hex,
+        virtual_bus::VirtualBus,
+        HalError, VehicleBusAdapter,
+    },
+    immo::{self, ImmoRegistry},
     protocol::{
         self,
         messages::{
@@ -88,6 +101,17 @@ pub struct ServerConfig {
     pub keys: KeyRing,
     /// Raw lease token; verified at every Hello so expiry takes effect.
     pub lease_token: Option<String>,
+    /// Live lease token, updated when `lease.jwt` is replaced on disk.
+    pub live_lease: Arc<Mutex<Option<String>>>,
+    /// Bumped when the lease file or minimum generation changes so open sockets close.
+    pub lease_epoch: Arc<AtomicU64>,
+    /// Optional dongle / tablet identity; compared to the lease `rcid` claim.
+    pub device_id: Option<String>,
+    /// Leases with `lease_ver` below this are treated as revoked.
+    pub lease_min_version: Arc<AtomicI64>,
+    /// Optional immobilizer lease; verified at Hello and bound on Connect.
+    pub immo_lease_token: Option<String>,
+    pub immo_registry: ImmoRegistry,
     pub pairing: Arc<PairingStore>,
     pub audit: Arc<dyn AuditSink>,
     pub hello_timeout: Duration,
@@ -103,6 +127,12 @@ impl ServerConfig {
             allowed_origins: vec!["http://localhost:3000".into()],
             keys,
             lease_token: None,
+            live_lease: Arc::new(Mutex::new(None)),
+            lease_epoch: Arc::new(AtomicU64::new(0)),
+            device_id: None,
+            lease_min_version: Arc::new(AtomicI64::new(0)),
+            immo_lease_token: None,
+            immo_registry: ImmoRegistry::new(),
             pairing,
             audit,
             hello_timeout: HELLO_TIMEOUT,
@@ -145,6 +175,11 @@ impl Server {
 
     pub fn port(&self) -> u16 {
         self.cfg.port
+    }
+
+    /// Signal open sessions that the lease has changed; they must reconnect.
+    pub fn bump_lease_epoch(&self) {
+        self.cfg.lease_epoch.fetch_add(1, Ordering::SeqCst);
     }
 
     /// Serves until the task is dropped.
@@ -286,7 +321,19 @@ async fn handle(cfg: Arc<ServerConfig>, stream: TcpStream) {
         }
     };
 
+    let my_epoch = cfg.lease_epoch.load(Ordering::SeqCst);
     while let Some(text) = next_text(&mut source).await {
+        if cfg.lease_epoch.load(Ordering::SeqCst) != my_epoch {
+            let _ = tx
+                .send(Outbound::Msg(err(
+                    request_id_of(&text),
+                    ErrorCode::TokenInvalid,
+                    "lease changed; reconnect with a fresh lease",
+                )))
+                .await;
+            let _ = tx.send(Outbound::Close).await;
+            break;
+        }
         let reply = session.handle(&text).await;
         if tx.send(Outbound::Msg(reply)).await.is_err() {
             break;
@@ -385,12 +432,35 @@ fn authenticate(
             }
         }
     };
-    let lease = lease::effective_lease(cfg.lease_token.as_deref(), &cfg.keys, now);
+    let live = cfg
+        .live_lease
+        .lock()
+        .ok()
+        .and_then(|g| g.clone())
+        .or_else(|| cfg.lease_token.clone());
+    let lease = lease::effective_lease_constrained(
+        live.as_deref(),
+        &cfg.keys,
+        now,
+        cfg.device_id.as_deref(),
+        cfg.lease_min_version.load(Ordering::SeqCst),
+    );
+    let immo_lease = match cfg.immo_lease_token.as_deref() {
+        None => None,
+        Some(token) => match lease::verify_immo_lease(token, &cfg.keys, now) {
+            Ok(immo) => Some(immo),
+            Err(e) => {
+                tracing::warn!("immo lease rejected ({e})");
+                None
+            }
+        },
+    };
     let session_id = random_session_id();
     let interlock = Arc::new(SafetyInterlock::new(
         session_id.clone(),
         Arc::clone(&cfg.audit),
     ));
+    interlock.set_immo_registry(cfg.immo_registry.clone());
     interlock.set_identity(user, None);
     let hello_resp = m::HelloResponse {
         daemon_version: env!("CARGO_PKG_VERSION")
@@ -414,6 +484,7 @@ fn authenticate(
     tracing::info!(%session_id, tier = %lease.tier, "client authenticated");
     let session = Session {
         lease,
+        immo_lease,
         interlock,
         conn: None,
         bucket: Bucket::new(cfg.diag_per_second),
@@ -452,9 +523,24 @@ impl Bucket {
     }
 }
 
+#[derive(Clone)]
+enum BusHandle {
+    Virtual(VirtualBus),
+    Physical(SharedBus),
+}
+
+impl BusHandle {
+    fn bitrate(&self) -> u32 {
+        match self {
+            Self::Virtual(b) => b.bitrate(),
+            Self::Physical(b) => b.bitrate(),
+        }
+    }
+}
+
 struct Connected {
     adapter_id: String,
-    bus: VirtualBus,
+    bus: BusHandle,
     tasks: Vec<JoinHandle<()>>,
     channels: HashMap<(u32, u32), DiagChannel>,
 }
@@ -469,6 +555,7 @@ impl Drop for Connected {
 
 struct Session {
     lease: Lease,
+    immo_lease: Option<ImmoLease>,
     interlock: Arc<SafetyInterlock>,
     conn: Option<Connected>,
     bucket: Bucket,
@@ -476,17 +563,42 @@ struct Session {
     stream_period: Duration,
 }
 
-/// A diagnostic channel on its own port of the virtual bus.
+/// A diagnostic channel on its own port of the virtual or shared physical bus.
 async fn open_channel(
-    bus: VirtualBus,
+    bus: BusHandle,
     bitrate: u32,
     addr: CanAddressing,
     interlock: Arc<SafetyInterlock>,
 ) -> Result<DiagChannel, HalError> {
-    let mut port = bus.adapter();
-    port.open(bitrate).await?;
-    let link = IsoTpLink::new(port, addr, IsoTpConfig::default()).await?;
-    Ok(DiagChannel::isotp(link, interlock))
+    match bus {
+        BusHandle::Virtual(b) => {
+            let mut port = b.adapter();
+            port.open(bitrate).await?;
+            let link = IsoTpLink::new(port, addr, IsoTpConfig::default()).await?;
+            Ok(DiagChannel::isotp(link, interlock))
+        }
+        BusHandle::Physical(b) => {
+            let port = b.port();
+            let link = IsoTpLink::new(port, addr, IsoTpConfig::default()).await?;
+            Ok(DiagChannel::isotp(link, interlock))
+        }
+    }
+}
+
+fn stn_protocol_for(protocol: BusProtocol) -> StnProtocol {
+    match protocol {
+        BusProtocol::Auto => StnProtocol::Auto,
+        BusProtocol::Iso1576511500 | BusProtocol::BmwDcan => StnProtocol::Can11_500,
+        BusProtocol::Iso1576529500 => StnProtocol::Can29_500,
+        BusProtocol::Iso1576511250 => StnProtocol::Can11_250,
+        BusProtocol::Iso1576529250 => StnProtocol::Can29_250,
+        BusProtocol::MsCan125 => StnProtocol::MsCan125,
+        BusProtocol::Iso91412 => StnProtocol::Iso9141,
+        BusProtocol::Iso142305baud => StnProtocol::Kwp5Baud,
+        BusProtocol::Iso14230Fast => StnProtocol::KwpFast,
+        BusProtocol::J1850Pwm => StnProtocol::J1850Pwm,
+        BusProtocol::J1850Vpw => StnProtocol::J1850Vpw,
+    }
 }
 
 fn bitrate_for(protocol: BusProtocol, profile_bitrate: u32) -> Option<u32> {
@@ -604,18 +716,117 @@ impl Session {
             .strip_prefix("virtual-")
             .and_then(profiles::by_id)
         else {
-            let kind = discovery::discover()
+            let found = discovery::discover()
                 .into_iter()
-                .find(|a| a.adapter_id == adapter_id)
-                .map(|a| a.kind);
-            let msg = match kind {
-                None => format!("unknown adapter {adapter_id}"),
-                Some(AdapterKind::J2534) if !self.lease.has(Feature::J2534) => {
-                    return err(rid, ErrorCode::LeaseRequired, "J2534 adapters need the J2534 feature");
-                }
-                Some(_) => "live sessions on physical adapters arrive with Task 4.1; use a virtual vehicle for now".into(),
+                .find(|a| a.adapter_id == adapter_id);
+            let Some(adapter_info) = found else {
+                return err(
+                    rid,
+                    ErrorCode::AdapterError,
+                    &format!("unknown adapter {adapter_id}"),
+                );
             };
-            return err(rid, ErrorCode::AdapterError, &msg);
+            if adapter_info.kind == AdapterKind::J2534 && !self.lease.has(Feature::J2534) {
+                return err(
+                    rid,
+                    ErrorCode::LeaseRequired,
+                    "J2534 adapters need the J2534 feature",
+                );
+            }
+            let path = adapter_info.path.clone().unwrap_or_default();
+            let bitrate = r
+                .baud_rate
+                .map(|b| b.get())
+                .or_else(|| bitrate_for(r.protocol, 500_000))
+                .unwrap_or(500_000);
+            let boxed: Box<dyn VehicleBusAdapter> = match adapter_info.kind {
+                AdapterKind::StnElm => {
+                    let link = match SystemSerial::open(&path, 115_200) {
+                        Ok(l) => l,
+                        Err(e) => return err(rid, ErrorCode::AdapterError, &e.to_string()),
+                    };
+                    Box::new(StnElmAdapter::new(link, stn_protocol_for(r.protocol)))
+                }
+                AdapterKind::Slcan => {
+                    let link = match SystemSerial::open(&path, 115_200) {
+                        Ok(l) => l,
+                        Err(e) => return err(rid, ErrorCode::AdapterError, &e.to_string()),
+                    };
+                    Box::new(SlcanSerialAdapter::new(link))
+                }
+                #[cfg(target_os = "linux")]
+                AdapterKind::Socketcan => {
+                    Box::new(crate::hal::socketcan_linux::SocketCanAdapter::new(&path))
+                }
+                #[cfg(not(target_os = "linux"))]
+                AdapterKind::Socketcan => {
+                    return err(
+                        rid,
+                        ErrorCode::AdapterError,
+                        "SocketCAN is only available on Linux",
+                    );
+                }
+                AdapterKind::J2534 => {
+                    #[cfg(windows)]
+                    {
+                        Box::new(crate::hal::j2534_win::J2534Adapter::new(
+                            crate::hal::j2534_win::default_bridge_path(),
+                            &path,
+                        ))
+                    }
+                    #[cfg(not(windows))]
+                    {
+                        return err(
+                            rid,
+                            ErrorCode::AdapterError,
+                            "J2534 PassThru requires Windows",
+                        );
+                    }
+                }
+                AdapterKind::KlineFtdi => {
+                    return err(
+                        rid,
+                        ErrorCode::AdapterError,
+                        "K-line FTDI direct streaming is not CAN",
+                    );
+                }
+                AdapterKind::Virtual => unreachable!("handled by virtual- prefix"),
+            };
+            let shared = match SharedBus::open(boxed, bitrate).await {
+                Ok(s) => s,
+                Err(e) => return err(rid, ErrorCode::AdapterError, &e.to_string()),
+            };
+            let bus = BusHandle::Physical(shared.clone());
+            let mut tasks = vec![tokio::spawn(stream_can(
+                shared.port(),
+                self.tx.clone(),
+                self.stream_period,
+                self.lease.has(Feature::CanRePro),
+            ))];
+            match open_channel(
+                bus.clone(),
+                bitrate,
+                CanAddressing::obd_functional(0x7E8),
+                Arc::clone(&self.interlock),
+            )
+            .await
+            {
+                Ok(ch) => tasks.push(tokio::spawn(stream_pids(
+                    ch,
+                    Arc::clone(&self.interlock),
+                    self.tx.clone(),
+                    self.stream_period,
+                ))),
+                Err(e) => tracing::warn!("no OBD poller on physical adapter: {e}"),
+            }
+            self.interlock.set_mode(r.safety_mode);
+            self.conn = Some(Connected {
+                adapter_id: adapter_id.to_owned(),
+                bus,
+                tasks,
+                channels: HashMap::new(),
+            });
+            return self.status(rid, adapter_id, AdapterState::Connected, None);
         };
         let Link::Can {
             bitrate: profile_bitrate,
@@ -646,13 +857,15 @@ impl Session {
         if let Err(e) = frames.open(bitrate).await {
             return err(rid, ErrorCode::AdapterError, &e.to_string());
         }
+        let bus_handle = BusHandle::Virtual(bus.clone());
         let mut tasks = vec![tokio::spawn(stream_can(
             frames,
             self.tx.clone(),
             self.stream_period,
+            self.lease.has(Feature::CanRePro),
         ))];
         match open_channel(
-            bus.clone(),
+            bus_handle.clone(),
             bitrate,
             CanAddressing::obd_functional(0x7E8),
             Arc::clone(&self.interlock),
@@ -669,9 +882,23 @@ impl Session {
         }
         self.interlock.set_mode(r.safety_mode);
         let battery = bus.with_vehicle(|v| v.battery_v);
+        let vin = bus.with_vehicle(|v| v.vin.clone());
+        self.interlock.update_battery(battery);
+        self.interlock
+            .update_speed(bus.with_vehicle(|v| v.speed_kmh));
+        self.interlock.update_rpm(bus.with_vehicle(|v| v.rpm));
+        self.interlock.set_identity(None, Some(vin.clone()));
+        if let Some(immo) = self.immo_lease.clone() {
+            if let Err(refusal) =
+                self.interlock
+                    .begin_immo(immo, &vin, immo::canonical_device_id(adapter_id))
+            {
+                return err(rid, refusal_code(refusal.code), &refusal.message);
+            }
+        }
         self.conn = Some(Connected {
             adapter_id: adapter_id.to_owned(),
-            bus,
+            bus: bus_handle,
             tasks,
             channels: HashMap::new(),
         });
@@ -770,14 +997,16 @@ impl Session {
         let key = (r.tx_id.0, r.rx_id.0);
         if !conn.channels.contains_key(&key) {
             let (bus, bitrate) = (conn.bus.clone(), conn.bus.bitrate());
-            match open_channel(
-                bus,
-                bitrate,
-                CanAddressing::normal(key.0, key.1),
-                Arc::clone(&self.interlock),
-            )
-            .await
-            {
+            // Local box fix: r.protocol is DiagProtocol, not BusProtocol.
+            // BMW D-CAN extended addressing is detected from IDs (0x6F1 / 0x6xx).
+            let addressing = if key.0 == 0x6F1 && (0x600..=0x6FF).contains(&key.1) {
+                CanAddressing::BmwExtended {
+                    ecu: (key.1 & 0xFF) as u8,
+                }
+            } else {
+                CanAddressing::normal(key.0, key.1)
+            };
+            match open_channel(bus, bitrate, addressing, Arc::clone(&self.interlock)).await {
                 Ok(ch) => {
                     self.conn
                         .as_mut()
@@ -835,9 +1064,10 @@ impl Session {
 }
 
 async fn stream_can(
-    mut port: crate::hal::virtual_bus::VirtualBusAdapter,
+    mut port: impl VehicleBusAdapter + 'static,
     tx: mpsc::Sender<Outbound>,
     period: Duration,
+    allow_raw_can: bool,
 ) {
     let mut tick = tokio::time::interval(period);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -845,7 +1075,8 @@ async fn stream_can(
     loop {
         tokio::select! {
             _ = tick.tick() => {
-                if frames.is_empty() {
+                if frames.is_empty() || !allow_raw_can {
+                    frames.clear();
                     continue;
                 }
                 let batch = m::CanFrameBatch { frames: std::mem::take(&mut frames), type_: m::CanFrameBatchType::CanFrameBatch };

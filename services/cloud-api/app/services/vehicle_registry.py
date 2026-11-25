@@ -1,0 +1,607 @@
+"""Make/model/platform vehicle registry, AutoVIN decoder, and service functions catalog."""
+
+from __future__ import annotations
+
+from typing import Any
+
+VEHICLE_PLATFORMS: dict[str, dict[str, Any]] = {
+    "holden_commodore_ve_vf": {
+        "make": "Holden",
+        "model": "Commodore VE / VF (2006-2017)",
+        "engine": "3.6L Alloytec/SIDI LFX & 6.0L/6.2L L77/LS3 V8",
+        "wmi_prefixes": ["6G1"],
+        "protocols": ["ISO15765_11_500"],
+        "modules": [
+            {"id": "ECM", "bus": "GMLAN HS-CAN 500k", "tx": "0x7E0", "rx": "0x7E8"},
+            {"id": "TCM", "bus": "GMLAN HS-CAN 500k", "tx": "0x7E1", "rx": "0x7E9"},
+            {"id": "EBCM", "bus": "GMLAN HS-CAN 500k", "tx": "0x741", "rx": "0x749"},
+            {"id": "BCM", "bus": "SW-CAN 33.3k / Gateway", "tx": "0x744", "rx": "0x74C"},
+        ],
+        "shared_nodes": ["NODE:GMLAN_HS_500K", "NODE:BATT_POS_X50A", "NODE:ENG_BLK_GND_G106"],
+        "common_dtcs": {
+            "P0017": "Alloytec/SIDI timing chain stretch — inspect cam/crank phase & oil pressure.",
+            "P0300": "V8/V6 random misfire — inspect coil harness ground G106 & injector balance.",
+        },
+    },
+    "holden_commodore_vz": {
+        "make": "Holden",
+        "model": "Commodore VZ (2004-2006)",
+        "engine": "3.6L Alloytec LY7/LE0 & 5.7L/6.0L LS1/L76",
+        "wmi_prefixes": ["6G1"],
+        "protocols": ["ISO15765_11_500", "J1850_VPW"],
+        "modules": [
+            {"id": "ECM", "bus": "CAN 500k / VPW (LS1)", "tx": "0x7E0", "rx": "0x7E8"},
+            {"id": "TCM", "bus": "CAN 500k", "tx": "0x7E1", "rx": "0x7E9"},
+            {"id": "ABS", "bus": "CAN / K-Line", "tx": "0x741", "rx": "0x749"},
+        ],
+        "shared_nodes": ["NODE:GMLAN_HS_500K", "NODE:PIM_IMMOBILIZER", "NODE:ENG_GND_G104"],
+        "common_dtcs": {"P0341": "Camshaft sensor or early Alloytec timing chain wear."},
+    },
+    "holden_commodore_vn_vy": {
+        "make": "Holden",
+        "model": "Commodore VN / VP / VR / VS / VT / VX / VY V6 (1988-2004)",
+        "engine": "3.8L Buick / Ecotec L36 V6 (8192-baud ALDL)",
+        "wmi_prefixes": ["6H8"],
+        "protocols": ["ALDL_8192"],
+        "modules": [{"id": "ECM", "bus": "GM 8192-baud ALDL (Pin 9)", "tx": "0xF4", "rx": "0xF4"}],
+        "shared_nodes": ["NODE:ALDL_PIN9_8192", "NODE:DFI_CAS_MODULE"],
+        "common_dtcs": {
+            "12": "System Pass (No RPM pulse)",
+            "42": "Electronic Spark Timing (EST) bypass fault — check DFI module.",
+        },
+    },
+    "holden_commodore_vt_vy_ls1": {
+        "make": "Holden",
+        "model": "Commodore VT II - VY LS1 V8 (1999-2004)",
+        "engine": "5.7L LS1 Gen-III V8 (note: VN-VY V6 uses 8192-baud ALDL)",
+        "wmi_prefixes": ["6H8", "6G1"],
+        "protocols": ["J1850_VPW"],
+        "modules": [{"id": "PCM", "bus": "J1850 VPW", "tx": "0x7E0", "rx": "0x7E8"}],
+        "shared_nodes": ["NODE:J1850_VPW_BUS", "NODE:PCM_MAIN_GND"],
+        "common_dtcs": {"P0171": "Intake manifold / PCV vacuum leak on LS1."},
+    },
+    "holden_commodore_zb": {
+        "make": "Holden",
+        "model": "Commodore ZB (2018-2020)",
+        "engine": "2.0L LTG Turbo / 3.6L LGX V6",
+        "wmi_prefixes": ["W0V"],
+        "protocols": ["ISO15765_11_500"],
+        "modules": [
+            {"id": "ECM", "bus": "HS-CAN 500k", "tx": "0x7E0", "rx": "0x7E8"},
+            {"id": "TCM", "bus": "HS-CAN 500k", "tx": "0x7E1", "rx": "0x7E9"},
+            {"id": "EBCM", "bus": "HS-CAN 500k", "tx": "0x741", "rx": "0x749"},
+        ],
+        "shared_nodes": ["NODE:HS_CAN_500K", "NODE:BATT_SENSOR_LIN"],
+        "common_dtcs": {"P0299": "2.0T wastegate actuator or charge pipe leak."},
+    },
+    "holden_colorado_rg": {
+        "make": "Holden / GM",
+        "model": "Colorado RG & Trailblazer (2012-2020)",
+        "engine": "2.8L Duramax LWN Diesel",
+        "wmi_prefixes": ["MMM"],
+        "protocols": ["ISO15765_11_500"],
+        "modules": [
+            {"id": "ECM", "bus": "HS-CAN 500k", "tx": "0x7E0", "rx": "0x7E8"},
+            {"id": "TCM", "bus": "HS-CAN 500k", "tx": "0x7E1", "rx": "0x7E9"},
+            {"id": "EBCM", "bus": "HS-CAN 500k", "tx": "0x741", "rx": "0x749"},
+        ],
+        "shared_nodes": ["NODE:GMLAN_HS_500K", "NODE:BOOST_PIPE_MAP"],
+        "common_dtcs": {"P0299": "Split intercooler hose or VGT turbo actuator."},
+    },
+    "ford_falcon_ba_au": {
+        "make": "Ford Australia",
+        "model": "Falcon AU / BA / BF (1998-2008)",
+        "engine": "4.0L Intech / Barra 182-190 I6",
+        "wmi_prefixes": ["6FP"],
+        "protocols": ["J1850_PWM", "ISO15765_11_500"],
+        "modules": [
+            {"id": "PCM", "bus": "J1850 PWM / HS-CAN", "tx": "0x7E0", "rx": "0x7E8"},
+            {"id": "BEM", "bus": "ACP Body Bus", "tx": "0x726", "rx": "0x72E"},
+            {"id": "ABS", "bus": "J1850 PWM", "tx": "0x760", "rx": "0x768"},
+            {"id": "IC", "bus": "ACP / J1850", "tx": "0x720", "rx": "0x728"},
+        ],
+        "shared_nodes": ["NODE:J1850_PWM_BUS", "NODE:ACP_BODY_BUS", "NODE:PCM_MAIN_RELAY_R1"],
+        "common_dtcs": {
+            "P0420": (
+                "Catalyst Efficiency Below Threshold — check O2 heater "
+                "fuse & exhaust manifold leaks."
+            )
+        },
+    },
+    "ford_falcon_fg_fgx": {
+        "make": "Ford Australia",
+        "model": "Falcon FG / FGX & Territory SZ (2008-2016)",
+        "engine": "4.0L Barra 195 / XR6 Turbo 270T / Miami 5.0L",
+        "wmi_prefixes": ["6FP"],
+        "protocols": ["ISO15765_11_500", "MS_CAN_125"],
+        "modules": [
+            {"id": "PCM", "bus": "HS-CAN 500k", "tx": "0x7E0", "rx": "0x7E8"},
+            {"id": "TCM", "bus": "HS-CAN 500k (ZF6HP26)", "tx": "0x7E1", "rx": "0x7E9"},
+            {"id": "ABS", "bus": "HS-CAN 500k", "tx": "0x760", "rx": "0x768"},
+            {"id": "BEM/ICC", "bus": "MS-CAN 125k (STP 53)", "tx": "0x726", "rx": "0x72E"},
+        ],
+        "shared_nodes": ["NODE:HS_CAN_500K", "NODE:MS_CAN_125K", "NODE:ZF_MECHATRONIC_PLUG"],
+        "common_dtcs": {
+            "U0101": (
+                "ZF6HP26 TCM comms/mechatronic sleeve leak — inspect 16-pin plug & bridge seal."
+            )
+        },
+    },
+    "ford_ranger_px3": {
+        "make": "Ford",
+        "model": "Ranger PX/PX2/PX3 & Everest (2011-2024)",
+        "engine": "2.0L Bi-Turbo / 3.2L Duratorq TDCi",
+        "wmi_prefixes": ["MPB", "MNA"],
+        "protocols": ["ISO15765_11_500", "MS_CAN_125"],
+        "modules": [
+            {"id": "PCM", "bus": "HS-CAN 500k", "tx": "0x7E0", "rx": "0x7E8"},
+            {"id": "TCM", "bus": "HS-CAN 500k", "tx": "0x7E1", "rx": "0x7E9"},
+            {"id": "ABS", "bus": "HS-CAN 500k", "tx": "0x760", "rx": "0x768"},
+            {"id": "BCM", "bus": "MS-CAN 125k (STP 53)", "tx": "0x726", "rx": "0x72E"},
+            {"id": "IPC", "bus": "MS-CAN 125k (STP 53)", "tx": "0x720", "rx": "0x728"},
+            {"id": "RCM", "bus": "MS-CAN 125k (STP 53)", "tx": "0x737", "rx": "0x73F"},
+        ],
+        "shared_nodes": [
+            "NODE:HS_CAN_500K",
+            "NODE:MS_CAN_125K",
+            "NODE:EXH_DPF_DIFF_PRESS",
+            "NODE:BATT_MAIN_GND_G101",
+        ],
+        "common_dtcs": {
+            "P2463": (
+                "DPF Soot Accumulation — check differential pressure "
+                "hoses & 5V ref before forced regen."
+            )
+        },
+    },
+    "bmw_e90_dcan": {
+        "make": "BMW",
+        "model": "1/3/5 Series E8x/E9x/E6x/E7x (2006-2013)",
+        "engine": "N52 / N54 / N55 / N47",
+        "wmi_prefixes": ["WBA", "WBS", "WBX"],
+        "protocols": ["BMW_DCAN", "ISO15765_11_500"],
+        "modules": [
+            {"id": "DME", "bus": "PT-CAN / D-CAN (0x6F1->0x12)", "tx": "0x6F1", "rx": "0x612"},
+            {"id": "EGS", "bus": "PT-CAN / D-CAN (0x6F1->0x18)", "tx": "0x6F1", "rx": "0x618"},
+            {"id": "DSC", "bus": "PT-CAN / D-CAN (0x6F1->0x29)", "tx": "0x6F1", "rx": "0x629"},
+            {"id": "CAS", "bus": "K-CAN / D-CAN (0x6F1->0x00)", "tx": "0x6F1", "rx": "0x600"},
+            {"id": "KOMBI", "bus": "K-CAN / D-CAN (0x6F1->0x60)", "tx": "0x6F1", "rx": "0x660"},
+        ],
+        "shared_nodes": ["NODE:PT_CAN_500K", "NODE:KL15_FUSE_F04", "NODE:CHASSIS_GND_X165"],
+        "common_dtcs": {
+            "2AAF": (
+                "Fuel Pump Plausibility — test EKPS module supply voltage & low-pressure sensor."
+            )
+        },
+    },
+    "toyota_hilux_gun126": {
+        "make": "Toyota",
+        "model": "Hilux / Fortuner / Prado / LandCruiser (2008-2024)",
+        "engine": "2.8L 1GD-FTV / 3.0L 1KD-FTV / 4.5L 1VD-FTV",
+        "wmi_prefixes": ["MR0", "JTE", "JTM"],
+        "protocols": ["ISO15765_11_500"],
+        "modules": [
+            {"id": "ECM", "bus": "HS-CAN 500k", "tx": "0x7E0", "rx": "0x7E8"},
+            {"id": "TCM", "bus": "HS-CAN 500k", "tx": "0x7E1", "rx": "0x7E9"},
+            {"id": "ABS/VSC", "bus": "HS-CAN 500k", "tx": "0x7B0", "rx": "0x7B8"},
+            {"id": "BCM", "bus": "CAN Gateway", "tx": "0x750", "rx": "0x758"},
+        ],
+        "shared_nodes": ["NODE:HS_CAN_500K", "NODE:EFI_MAIN_RELAY", "NODE:INJ_EDU_GND_E1"],
+        "common_dtcs": {
+            "P2002": (
+                "DPF Efficiency Below Threshold — inspect 5th injector "
+                "& differential pressure pipe."
+            )
+        },
+    },
+    "toyota_jdm_hybrid_import": {
+        "make": "Toyota / Lexus (JDM Import)",
+        "model": "Prius / Crown / Alphard / Vellfire / Estima Hybrid",
+        "engine": "2ZR-FXE / 2AR-FXE Hybrid Synergy Drive",
+        "wmi_prefixes": ["JTD", "JTH"],
+        "protocols": ["ISO15765_11_500"],
+        "modules": [
+            {"id": "ECM", "bus": "HS-CAN 500k", "tx": "0x7E0", "rx": "0x7E8"},
+            {"id": "HV Control", "bus": "HS-CAN 500k", "tx": "0x7E2", "rx": "0x7EA"},
+            {"id": "Battery ECU", "bus": "HS-CAN 500k", "tx": "0x7E3", "rx": "0x7EB"},
+            {"id": "ABS/Regen", "bus": "HS-CAN 500k", "tx": "0x7B0", "rx": "0x7B8"},
+        ],
+        "shared_nodes": ["NODE:HS_CAN_500K", "NODE:HV_INTERLOCK_SW", "NODE:INV_COOLANT_PUMP"],
+        "common_dtcs": {
+            "P0A80": (
+                "Replace Hybrid Battery Pack — inspect HV blower fan & delta-V across cell blocks."
+            )
+        },
+    },
+    "mazda_bt50_cx5": {
+        "make": "Mazda",
+        "model": "CX-5 / Mazda3 / BT-50 (2012-2024)",
+        "engine": "Skyactiv-D 2.2L / Skyactiv-G 2.5L",
+        "wmi_prefixes": ["JM0", "MM7"],
+        "protocols": ["ISO15765_11_500", "MS_CAN_125"],
+        "modules": [
+            {"id": "PCM", "bus": "HS-CAN 500k", "tx": "0x7E0", "rx": "0x7E8"},
+            {"id": "ABS", "bus": "HS-CAN 500k", "tx": "0x760", "rx": "0x768"},
+            {"id": "BCM", "bus": "MS-CAN 125k", "tx": "0x726", "rx": "0x72E"},
+        ],
+        "shared_nodes": ["NODE:HS_CAN_500K", "NODE:MS_CAN_125K", "NODE:EXH_PRESS_SENSOR_1"],
+        "common_dtcs": {
+            "P0471": (
+                "Exhaust Pressure Sensor Range/Performance — check carbon blockage in sensor pipe."
+            )
+        },
+    },
+    "hyundai_kia_platform": {
+        "make": "Hyundai / Kia",
+        "model": "i30 / Tucson / Sportage / Carnival / Stinger (2012-2024)",
+        "engine": "2.0L GDi / 2.2L CRDi R-Engine",
+        "wmi_prefixes": ["KMH", "KNA", "KND", "TMA"],
+        "protocols": ["ISO15765_11_500"],
+        "modules": [
+            {"id": "ECM", "bus": "C-CAN 500k", "tx": "0x7E0", "rx": "0x7E8"},
+            {"id": "TCU", "bus": "C-CAN 500k", "tx": "0x7E1", "rx": "0x7E9"},
+            {"id": "ABS/ESP", "bus": "C-CAN 500k", "tx": "0x7D1", "rx": "0x7D9"},
+            {"id": "BCM", "bus": "B-CAN", "tx": "0x7A0", "rx": "0x7A8"},
+        ],
+        "shared_nodes": ["NODE:C_CAN_500K", "NODE:JUNCTION_BOX_F12", "NODE:CHASSIS_GND_G11"],
+        "common_dtcs": {
+            "P0014": (
+                "Exhaust Camshaft Timing Over-Advanced — test OCV "
+                "solenoid resistance (6.9-7.9 ohm)."
+            )
+        },
+    },
+    "vw_audi_mqb": {
+        "make": "Volkswagen / Audi / Skoda",
+        "model": "Golf / Amarok / Tiguan / A4 (2010-2024)",
+        "engine": "EA888 2.0 TSI / EA288 2.0 TDI / V6 TDI",
+        "wmi_prefixes": ["WVW", "WAU", "WV1", "TMB"],
+        "protocols": ["ISO15765_11_500", "ISO15765_29_500"],
+        "modules": [
+            {"id": "01-Engine", "bus": "Powertrain CAN 500k", "tx": "0x7E0", "rx": "0x7E8"},
+            {"id": "02-Trans", "bus": "Powertrain CAN 500k", "tx": "0x7E1", "rx": "0x7E9"},
+            {"id": "03-ABS", "bus": "Powertrain CAN 500k", "tx": "0x713", "rx": "0x77D"},
+            {"id": "19-Gateway", "bus": "CAN Gateway", "tx": "0x710", "rx": "0x77A"},
+        ],
+        "shared_nodes": ["NODE:PT_CAN_500K", "NODE:TERM15_RELAY_J329", "NODE:GATEWAY_J533"],
+        "common_dtcs": {
+            "P0299": (
+                "Turbocharger Underboost — smoke-test charge pipes "
+                "& verify N75 actuator duty cycle."
+            )
+        },
+    },
+    "mercedes_sprinter_cclass": {
+        "make": "Mercedes-Benz",
+        "model": "C-Class W204/W205 & Sprinter NCV3/VS30",
+        "engine": "OM651 2.1L / OM642 3.0L V6 Diesel / M274",
+        "wmi_prefixes": ["WDD", "WDB", "WDF", "W1K"],
+        "protocols": ["ISO15765_11_500", "ISO15765_29_500"],
+        "modules": [
+            {"id": "CDI/ME", "bus": "Powertrain CAN 500k", "tx": "0x7E0", "rx": "0x7E8"},
+            {"id": "EGS/VGS", "bus": "Powertrain CAN 500k", "tx": "0x7E1", "rx": "0x7E9"},
+            {"id": "ESP", "bus": "Chassis CAN 500k", "tx": "0x720", "rx": "0x728"},
+        ],
+        "shared_nodes": ["NODE:PT_CAN_500K", "NODE:FRONT_SAM_N10", "NODE:DPF_BACKPRESS_B60"],
+        "common_dtcs": {
+            "P2453": "DPF Differential Pressure Sensor — inspect B28/8 sensor & boost hoses."
+        },
+    },
+    "isuzu_dmax_mux": {
+        "make": "Isuzu",
+        "model": "D-Max / MU-X (2012-2024)",
+        "engine": "4JJ1-TC / 4JJ3-TCX 3.0L Diesel",
+        "wmi_prefixes": ["MP1"],
+        "protocols": ["ISO15765_11_500"],
+        "modules": [
+            {"id": "ECM", "bus": "HS-CAN 500k", "tx": "0x7E0", "rx": "0x7E8"},
+            {"id": "TCM", "bus": "HS-CAN 500k", "tx": "0x7E1", "rx": "0x7E9"},
+            {"id": "ABS", "bus": "HS-CAN 500k", "tx": "0x760", "rx": "0x768"},
+        ],
+        "shared_nodes": ["NODE:HS_CAN_500K", "NODE:SCV_SUCTION_VALVE", "NODE:ECM_GND_E2"],
+        "common_dtcs": {
+            "P0087": (
+                "Fuel Rail Pressure Too Low — test Suction Control "
+                "Valve (SCV) & fuel filter vacuum."
+            )
+        },
+    },
+    "mitsubishi_triton_pajero": {
+        "make": "Mitsubishi",
+        "model": "Triton MQ/MR, Pajero Sport & Delica D:5 (2010-2024)",
+        "engine": "4N15 2.4L / 4M41 3.2L Diesel",
+        "wmi_prefixes": ["MMA", "JMY"],
+        "protocols": ["ISO15765_11_500"],
+        "modules": [
+            {"id": "MPI/Diesel", "bus": "HS-CAN 500k", "tx": "0x7E0", "rx": "0x7E8"},
+            {"id": "AT", "bus": "HS-CAN 500k", "tx": "0x7E1", "rx": "0x7E9"},
+            {"id": "ABS/ASC", "bus": "HS-CAN 500k", "tx": "0x784", "rx": "0x78C"},
+        ],
+        "shared_nodes": ["NODE:HS_CAN_500K", "NODE:INTERCOOLER_HOSE", "NODE:EGR_VALVE_LIN"],
+        "common_dtcs": {
+            "P0299": "Turbo Underboost — inspect split rubber intercooler hose on driver side."
+        },
+    },
+    "nissan_navara_patrol": {
+        "make": "Nissan",
+        "model": "Navara NP300, Patrol Y62 & Skyline/Elgrand JDM",
+        "engine": "YS23DDTT 2.3L / VK56VD 5.6L V8 / VQ35",
+        "wmi_prefixes": ["MNT", "JN1"],
+        "protocols": ["ISO15765_11_500"],
+        "modules": [
+            {"id": "ECM", "bus": "HS-CAN 500k", "tx": "0x7E0", "rx": "0x7E8"},
+            {"id": "TCM", "bus": "HS-CAN 500k", "tx": "0x7E1", "rx": "0x7E9"},
+            {"id": "ABS", "bus": "HS-CAN 500k", "tx": "0x740", "rx": "0x748"},
+            {"id": "IPDM", "bus": "HS-CAN 500k", "tx": "0x745", "rx": "0x74D"},
+        ],
+        "shared_nodes": ["NODE:HS_CAN_500K", "NODE:IPDM_ER_FUSE_BOX", "NODE:VAC_SOLENOID_BOOST"],
+        "common_dtcs": {
+            "P0101": "MAF Sensor Circuit Range — clean MAF & inspect turbo boost vacuum solenoid."
+        },
+    },
+    "subaru_forester_wrx": {
+        "make": "Subaru",
+        "model": "Forester / Outback / WRX / Levorg (2010-2024)",
+        "engine": "FB25 / FA20DIT / FA24 / EJ25 Boxer",
+        "wmi_prefixes": ["JF1", "JF2"],
+        "protocols": ["ISO15765_11_500"],
+        "modules": [
+            {"id": "ECM", "bus": "HS-CAN 500k", "tx": "0x7E0", "rx": "0x7E8"},
+            {"id": "TCM", "bus": "HS-CAN 500k", "tx": "0x7E1", "rx": "0x7E9"},
+            {"id": "VDC/ABS", "bus": "HS-CAN 500k", "tx": "0x7B0", "rx": "0x7B8"},
+            {"id": "EYESIGHT", "bus": "HS-CAN 500k", "tx": "0x7A2", "rx": "0x7AA"},
+        ],
+        "shared_nodes": ["NODE:HS_CAN_500K", "NODE:STOP_LAMP_SW", "NODE:TGV_ACTUATOR"],
+        "common_dtcs": {
+            "P0171": "System Too Lean Bank 1 — inspect PCV hose & intake manifold gasket."
+        },
+    },
+    "honda_civic_crv_jdm": {
+        "make": "Honda",
+        "model": "Civic / CR-V / Accord / Fit JDM (2008-2024)",
+        "engine": "K20 / K24 / L15B7 EarthDreams Turbo",
+        "wmi_prefixes": ["JHM", "MRH", "1HG"],
+        "protocols": ["ISO15765_11_500", "ISO15765_29_500"],
+        "modules": [
+            {"id": "PGM-FI", "bus": "HS-CAN 500k", "tx": "0x7E0", "rx": "0x7E8"},
+            {"id": "AT/CVT", "bus": "HS-CAN 500k", "tx": "0x7E1", "rx": "0x7E9"},
+            {"id": "VSA/ABS", "bus": "HS-CAN 500k", "tx": "0x7B0", "rx": "0x7B8"},
+        ],
+        "shared_nodes": ["NODE:HS_CAN_500K", "NODE:PGMFI_MAIN_RELAY"],
+        "common_dtcs": {
+            "P0300": "L15B7 injector/coil misfire — check fuel dilution & coil pack resistance."
+        },
+    },
+    "suzuki_swift_jimny": {
+        "make": "Suzuki",
+        "model": "Swift / Jimny JB74 / Vitara (2012-2024)",
+        "engine": "K15B 1.5L / K14C Boosterjet",
+        "wmi_prefixes": ["JS2", "JSA"],
+        "protocols": ["ISO15765_11_500"],
+        "modules": [
+            {"id": "ECM", "bus": "HS-CAN 500k", "tx": "0x7E0", "rx": "0x7E8"},
+            {"id": "ABS/ESP", "bus": "HS-CAN 500k", "tx": "0x760", "rx": "0x768"},
+        ],
+        "shared_nodes": ["NODE:HS_CAN_500K", "NODE:MAIN_FUSE_BOX"],
+        "common_dtcs": {
+            "P0420": "Catalyst Efficiency — check downstream O2 sensor & exhaust flange."
+        },
+    },
+    "gwm_haval_chery": {
+        "make": "GWM / Haval / Chery",
+        "model": "Cannon, Tank 300/500, Haval H6/Jolion & Chery Omoda 5 (2020-2026)",
+        "engine": "2.0T / 2.4T Diesel / 1.5T DHT Hybrid & PHEV",
+        "wmi_prefixes": ["LGW", "LVV"],
+        "protocols": ["ISO15765_11_500"],
+        "modules": [
+            {"id": "ECM", "bus": "HS-CAN 500k", "tx": "0x7E0", "rx": "0x7E8"},
+            {"id": "EPS/ESC", "bus": "HS-CAN 500k", "tx": "0x730", "rx": "0x738"},
+            {"id": "BCM/TPMS", "bus": "Body CAN", "tx": "0x740", "rx": "0x748"},
+            {"id": "RADAR/ADAS", "bus": "ADAS CAN", "tx": "0x750", "rx": "0x758"},
+        ],
+        "shared_nodes": ["NODE:HS_CAN_500K", "NODE:SAS_STEERING_ZERO", "NODE:AUX_12V_PHEV"],
+        "common_dtcs": {
+            "C1200": (
+                "ESP/SAS uncalibrated — run SAS Zero-Point Calibration with wheels straight ahead."
+            ),
+            "U0100": (
+                "PHEV/Hybrid 12V aux drop — load-test 12V battery before condemning HV modules."
+            ),
+        },
+    },
+    "byd_ev_phev": {
+        "make": "BYD",
+        "model": "Atto 3, Seal, Dolphin, Sealion 6/7 & Shark 6 (2022-2026)",
+        "engine": "8-in-1 PMSM EV / DM-i PHEV Blade Battery",
+        "wmi_prefixes": ["LC0", "LGX"],
+        "protocols": ["ISO15765_11_500", "ISO15765_29_500"],
+        "modules": [
+            {"id": "VCU", "bus": "Powertrain CAN 500k", "tx": "0x7E0", "rx": "0x7E8"},
+            {"id": "BMS", "bus": "EV CAN 500k", "tx": "0x7E4", "rx": "0x7EC"},
+            {"id": "MCU/Inverter", "bus": "EV CAN 500k", "tx": "0x7E2", "rx": "0x7EA"},
+            {"id": "IPB (iBoost)", "bus": "Chassis CAN 500k", "tx": "0x7B0", "rx": "0x7B8"},
+        ],
+        "shared_nodes": [
+            "NODE:AUX_12V_DCDC_13V5",
+            "NODE:REAR_AXLE_HV_CONN",
+            "NODE:HV_ISOLATION_LOOP",
+        ],
+        "common_dtcs": {
+            "VCU_LIMP_MODE": (
+                "Check 12V aux voltage & DC-DC (>13.5V Ready); inspect "
+                "rear-axle HV connector on Seal."
+            ),
+            "BMS_ISO_LOW": (
+                "HV isolation resistance low — inspect underbody HV harness & coolant conductivity."
+            ),
+        },
+    },
+    "ldv_mg_saic": {
+        "make": "LDV / MG (SAIC)",
+        "model": "LDV T60 / G10 / D90 & MG ZS / HS / MG4 (2017-2026)",
+        "engine": "2.0L Bi-Turbo Diesel / 1.5T Petrol / EV",
+        "wmi_prefixes": ["LSF", "LSJ"],
+        "protocols": ["ISO15765_11_500"],
+        "modules": [
+            {"id": "ECM/VCU", "bus": "HS-CAN 500k", "tx": "0x7E0", "rx": "0x7E8"},
+            {"id": "TCM", "bus": "HS-CAN 500k", "tx": "0x7E1", "rx": "0x7E9"},
+            {"id": "ABS/ESP", "bus": "HS-CAN 500k", "tx": "0x760", "rx": "0x768"},
+            {"id": "BCM", "bus": "Body CAN", "tx": "0x740", "rx": "0x748"},
+        ],
+        "shared_nodes": ["NODE:HS_CAN_500K", "NODE:DPF_DIFF_PRESS", "NODE:INTERCOOLER_HOSE"],
+        "common_dtcs": {
+            "P2463": (
+                "LDV T60 DPF soot load — inspect diff-pressure hoses & run Tier B forced regen."
+            ),
+            "P0299": "Turbo underboost — inspect charge pipe clamps & VGT actuator.",
+        },
+    },
+    "landrover_jaguar": {
+        "make": "Land Rover / Jaguar",
+        "model": "Discovery 4/5, Defender L663 & Range Rover Sport (2010-2025)",
+        "engine": "3.0L TDV6/SDV6 & Ingenium 2.0L/3.0L",
+        "wmi_prefixes": ["SAL", "SAJ"],
+        "protocols": ["ISO15765_11_500", "MS_CAN_125"],
+        "modules": [
+            {"id": "PCM", "bus": "HS-CAN 500k", "tx": "0x7E0", "rx": "0x7E8"},
+            {"id": "TCM", "bus": "HS-CAN 500k", "tx": "0x7E1", "rx": "0x7E9"},
+            {"id": "RLM (Air Susp)", "bus": "MS-CAN 125k", "tx": "0x726", "rx": "0x72E"},
+        ],
+        "shared_nodes": ["NODE:HS_CAN_500K", "NODE:MS_CAN_125K", "NODE:CROSSOVER_EGR_PIPE"],
+        "common_dtcs": {
+            "P0299": "TDV6/SDV6 plastic inlet manifold crack or secondary turbo actuator fault."
+        },
+    },
+    "jeep_ram_stellantis": {
+        "make": "Jeep / RAM",
+        "model": "Wrangler JL, Grand Cherokee WK2 & RAM 1500 DT (2014-2025)",
+        "engine": "3.6L Pentastar / 5.7L HEMI / 3.0L EcoDiesel",
+        "wmi_prefixes": ["1C4", "1C6"],
+        "protocols": ["ISO15765_11_500"],
+        "modules": [
+            {"id": "PCM", "bus": "CAN-C 500k (SGW)", "tx": "0x7E0", "rx": "0x7E8"},
+            {"id": "TCM", "bus": "CAN-C 500k", "tx": "0x7E1", "rx": "0x7E9"},
+            {"id": "ABS", "bus": "CAN-C 500k", "tx": "0x760", "rx": "0x768"},
+        ],
+        "shared_nodes": ["NODE:CAN_C_500K", "NODE:SGW_SECURITY_GATEWAY", "NODE:ESIM_EVAP_SWITCH"],
+        "common_dtcs": {
+            "P0456": "Small EVAP leak — replace ESIM purge integrity module on canister."
+        },
+    },
+}
+
+SERVICE_FUNCTIONS_CATALOG: list[dict[str, Any]] = [
+    {
+        "id": "oil_reset",
+        "name": "Oil Service / Maintenance Reset",
+        "tier": "A",
+        "uds_service": "0x31",
+        "notes": "Resets service interval counter in IPC/PCM.",
+    },
+    {
+        "id": "bms_reset",
+        "name": "BMS Battery Registration",
+        "tier": "A",
+        "uds_service": "0x31",
+        "notes": "Registers new AGM/EFB battery capacity & state-of-charge.",
+    },
+    {
+        "id": "epb_service",
+        "name": "EPB Caliper Retract / Service Mode",
+        "tier": "A",
+        "uds_service": "0x31",
+        "notes": "Opens rear electronic parking brake calipers for pad replacement.",
+    },
+    {
+        "id": "sas_cal",
+        "name": "Steering Angle Sensor (SAS) Zero Calibration",
+        "tier": "A",
+        "uds_service": "0x31",
+        "notes": "Zeros steering angle with wheels straight ahead.",
+    },
+    {
+        "id": "dpf_regen",
+        "name": "DPF Static Forced Regeneration",
+        "tier": "B",
+        "uds_service": "0x31",
+        "notes": "Requires park/neutral, coolant >= 70C, battery >= 12.5V.",
+    },
+    {
+        "id": "abs_bleed",
+        "name": "ABS / VSC Automated Hydraulic Bleed",
+        "tier": "B",
+        "uds_service": "0x2F",
+        "notes": "Actuates ABS pump & solenoids during brake fluid bleed.",
+    },
+    {
+        "id": "injector_coding",
+        "name": "Diesel Injector IMA / QR Coding",
+        "tier": "B",
+        "uds_service": "0x2E",
+        "notes": "Writes injector trim codes to ECM.",
+    },
+    {
+        "id": "throttle_relearn",
+        "name": "Electronic Throttle Body Idle Relearn",
+        "tier": "A",
+        "uds_service": "0x31",
+        "notes": "Relearns closed-throttle stop after cleaning.",
+    },
+    {
+        "id": "tpms_relearn",
+        "name": "TPMS Sensor ID Relearn",
+        "tier": "A",
+        "uds_service": "0x31",
+        "notes": "Registers wheel TPMS sensor IDs in BCM.",
+    },
+    {
+        "id": "radar_cal",
+        "name": "Park Assist & Blind-Spot Radar Zero-Point Calibration",
+        "tier": "B",
+        "uds_service": "0x31",
+        "notes": "Calibrates ultrasonic/radar baseline on flat ground.",
+    },
+    {
+        "id": "ckp_relearn",
+        "name": "Crankshaft Position (CKP) Sensor Relearn",
+        "tier": "B",
+        "uds_service": "0x31",
+        "notes": "Clears P1336 / cam-crank variation after CKP/ECU replacement.",
+    },
+]
+
+
+def list_vehicle_platforms() -> list[dict[str, Any]]:
+    return [{"profile": k, **v} for k, v in VEHICLE_PLATFORMS.items()]
+
+
+def get_vehicle_platform(profile: str) -> dict[str, Any]:
+    return VEHICLE_PLATFORMS.get(profile, VEHICLE_PLATFORMS["holden_commodore_ve_vf"])
+
+
+def decode_vin_platform(vin: str) -> dict[str, Any]:
+    clean = vin.strip().upper()
+    wmi = clean[:3]
+    for profile, info in VEHICLE_PLATFORMS.items():
+        if wmi in info["wmi_prefixes"]:
+            return {"matched": True, "profile": profile, "wmi": wmi, **info}
+    return {
+        "matched": False,
+        "profile": "generic_obd2_uds",
+        "wmi": wmi,
+        "make": "Universal OBD-II / EOBD",
+        "model": "Generic ISO 15765 / KWP2000 / J1850 Vehicle",
+        "engine": "All OBD-II Compliant Powertrains",
+        "protocols": [
+            "AUTO",
+            "ISO15765_11_500",
+            "ISO15765_29_500",
+            "ISO14230_FAST",
+            "ISO9141_2",
+            "J1850_PWM",
+            "J1850_VPW",
+        ],
+        "modules": [{"id": "ECM/PCM", "bus": "OBD-II Functional", "tx": "0x7DF", "rx": "0x7E8"}],
+        "shared_nodes": ["NODE:OBD2_PIN16_BATT", "NODE:OBD2_PIN4_5_GND"],
+        "common_dtcs": {},
+    }

@@ -18,10 +18,12 @@ use std::{fmt, time::Duration};
 
 use async_trait::async_trait;
 
+pub mod aldl_8192;
 pub mod discovery;
 pub mod j2534_win;
 pub mod kline_ftdi;
 pub mod serial;
+pub mod shared_bus;
 pub mod slcan_serial;
 pub mod stn_elm;
 pub mod virtual_bus;

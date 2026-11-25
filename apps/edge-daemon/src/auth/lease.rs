@@ -1,9 +1,11 @@
 //! Offline capability leases and cloud pairing tokens (Task 1.4).
 //!
 //! Lease (`aud=edge-daemon`, issued by `POST /api/v1/auth/edge-lease`, Task 2.2):
-//! `tenant_id`, `tier`, `features`, `aasra_verified`, `nbf`, `exp`; valid up to
-//! 72 h, 5 min clock skew. Unlocks `J2534`, `UDS_ACTIVE`, `CAN_RE_PRO` offline.
-//! No valid lease means COMMUNITY tier with no features.
+//! `tenant_id`, `tier`, `features`, `aasra_verified`, `nbf`, `exp`, optional
+//! `rcid` and `lease_ver`; valid up to 72 h, 5 min clock skew. Paid-feature
+//! leases are issued for 12 h. Unlocks `J2534`, `UDS_ACTIVE`, `CAN_RE_PRO`,
+//! and `IMMO_PROGRAM` when the add-on is entitled. No valid lease (or a
+//! revoked / wrong-device lease) means COMMUNITY tier with no features.
 //!
 //! Pairing token (`aud=edge-ws`, `POST /api/v1/auth/edge-pairing`): `user_id`,
 //! `tenant_id`, `origin`; lifetime at most 5 min; `origin` must equal the
@@ -15,6 +17,7 @@ use super::{
     cloud_keys::KeyRing,
     jws::{self, JwsError},
 };
+use crate::immo::{IMMO_LEASE_KIND, MAX_IMMO_LEASE_SECS};
 use crate::protocol::messages::{Feature, LeaseTier};
 
 pub const SKEW_SECS: u64 = 300;
@@ -48,8 +51,14 @@ pub struct Lease {
     pub tier: LeaseTier,
     pub features: Vec<Feature>,
     pub aasra_verified: bool,
+    /// True when this token is an immobilizer lease, not a diagnostic one.
+    pub immo: bool,
     /// Unix seconds; `None` for the no-lease default.
     pub expires_at: Option<u64>,
+    /// Optional dongle / device binding from the `rcid` claim.
+    pub rcid: Option<String>,
+    /// Monotonic tenant lease generation; older than `EDGE_LEASE_MIN_VERSION` is revoked.
+    pub lease_ver: i64,
 }
 
 impl Lease {
@@ -60,7 +69,10 @@ impl Lease {
             tier: LeaseTier::Community,
             features: Vec::new(),
             aasra_verified: false,
+            immo: false,
             expires_at: None,
+            rcid: None,
+            lease_ver: 0,
         }
     }
 
@@ -143,25 +155,82 @@ pub fn verify_lease(token: &str, keys: &KeyRing, now: u64) -> Result<Lease, Toke
         .get("aasra_verified")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let immo = claims.get("lease_kind").and_then(Value::as_str) == Some(IMMO_LEASE_KIND);
+    let rcid = claims
+        .get("rcid")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned);
+    let lease_ver = claims
+        .get("lease_ver")
+        .and_then(|v| v.as_i64().or_else(|| v.as_u64().map(|u| u as i64)))
+        .unwrap_or(0);
     Ok(Lease {
         tenant_id: Some(tenant_id),
         tier,
         features,
         aasra_verified,
+        immo,
         expires_at: Some(exp),
+        rcid,
+        lease_ver,
     })
+}
+
+/// Drop paid features when the lease is bound to another device or has been revoked.
+pub fn constrain_lease(lease: Lease, device_id: Option<&str>, min_version: i64) -> Lease {
+    if lease.features.is_empty() {
+        return lease;
+    }
+    if lease.lease_ver < min_version {
+        tracing::warn!(
+            lease_ver = lease.lease_ver,
+            min_version,
+            "lease revoked; running at COMMUNITY tier"
+        );
+        return Lease::community();
+    }
+    match (lease.rcid.as_deref(), device_id) {
+        (Some(rcid), Some(id)) if rcid != id => {
+            tracing::warn!("lease rcid does not match EDGE_DEVICE_ID; running at COMMUNITY tier");
+            Lease::community()
+        }
+        (None, Some(_)) => {
+            tracing::warn!(
+                "EDGE_DEVICE_ID is set but the lease has no rcid; running at COMMUNITY tier"
+            );
+            Lease::community()
+        }
+        _ => lease,
+    }
 }
 
 /// The lease to use now: a verified token, or COMMUNITY if there is none or it fails.
 pub fn effective_lease(token: Option<&str>, keys: &KeyRing, now: u64) -> Lease {
-    match token.map(|t| verify_lease(t.trim(), keys, now)) {
+    effective_lease_constrained(token, keys, now, None, 0)
+}
+
+/// Like [`effective_lease`], with device binding and lease-generation checks.
+pub fn effective_lease_constrained(
+    token: Option<&str>,
+    keys: &KeyRing,
+    now: u64,
+    device_id: Option<&str>,
+    min_version: i64,
+) -> Lease {
+    let lease = match token.map(|t| verify_lease(t.trim(), keys, now)) {
+        Some(Ok(lease)) if lease.immo => {
+            tracing::warn!("immo lease presented as a diagnostic lease; running at COMMUNITY tier");
+            Lease::community()
+        }
         Some(Ok(lease)) => lease,
         Some(Err(e)) => {
             tracing::warn!("lease rejected ({e}); running at COMMUNITY tier");
             Lease::community()
         }
         None => Lease::community(),
-    }
+    };
+    constrain_lease(lease, device_id, min_version)
 }
 
 /// Claims of a verified cloud pairing token.
@@ -188,6 +257,46 @@ pub fn verify_pairing(
     Ok(Pairing {
         user_id: string(&claims, "user_id")?,
         tenant_id: string(&claims, "tenant_id")?,
+    })
+}
+
+/// A verified immobilizer lease (`lease_kind=immo_lease`, `aud=edge-daemon`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImmoLease {
+    pub tenant_id: String,
+    pub user_id: String,
+    pub session_id: String,
+    pub jti: String,
+    pub vin: String,
+    pub device_id: String,
+    pub device_tier: String,
+    pub oem: String,
+    pub operation: String,
+    pub expires_at: u64,
+}
+
+/// Verifies an immobilizer lease. Diagnostic leases and over-long tokens fail.
+pub fn verify_immo_lease(token: &str, keys: &KeyRing, now: u64) -> Result<ImmoLease, TokenError> {
+    let claims = jws::verify(token, keys)?;
+    check_audience(&claims, LEASE_AUDIENCE)?;
+    if claims.get("lease_kind").and_then(Value::as_str) != Some(IMMO_LEASE_KIND) {
+        return Err(TokenError::Claim("lease_kind"));
+    }
+    let (_, exp) = check_times(&claims, now, MAX_IMMO_LEASE_SECS)?;
+    if claims.get("aasra_verified").and_then(Value::as_bool) != Some(true) {
+        return Err(TokenError::Claim("aasra_verified"));
+    }
+    Ok(ImmoLease {
+        tenant_id: string(&claims, "tenant_id")?,
+        user_id: string(&claims, "user_id")?,
+        session_id: string(&claims, "session_id")?,
+        jti: string(&claims, "jti")?,
+        vin: string(&claims, "vin")?,
+        device_id: string(&claims, "device_id")?,
+        device_tier: string(&claims, "device_tier")?,
+        oem: string(&claims, "oem")?,
+        operation: string(&claims, "operation")?,
+        expires_at: exp,
     })
 }
 
@@ -323,5 +432,95 @@ mod tests {
             verify_pairing(&lease_token, &keys, Some("https://app.example"), NOW),
             Err(TokenError::WrongAudience(_))
         ));
+    }
+
+    fn immo_claims() -> Value {
+        json!({
+            "aud": "edge-daemon",
+            "lease_kind": "immo_lease",
+            "tenant_id": "t-1",
+            "user_id": "u-1",
+            "session_id": "s-1",
+            "jti": "j-1",
+            "vin": "SBXTESTVAN0000001",
+            "device_id": "RC-DONGLE-SANDBOX",
+            "device_tier": "dongle",
+            "oem": "SANDBOX",
+            "operation": "add_key_onboard",
+            "aasra_verified": true,
+            "features": ["IMMO_PROGRAM"],
+            "nbf": NOW - 10,
+            "exp": NOW + 15 * 60
+        })
+    }
+
+    #[test]
+    fn immo_lease_gates() {
+        let (key, keys) = setup();
+        let sign = |c: Value| jws::sign(&c, "cloud-1", &key);
+        let lease = verify_immo_lease(&sign(immo_claims()), &keys, NOW).unwrap();
+        assert_eq!(lease.vin, "SBXTESTVAN0000001");
+        assert_eq!(lease.device_id, "RC-DONGLE-SANDBOX");
+
+        // A diagnostic lease is not an immo lease.
+        assert_eq!(
+            verify_immo_lease(&sign(lease_claims()), &keys, NOW),
+            Err(TokenError::Claim("lease_kind"))
+        );
+
+        // Longer than 30 minutes is refused.
+        let mut long = immo_claims();
+        long["exp"] = json!(NOW + 31 * 60);
+        assert_eq!(
+            verify_immo_lease(&sign(long), &keys, NOW),
+            Err(TokenError::TooLong(MAX_IMMO_LEASE_SECS))
+        );
+
+        // VIN binding is required.
+        let mut no_vin = immo_claims();
+        no_vin["vin"] = json!("");
+        assert_eq!(
+            verify_immo_lease(&sign(no_vin), &keys, NOW),
+            Err(TokenError::Claim("vin"))
+        );
+
+        // An immo lease must not unlock diagnostic features.
+        assert_eq!(
+            effective_lease(Some(&sign(immo_claims())), &keys, NOW),
+            Lease::community()
+        );
+    }
+
+    #[test]
+    fn device_binding_and_revocation() {
+        let (key, keys) = setup();
+        let mut claims = lease_claims();
+        claims["rcid"] = json!("RC-DGL-04A2");
+        claims["lease_ver"] = json!(3);
+        claims["features"] = json!(["UDS_ACTIVE", "CAN_RE_PRO"]);
+        let token = jws::sign(&claims, "cloud-1", &key);
+        let ok = effective_lease_constrained(Some(&token), &keys, NOW, Some("RC-DGL-04A2"), 3);
+        assert!(ok.has(Feature::CanRePro));
+        assert_eq!(ok.lease_ver, 3);
+        assert_eq!(ok.rcid.as_deref(), Some("RC-DGL-04A2"));
+
+        assert_eq!(
+            effective_lease_constrained(Some(&token), &keys, NOW, Some("OTHER-DEVICE"), 3),
+            Lease::community(),
+            "wrong device"
+        );
+        assert_eq!(
+            effective_lease_constrained(Some(&token), &keys, NOW, Some("RC-DGL-04A2"), 4),
+            Lease::community(),
+            "revoked generation"
+        );
+        // When the daemon has a device id, unbound paid leases are refused.
+        let unbound = lease_claims();
+        let unbound_tok = jws::sign(&unbound, "cloud-1", &key);
+        assert_eq!(
+            effective_lease_constrained(Some(&unbound_tok), &keys, NOW, Some("RC-DGL-04A2"), 0),
+            Lease::community(),
+            "missing rcid"
+        );
     }
 }

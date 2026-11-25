@@ -59,13 +59,22 @@ impl StnProtocol {
             Self::Can29_500 => '7',
             Self::Can11_250 => '8',
             Self::Can29_250 => '9',
+            // STN11xx/STN22xx MS-CAN uses STP 53 (ISO 15765, 11-bit, 125 kbps);
+            // plain ELM327 chips cannot switch to MS-CAN without hardware pins.
             Self::MsCan125 => {
                 return Err(HalError::Unsupported(
-                    "MS-CAN switching: STN STP numbers not yet verified against the STN reference"
-                        .into(),
+                    "MS-CAN requires an STN chip (STP 53); plain ELM327 ATSP is unsupported".into(),
                 ))
             }
         })
+    }
+
+    /// STN-specific `STP` protocol selector when `ATSP` does not cover the bus.
+    pub fn stp_command(self) -> Option<&'static str> {
+        match self {
+            Self::MsCan125 => Some("STP 53"),
+            _ => None,
+        }
     }
 
     fn can_bitrate(self) -> Option<(u32, bool)> {
@@ -74,6 +83,7 @@ impl StnProtocol {
             Self::Can29_500 => Some((500_000, true)),
             Self::Can11_250 => Some((250_000, false)),
             Self::Can29_250 => Some((250_000, true)),
+            Self::MsCan125 => Some((125_000, false)),
             _ => None,
         }
     }
@@ -282,7 +292,12 @@ impl<L: SerialLink> StnElmAdapter<L> {
     /// Resets and configures the chip for the chosen protocol. Called by `open`
     /// for CAN; call it directly before `request_message` on K-line or J1850.
     pub async fn init(&mut self) -> Result<DeviceInfo> {
-        let atsp = self.protocol.atsp()?;
+        let stp_cmd = self.protocol.stp_command();
+        let atsp = if stp_cmd.is_some() {
+            None
+        } else {
+            Some(self.protocol.atsp()?)
+        };
         let elm_version = self
             .command("ATZ")
             .await?
@@ -297,7 +312,16 @@ impl<L: SerialLink> StnElmAdapter<L> {
             Err(HalError::Protocol(_)) => None, // a plain ELM answers "?"
             Err(e) => return Err(e),
         };
-        self.expect_ok(&format!("ATSP{atsp}")).await?;
+        if let Some(stp) = stp_cmd {
+            if stn.is_none() {
+                return Err(HalError::Unsupported(
+                    "MS-CAN requires an STN chip (STP 53); plain ELM327 is unsupported".into(),
+                ));
+            }
+            self.expect_ok(stp).await?;
+        } else if let Some(code) = atsp {
+            self.expect_ok(&format!("ATSP{code}")).await?;
+        }
         if self.protocol.can_bitrate().is_some() {
             self.expect_ok("ATCAF0").await?;
         }
@@ -312,12 +336,25 @@ impl<L: SerialLink> StnElmAdapter<L> {
     /// for KWP physical addressing to the DME, or `[0x68, 0x6A, 0xF1]` for J1850
     /// OBD). Returns every message the chip printed, checksums verified.
     pub async fn request_message(&mut self, header: &[u8], data: &[u8]) -> Result<Vec<StnMessage>> {
+        self.request_message_gated(header, data, false).await
+    }
+
+    /// K-line or J1850 request; allows J1850 Mode 0x04 Clear DTCs when `safety_confirmed` is true.
+    pub async fn request_message_gated(
+        &mut self,
+        header: &[u8],
+        data: &[u8],
+        safety_confirmed: bool,
+    ) -> Result<Vec<StnMessage>> {
         if !(self.protocol.is_kline() || self.protocol.is_j1850()) {
             return Err(HalError::Unsupported(
                 "request_message is for K-line and J1850 protocols".into(),
             ));
         }
-        if self.protocol.is_j1850() && !data.first().is_some_and(|m| J1850_READ_MODES.contains(m)) {
+        let j1850_allowed = data
+            .first()
+            .is_some_and(|m| J1850_READ_MODES.contains(m) || (safety_confirmed && *m == 0x04));
+        if self.protocol.is_j1850() && !j1850_allowed {
             return Err(HalError::Unsupported(
                 "J1850 is read-only: OBD read modes only".into(),
             ));
@@ -573,7 +610,17 @@ mod tests {
             Err(HalError::Unsupported(_))
         ));
 
-        let mut ms = StnElmAdapter::new(ReplaySerial::new(Vec::new()), StnProtocol::MsCan125);
-        assert!(matches!(ms.init().await, Err(HalError::Unsupported(_))));
+        // Intended MS-CAN behaviour: probe the chip first (STI), then refuse
+        // STP 53 on a plain ELM327. An empty serial link is the wrong fixture
+        // -- init must talk to the adapter before it can decide.
+        let elm_mscan = "> ATZ\\r\n< ATZ\\r\\r\\rELM327 v1.5\\r\\r>\n> ATE0\\r\n< ATE0\\rOK\\r\\r>\n> ATL0\\r\n< OK\\r\\r>\n> ATS1\\r\n< OK\\r\\r>\n> ATH1\\r\n< OK\\r\\r>\n> STI\\r\n< ?\\r\\r>\n";
+        let mut ms = StnElmAdapter::new(
+            ReplaySerial::from_script(elm_mscan).unwrap(),
+            StnProtocol::MsCan125,
+        );
+        assert!(
+            matches!(ms.init().await, Err(HalError::Unsupported(_))),
+            "plain ELM327 must not be given STP 53"
+        );
     }
 }

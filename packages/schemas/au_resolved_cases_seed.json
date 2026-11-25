@@ -1,0 +1,199 @@
+[
+  {
+    "case_id": "CASE-AU-2026-0001",
+    "wmi_vds": "6G1EY5",
+    "engine_family": "Holden 3.6L SIDI LFX / Alloytec",
+    "dtcs": [
+      "P0017",
+      "P0016",
+      "P0008"
+    ],
+    "symptom_summary": "VE/VF Commodore rough idle and cam/crank correlation fault",
+    "verified_fix": "Replaced stretched primary & secondary timing chains and verified oil pressure >= 250 kPa at 2000 rpm.",
+    "parts_replaced": [
+      "Timing Chain Kit",
+      "Cam Phaser Solenoid"
+    ]
+  },
+  {
+    "case_id": "CASE-AU-2026-0002",
+    "wmi_vds": "6G1EP5",
+    "engine_family": "Holden 6.0L L77 / 6.2L LS3 V8",
+    "dtcs": [
+      "P0300",
+      "P0201"
+    ],
+    "symptom_summary": "VF Commodore V8 intermittent misfire under load",
+    "verified_fix": "Cleaned corroded engine block ground G106 and replaced faulty #1 ignition coil.",
+    "parts_replaced": [
+      "Ignition Coil"
+    ]
+  },
+  {
+    "case_id": "CASE-AU-2026-0003",
+    "wmi_vds": "6FPAAA",
+    "engine_family": "Ford 4.0L Barra 195 / 270T",
+    "dtcs": [
+      "U0101",
+      "P0705"
+    ],
+    "symptom_summary": "FG Falcon ZF6HP26 limp mode and no PRNDL display",
+    "verified_fix": "Replaced leaking transmission mechatronic bridge seal and cleaned 16-pin connector.",
+    "parts_replaced": [
+      "ZF Mechatronic Sleeve",
+      "Bridge Seal"
+    ]
+  },
+  {
+    "case_id": "CASE-AU-2026-0004",
+    "wmi_vds": "MPBUMF",
+    "engine_family": "Ford 3.2L Duratorq / 2.0L Bi-Turbo",
+    "dtcs": [
+      "P2463",
+      "P246C"
+    ],
+    "symptom_summary": "Ranger PX3 DPF restriction warning and derate",
+    "verified_fix": "Replaced split DPF differential pressure sensor hose, reset learned ash, and ran Tier B forced regen.",
+    "parts_replaced": [
+      "DPF Pressure Sensor Hose"
+    ]
+  },
+  {
+    "case_id": "CASE-AU-2026-0005",
+    "wmi_vds": "MR0HA3",
+    "engine_family": "Toyota 2.8L 1GD-FTV Diesel",
+    "dtcs": [
+      "P2002",
+      "P244A"
+    ],
+    "symptom_summary": "Hilux GUN126 DPF efficiency fault on highway",
+    "verified_fix": "Cleaned blocked 5th fuel injector nozzle and verified exhaust temp > 600C during static regen.",
+    "parts_replaced": [
+      "DPF 5th Injector Gasket"
+    ]
+  },
+  {
+    "case_id": "CASE-AU-2026-0006",
+    "wmi_vds": "WBAVB1",
+    "engine_family": "BMW N52 / N54 Inline-6",
+    "dtcs": [
+      "2AAF",
+      "29F4"
+    ],
+    "symptom_summary": "BMW E90 fuel pump plausibility & long crank",
+    "verified_fix": "Tested EKPS fuel pump module supply (13.8V) and replaced failing low-pressure fuel sensor.",
+    "parts_replaced": [
+      "Low-Pressure Fuel Sensor"
+    ]
+  },
+  {
+    "case_id": "CASE-AU-2026-0007",
+    "wmi_vds": "MMAJY1",
+    "engine_family": "Mitsubishi 2.4L 4N15 MIVEC Diesel",
+    "dtcs": [
+      "P0299",
+      "P0101"
+    ],
+    "symptom_summary": "Triton MQ underboost and black smoke under load",
+    "verified_fix": "Replaced split driver-side rubber intercooler boost hose and cleared learned MAF values.",
+    "parts_replaced": [
+      "Intercooler Hose"
+    ]
+  },
+  {
+    "case_id": "CASE-AU-2026-0008",
+    "wmi_vds": "MP1TFS",
+    "engine_family": "Isuzu 3.0L 4JJ1-TC Diesel",
+    "dtcs": [
+      "P0087",
+      "P0093"
+    ],
+    "symptom_summary": "D-Max rail pressure drop and stalling at idle",
+    "verified_fix": "Replaced worn Suction Control Valve (SCV) on HP3 pump and performed fuel pump learn.",
+    "parts_replaced": [
+      "Suction Control Valve",
+      "Fuel Filter"
+    ]
+  },
+  {
+    "case_id": "CASE-AU-2026-0009",
+    "wmi_vds": "JTDKN3",
+    "engine_family": "Toyota JDM Hybrid 2ZR-FXE",
+    "dtcs": [
+      "P0A80",
+      "P3000"
+    ],
+    "symptom_summary": "JDM Prius / Crown Hybrid warning light & cooling fan high",
+    "verified_fix": "Cleaned clogged HV battery cooling blower fan and balanced weak NiMH cell block.",
+    "parts_replaced": [
+      "HV Blower Filter"
+    ]
+  },
+  {
+    "case_id": "CASE-AU-2026-0010",
+    "wmi_vds": "MNTCC2",
+    "engine_family": "Nissan YS23DDTT 2.3L Twin-Turbo",
+    "dtcs": [
+      "P0101",
+      "P2263"
+    ],
+    "symptom_summary": "Navara NP300 limp mode and turbo boost fluctuation",
+    "verified_fix": "Replaced faulty turbo vacuum boost solenoid and cleaned MAF sensor.",
+    "parts_replaced": [
+      "Boost Control Solenoid"
+    ]
+  },
+  {
+    "case_id": "CASE-AU-2026-0011",
+    "wmi_vds": "LC0C12",
+    "engine_family": "BYD 8-in-1 EV / Blade Battery",
+    "dtcs": [
+      "VCU_LIMP_MODE",
+      "BMS_ISO_LOW"
+    ],
+    "symptom_summary": "BYD Seal power system failure warning and sudden limp mode",
+    "verified_fix": "Verified 12V aux battery (>13.5V DC-DC) and cleaned corroded rear-axle HV connector.",
+    "parts_replaced": [
+      "Rear Axle HV Connector Seal"
+    ]
+  },
+  {
+    "case_id": "CASE-AU-2026-0012",
+    "wmi_vds": "LGWFF4",
+    "engine_family": "GWM / Haval 2.0T & 1.5T DHT",
+    "dtcs": [
+      "C1200",
+      "U0100"
+    ],
+    "symptom_summary": "Haval H6 / Cannon ESP light after wheel alignment",
+    "verified_fix": "Centered steering wheel on flat ground and ran SAS Zero-Point Calibration + ESC sweep.",
+    "parts_replaced": []
+  },
+  {
+    "case_id": "CASE-AU-2026-0013",
+    "wmi_vds": "LSFA41",
+    "engine_family": "LDV T60 2.0L Bi-Turbo Diesel",
+    "dtcs": [
+      "P2463",
+      "P0299"
+    ],
+    "symptom_summary": "LDV T60 DPF limp mode and low boost pressure",
+    "verified_fix": "Replaced split intercooler hose clamp and ran Tier B DPF static forced regeneration.",
+    "parts_replaced": [
+      "Intercooler Hose Clamp"
+    ]
+  },
+  {
+    "case_id": "CASE-AU-2026-0014",
+    "wmi_vds": "1C4RJF",
+    "engine_family": "Jeep 3.6L Pentastar / RAM 5.7L HEMI",
+    "dtcs": [
+      "P0456"
+    ],
+    "symptom_summary": "Grand Cherokee WK2 small EVAP leak MIL",
+    "verified_fix": "Smoke-tested EVAP lines and replaced faulty ESIM purge integrity switch on charcoal canister.",
+    "parts_replaced": [
+      "ESIM EVAP Switch"
+    ]
+  }
+]

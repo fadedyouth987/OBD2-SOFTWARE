@@ -1649,7 +1649,7 @@ impl ::std::convert::TryFrom<::std::string::String> for ErrorResponseType {
         value.parse()
     }
 }
-///Features unlocked by the offline lease (Task 1.4).
+///Features unlocked by the offline lease (Task 1.4). IMMO_PROGRAM is issued only on a short immobilizer lease or a diagnostic lease when the shop holds the IMMO add-on.
 #[derive(
     ::serde::Deserialize,
     ::serde::Serialize,
@@ -1668,6 +1668,8 @@ pub enum Feature {
     UdsActive,
     #[serde(rename = "CAN_RE_PRO")]
     CanRePro,
+    #[serde(rename = "IMMO_PROGRAM")]
+    ImmoProgram,
 }
 impl ::std::fmt::Display for Feature {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
@@ -1675,6 +1677,7 @@ impl ::std::fmt::Display for Feature {
             Self::J2534 => f.write_str("J2534"),
             Self::UdsActive => f.write_str("UDS_ACTIVE"),
             Self::CanRePro => f.write_str("CAN_RE_PRO"),
+            Self::ImmoProgram => f.write_str("IMMO_PROGRAM"),
         }
     }
 }
@@ -1687,6 +1690,7 @@ impl ::std::str::FromStr for Feature {
             "J2534" => Ok(Self::J2534),
             "UDS_ACTIVE" => Ok(Self::UdsActive),
             "CAN_RE_PRO" => Ok(Self::CanRePro),
+            "IMMO_PROGRAM" => Ok(Self::ImmoProgram),
             _ => Err("invalid value".into()),
         }
     }
@@ -2260,6 +2264,8 @@ pub enum LeaseTier {
     Pro,
     #[serde(rename = "WORKSHOP")]
     Workshop,
+    #[serde(rename = "FLEET")]
+    Fleet,
 }
 impl ::std::fmt::Display for LeaseTier {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
@@ -2267,6 +2273,7 @@ impl ::std::fmt::Display for LeaseTier {
             Self::Community => f.write_str("COMMUNITY"),
             Self::Pro => f.write_str("PRO"),
             Self::Workshop => f.write_str("WORKSHOP"),
+            Self::Fleet => f.write_str("FLEET"),
         }
     }
 }
@@ -2279,6 +2286,7 @@ impl ::std::str::FromStr for LeaseTier {
             "COMMUNITY" => Ok(Self::Community),
             "PRO" => Ok(Self::Pro),
             "WORKSHOP" => Ok(Self::Workshop),
+            "FLEET" => Ok(Self::Fleet),
             _ => Err("invalid value".into()),
         }
     }

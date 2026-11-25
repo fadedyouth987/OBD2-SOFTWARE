@@ -235,7 +235,7 @@ Tagged-union envelopes over `ws://127.0.0.1:8765`. Every request carries a clien
 
 **Implementation contract**
 - `signing.py`: Ed25519 key from secret manager, `kid` in every JWT header; public key + `kid` exported at build time into `cloud_keys.rs`.
-- `POST /api/v1/auth/edge-lease`: 72 h JWT, `aud=edge-daemon`, `tenant_id`, `tier`, `aasra_verified`, feature flags.
+- `POST /api/v1/auth/edge-lease`: JWT (`aud=edge-daemon`) with `tenant_id`, `tier`, `aasra_verified`, `features`, `lease_ver`, optional `rcid`. Community leases last 72 h; paid-feature leases last 12 h.
 - `POST /api/v1/auth/edge-pairing`: 5 min JWT, `aud=edge-ws`, `user_id`, `tenant_id`, requesting `origin`.
 - `POST /api/v1/sessions/sync`: compressed telemetry/DTC batches → TimescaleDB; raw CAN traces → S3 ap-southeast-2 (SeaweedFS locally).
 - `POST /api/v1/cases/publish`: strip PII, workshop IDs, VIN positions 10–17; keep `wmi_vds`, DTCs, feature vector, canonical summary.
@@ -249,10 +249,11 @@ Tagged-union envelopes over `ws://127.0.0.1:8765`. Every request carries a clien
 **Target paths**: `services/cloud-api/app/api/v1/{billing,gateways}.py`
 
 **Implementation contract**
-- Stripe webhook updates `tenants.subscription_tier` (`COMMUNITY`/`PRO`/`WORKSHOP`) and monthly quotas (`ai_diagnoses_used`, `schematic_pages_used`).
+- Stripe Checkout and Customer Portal (Owner only). Price IDs come from Settings / env. Webhooks look up the tenant by Stripe customer or subscription ID and map the plan from price IDs (not metadata). FLEET is a real tier. The IMMO add-on is a Workshop/Fleet entitlement, still gated by AASRA.
+- Tiers (AUD, annual 10-for-12): Community $0, Pro $39/$390, Workshop $99/$990, Fleet $229/$2,290, IMMO add-on $49/$490. AI overage is A$0.25/diagnosis, metered but off by default. Quotas reset each calendar month in Australia/Adelaide. `invoice.payment_failed` uses a past-due grace period, then degrades to Community and bumps `lease_version`.
 - `/api/v1/gateways/aasra-verify`, `/api/v1/gateways/autoauth-token` with MVIS VSP audit logging.
 
-**Verification gate**: simulated `checkout.session.completed` and `invoice.paid`; HTTP 402 past free-tier limits.
+**Verification gate**: simulated `checkout.session.completed` and `invoice.paid` with price IDs; HTTP 429 past included AI limits (402 remains a possible later product choice).
 
 ### Phase 3: AI and hybrid schematic-to-graph pipeline
 

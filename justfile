@@ -24,10 +24,19 @@ infra-down *args:
 infra-gate *args:
     scripts/infra-gate.sh {{args}}
 
-# Start infrastructure, then the web app and API with live reload
+# Start infrastructure, then the web app and API with live reload.
+# The root .env is exported so cloud-api Settings (webhook secret, price IDs,
+# signing key) are visible even though uvicorn's cwd is services/cloud-api.
 dev: infra-up
     #!/usr/bin/env bash
     set -euo pipefail
+    ROOT="{{justfile_directory()}}"
+    if [[ -f "$ROOT/.env" ]]; then
+      set -a
+      # shellcheck disable=SC1091
+      source "$ROOT/.env"
+      set +a
+    fi
     trap 'kill 0' EXIT
     (cd services/cloud-api && uv run uvicorn app.main:app --reload --port 8000) &
     (cd apps/web && pnpm dev) &

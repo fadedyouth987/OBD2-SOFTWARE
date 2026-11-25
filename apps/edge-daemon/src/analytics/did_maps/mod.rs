@@ -152,6 +152,19 @@ pub fn for_profile(profile_id: &str) -> Option<DidMap> {
                 dme: profiles::e90_pre2007::DME,
             },
         },
+        profiles::sandbox_immo::ID => DidMap {
+            profile_id: profiles::sandbox_immo::ID,
+            modules: vec![uds(
+                "ENGINE",
+                (
+                    profiles::sandbox_immo::ENGINE_REQ,
+                    profiles::sandbox_immo::ENGINE_RESP,
+                ),
+                true,
+                true,
+            )],
+            speed: SpeedSource::Obd,
+        },
         _ => return None,
     })
 }

@@ -21,7 +21,10 @@ from app.db.models import (
     AuditLogEntry,
     CustomDbcFile,
     DiagnosticSession,
+    ImmoAuditEntry,
+    OwnerAuthorisation,
     ResolvedCase,
+    TechnicianCredential,
     TelemetrySample,
     Tenant,
     TenantMembership,
@@ -353,3 +356,51 @@ def test_audit_log_one_row_per_attempt(db):
         with pytest.raises(DBAPIError, match="permission denied"):
             with tenant_session(t, app) as s:
                 s.execute(text(sql))
+
+
+def test_immo_tables_are_tenant_isolated_and_audit_is_append_only(db):
+    owner, app = db
+    a, b = new_tenant(app, "Immo A"), new_tenant(app, "Immo B")
+    uid = uuid.uuid4()
+    with tenant_session(a, app) as s:
+        s.add(User(id=uid, email=f"tech-{uid.hex[:8]}@localhost"))
+        s.flush()
+        from app.db.models import MembershipRole, TenantMembership
+
+        s.add(TenantMembership(tenant_id=a, user_id=uid, role=MembershipRole.TECH))
+        s.add(
+            TechnicianCredential(
+                tenant_id=a,
+                user_id=uid,
+                aasra_member_id="VSP-A",
+                national_police_check_dated=__import__("datetime").date.today(),
+            )
+        )
+        auth = OwnerAuthorisation(tenant_id=a, user_id=uid, vin_hmac="ab" * 32)
+        s.add(auth)
+        s.flush()
+        s.add(
+            ImmoAuditEntry(
+                tenant_id=a,
+                event="issued",
+                detail="no secret",
+                retain_until=__import__("datetime").datetime.now(__import__("datetime").UTC)
+                + __import__("datetime").timedelta(days=365 * 5),
+            )
+        )
+    assert count(app, a, TechnicianCredential) == 1
+    assert count(app, b, TechnicianCredential) == 0
+    assert count(app, a, OwnerAuthorisation) == 1
+    assert count(app, b, OwnerAuthorisation) == 0
+    assert count(app, a, ImmoAuditEntry) == 1
+    assert count(app, b, ImmoAuditEntry) == 0
+    with tenant_session(a, app) as s:
+        row = s.query(ImmoAuditEntry).one()
+        try:
+            s.delete(row)
+            s.flush()
+            deleted = True
+        except Exception:
+            deleted = False
+            s.rollback()
+    assert deleted is False or count(app, a, ImmoAuditEntry) == 1

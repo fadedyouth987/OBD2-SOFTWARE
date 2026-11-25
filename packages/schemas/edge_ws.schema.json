@@ -109,12 +109,12 @@
     },
     "LeaseTier": {
       "type": "string",
-      "enum": ["COMMUNITY", "PRO", "WORKSHOP"]
+      "enum": ["COMMUNITY", "PRO", "WORKSHOP", "FLEET"]
     },
     "Feature": {
-      "description": "Features unlocked by the offline lease (Task 1.4).",
+      "description": "Features unlocked by the offline lease (Task 1.4). IMMO_PROGRAM is issued only on a short immobilizer lease or a diagnostic lease when the shop holds the IMMO add-on.",
       "type": "string",
-      "enum": ["J2534", "UDS_ACTIVE", "CAN_RE_PRO"]
+      "enum": ["J2534", "UDS_ACTIVE", "CAN_RE_PRO", "IMMO_PROGRAM"]
     },
     "Severity": {
       "type": "string",

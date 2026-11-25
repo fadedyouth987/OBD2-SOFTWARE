@@ -190,8 +190,8 @@ Any request can fail with this. request_id is null when the failed message could
 - **DiagProtocol**: `UDS`, `KWP2000`, `OBD`. Diagnostic application protocol. Matches the protocol keys in safety_policy.json.
 - **AdapterKind**: `J2534`, `SOCKETCAN`, `STN_ELM`, `SLCAN`, `KLINE_FTDI`, `VIRTUAL`.
 - **AdapterState**: `CONNECTED`, `DISCONNECTED`, `ERROR`.
-- **LeaseTier**: `COMMUNITY`, `PRO`, `WORKSHOP`.
-- **Feature**: `J2534`, `UDS_ACTIVE`, `CAN_RE_PRO`. Features unlocked by the offline lease (Task 1.4).
+- **LeaseTier**: `COMMUNITY`, `PRO`, `WORKSHOP`, `FLEET`.
+- **Feature**: `J2534`, `UDS_ACTIVE`, `CAN_RE_PRO`, `IMMO_PROGRAM`. Features unlocked by the offline lease (Task 1.4). IMMO_PROGRAM is issued only on a short immobilizer lease or a diagnostic lease when the shop holds the IMMO add-on.
 - **Severity**: `INFO`, `AMBER`, `RED`.
 - **ErrorCode**: `UNAUTHENTICATED`, `ORIGIN_REJECTED`, `SAFETY_BLOCKED`, `TOKEN_INVALID`, `PRECONDITION_UNKNOWN`, `LEASE_REQUIRED`, `ADAPTER_ERROR`, `PROTOCOL_ERROR`, `TIMEOUT`, `VERSION_UNSUPPORTED`. Every code has a one-line fix-it hint in error_hints.json (A-DX-4).
 - **AdapterInfo**: object: `adapter_id`, `kind`, `display_name`, `path`.

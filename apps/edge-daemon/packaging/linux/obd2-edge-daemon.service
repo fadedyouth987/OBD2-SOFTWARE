@@ -1,0 +1,18 @@
+[Unit]
+Description=RootCause OBD2 Local Edge Daemon (ws://127.0.0.1:8765)
+After=network.target bluetooth.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/edge-daemon
+Environment=EDGE_PORT=8765
+Environment=EDGE_ALLOWED_ORIGINS=http://localhost:3000,https://app.rootcauseobd.com.au
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+PrivateTmp=true
+SupplementaryGroups=dialout
+
+[Install]
+WantedBy=multi-user.target
