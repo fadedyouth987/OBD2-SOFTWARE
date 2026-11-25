@@ -213,6 +213,9 @@ class DiagnosticSession(Base):
     lease_tier: Mapped[str | None] = mapped_column(Text)
     customer_ref: Mapped[str | None] = mapped_column(Text)
     complaint: Mapped[str | None] = mapped_column(Text)
+    vehicle_make: Mapped[str | None] = mapped_column(Text)
+    vehicle_model: Mapped[str | None] = mapped_column(Text)
+    model_year: Mapped[int | None] = mapped_column(Integer)
     dtcs: Mapped[list] = mapped_column(JSONB, default=list)
     alerts: Mapped[list] = mapped_column(JSONB, default=list)
     diagnosis: Mapped[dict | None] = mapped_column(JSONB)
@@ -458,3 +461,47 @@ class ImmoAuditEntry(Base):
     detail: Mapped[str] = mapped_column(Text, default="")
     retain_until: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _created()
+
+
+class ProcedureSource(Base):
+    """A licensor of OEM procedure data (migration 010). Shared reference data."""
+
+    __tablename__ = "procedure_sources"
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    key: Mapped[str] = mapped_column(Text, unique=True)
+    name: Mapped[str] = mapped_column(Text)
+    licence: Mapped[str] = mapped_column(Text)
+    licence_url: Mapped[str | None] = mapped_column(Text)
+    licensed_until: Mapped[date | None] = mapped_column(Date)
+    provider: Mapped[str] = mapped_column(Text, default="import")
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ProcedureRecord(Base):
+    """One versioned, licensed procedure for a service function (migration 010)."""
+
+    __tablename__ = "procedure_records"
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    source_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("procedure_sources.id"))
+    source_ref: Mapped[str] = mapped_column(Text)
+    version: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(Text, default="ACTIVE")
+    function_id: Mapped[str] = mapped_column(Text)
+    make: Mapped[str] = mapped_column(Text)
+    model: Mapped[str] = mapped_column(Text)
+    make_key: Mapped[str] = mapped_column(Text)
+    model_key: Mapped[str] = mapped_column(Text)
+    year_from: Mapped[int] = mapped_column(Integer)
+    year_to: Mapped[int] = mapped_column(Integer)
+    engine: Mapped[str | None] = mapped_column(Text)
+    module: Mapped[str] = mapped_column(Text)
+    procedure: Mapped[dict] = mapped_column(JSONB)
+    notes: Mapped[str | None] = mapped_column(Text)
+    sha256: Mapped[str] = mapped_column(Text)
+    imported_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    imported_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))

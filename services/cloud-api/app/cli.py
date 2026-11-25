@@ -30,16 +30,31 @@ def main(argv: list[str]) -> int:
         print(json.dumps(run_reminders()))
         return 0
     if command == "import-procedures" and len(args) == 1:
+        from fastapi import HTTPException
+
         from app.services.procedures import import_document
 
-        with open(args[0], encoding="utf-8") as fh:
-            result = import_document(json.load(fh), imported_by=None)
+        try:
+            with open(args[0], encoding="utf-8") as fh:
+                result = import_document(json.load(fh), imported_by=None)
+        except (HTTPException, ValueError) as exc:
+            print(
+                json.dumps(getattr(exc, "detail", str(exc)), indent=2, ensure_ascii=False),
+                file=sys.stderr,
+            )
+            return 1
         print(json.dumps(result))
         return 0
     if command == "sync-procedures" and not args:
+        from fastapi import HTTPException
+
         from app.services.procedures import sync_from_provider
 
-        print(json.dumps(sync_from_provider(imported_by=None)))
+        try:
+            print(json.dumps(sync_from_provider(imported_by=None)))
+        except HTTPException as exc:
+            print(exc.detail, file=sys.stderr)
+            return 1
         return 0
     print(__doc__, file=sys.stderr)
     return 2

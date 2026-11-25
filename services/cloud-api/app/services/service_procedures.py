@@ -4,9 +4,11 @@ The catalogue (``SERVICE_FUNCTIONS_CATALOG``) says what each function is. A
 *procedure* says exactly which request goes to which module. Real procedures
 are OEM data: routine and I/O identifiers differ per make, model and software
 level, and we do not have a licensed source for them yet. So the only
-procedures on file are for the edge daemon's built-in virtual vehicles, where
-the identifiers are the simulator's own and are labelled as such. Every other
-vehicle gets an honest "no verified procedure on file" instead of a guess.
+procedures built in are for the edge daemon's virtual vehicles, where the
+identifiers are the simulator's own and are labelled as such. Real vehicles get
+procedures only from a licensed source imported into ``procedure_records``
+(``app.services.procedures``); every other vehicle gets an honest "no verified
+procedure on file" instead of a guess.
 
 No procedure uses SecurityAccess (0x27) or any seed/key exchange: each runs
 in the extended diagnostic session, and every gated request still needs the
@@ -142,13 +144,24 @@ def simulator_profile(adapter_id: str | None) -> str | None:
     return None
 
 
-def service_functions_for(adapter_id: str | None) -> dict[str, Any]:
-    """The 11 functions, each with its checklist and a procedure when one is on file."""
-    profile = simulator_profile(adapter_id)
-    procedures = SIMULATOR_PROCEDURES.get(profile or "", {})
+def service_functions_for(adapter_id: str | None, vehicle=None) -> dict[str, Any]:
+    """The 11 functions, each with its checklist and a procedure when one is on file.
+
+    ``vehicle`` (``procedures.Vehicle``) lets licensed procedures match; the
+    simulator wins for virtual adapters. See ``app.services.procedures``.
+    """
+    from app.services.procedures import PROVIDERS, active_catalogue_size
+
+    matches: dict[str, Any] = {}
+    virtual = simulator_profile(adapter_id) is not None
+    for provider in PROVIDERS:
+        if virtual != (provider.key == "simulator"):
+            continue  # Virtual adapters only run simulator steps; real ones never do.
+        for fn_id, match in provider.lookup(adapter_id=adapter_id, vehicle=vehicle).items():
+            matches.setdefault(fn_id, match)
     items = []
     for fn in SERVICE_FUNCTIONS_CATALOG:
-        proc = procedures.get(fn["id"])
+        match = matches.get(fn["id"])
         items.append(
             {
                 "id": fn["id"],
@@ -158,25 +171,47 @@ def service_functions_for(adapter_id: str | None) -> dict[str, Any]:
                 # Workshop conditions: "B" also needs engine off / battery checks.
                 "conditions": "engine_off_battery" if fn["tier"] == "B" else "stationary",
                 "checklist": CHECKLISTS.get(fn["id"], []),
-                "availability": "simulated" if proc else "no_verified_procedure",
-                "procedure": proc,
+                "availability": match.availability if match else "no_verified_procedure",
+                "procedure": match.procedure if match else None,
+                "source": match.source if match else None,
             }
         )
-    if profile is not None:
+    kinds = {m.availability for m in matches.values()}
+    catalogue = active_catalogue_size()
+    if "simulated" in kinds:
         source = "simulator"
         note = (
             "Virtual vehicle: these procedures use the simulator's own identifiers. "
             "They are for training and testing, not for a real car."
         )
+    elif "licensed" in kinds:
+        source = "licensed"
+        note = (
+            "Procedures marked Licensed come from a licensed OEM data source for this "
+            "make, model and year. Functions without one still need the manufacturer's "
+            "service information."
+        )
     else:
         source = "none"
-        note = (
-            "No verified OEM procedures are on file for this vehicle yet. Use the "
-            "manufacturer's service information for these functions."
-        )
+        if catalogue and (vehicle is None or vehicle.year is None or not vehicle.model):
+            note = (
+                "Licensed procedures are matched on make, model and year. Confirm the "
+                "vehicle to look them up."
+            )
+        else:
+            note = (
+                "No verified OEM procedures are on file for this vehicle yet. Use the "
+                "manufacturer's service information for these functions."
+            )
     return {
         "adapter_id": adapter_id,
         "source": source,
         "note": note,
+        "vehicle": (
+            {"make": vehicle.make, "model": vehicle.model, "year": vehicle.year}
+            if vehicle is not None
+            else None
+        ),
+        "licensed_catalogue": catalogue,
         "functions": items,
     }

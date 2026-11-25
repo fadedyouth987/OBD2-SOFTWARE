@@ -24,6 +24,7 @@ from app.services.ai_diagnostic_agent import (
 )
 from app.services.billing import charge_ai_quota, refund_ai_quota
 from app.services.llm import LlmError, configured_llm
+from app.services.procedures import Vehicle
 from app.services.service_procedures import service_functions_for
 from app.services.vehicle_registry import (
     SERVICE_FUNCTIONS_CATALOG,
@@ -109,9 +110,26 @@ def get_vehicle_services(profile: str) -> dict[str, Any]:
 def get_service_functions(
     principal: RequirePrincipal,
     adapter_id: str | None = Query(default=None, max_length=128),
+    job_id: UUID | None = None,
 ) -> dict[str, Any]:
-    """Service functions with a runnable procedure where one is on file for this adapter."""
-    return service_functions_for(adapter_id)
+    """Service functions with a runnable procedure where one is on file.
+
+    Virtual adapters get the simulator's procedures; a real vehicle gets
+    licensed procedures matched on the job's make, model and model year.
+    """
+    vehicle = None
+    if job_id is not None:
+        with tenant_session(principal.tenant_id) as store:
+            job = store.get(DiagnosticSession, job_id)
+            if job is None or job.tenant_id != principal.tenant_id:
+                raise HTTPException(status_code=404, detail="Session not found")
+            if job.vehicle_make or job.vehicle_model or job.model_year:
+                vehicle = Vehicle(
+                    make=job.vehicle_make or "",
+                    model=job.vehicle_model or "",
+                    year=job.model_year,
+                )
+    return service_functions_for(adapter_id, vehicle)
 
 
 # Why a diagnosis came from the rules rather than the model (shown in the UI).

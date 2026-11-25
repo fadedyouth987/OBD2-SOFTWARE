@@ -31,12 +31,13 @@ from app.db.models import (
     User,
 )
 from app.db.session import tenant_session
-from app.db.vin import normalize_vin, resolve_secret, vin_hmac
+from app.db.vin import model_year, normalize_vin, resolve_secret, vin_hmac
 from app.observability.metrics import inc
 from app.services.anonymizer import anonymize_case, scrub_text, scrub_value
 from app.services.embeddings import EMBEDDING_MODEL, embed_canonical_text
 from app.services.identity import user_profile
 from app.services.permissions import Permission, can, require, require_own_or
+from app.services.vehicle_registry import decode_vin_platform
 
 router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
 
@@ -76,6 +77,9 @@ class JobStart(BaseModel):
     odometer_km: int | None = Field(default=None, ge=0, le=2_000_000)
     customer_ref: str | None = Field(default=None, max_length=120)
     complaint: str | None = Field(default=None, max_length=2000)
+    vehicle_make: str | None = Field(default=None, max_length=80)
+    vehicle_model: str | None = Field(default=None, max_length=120)
+    model_year: int | None = Field(default=None, ge=1980, le=2100)
 
 
 class JobUpdate(BaseModel):
@@ -91,6 +95,10 @@ class JobUpdate(BaseModel):
     dtcs: list[DtcIn] | None = None
     alerts: list[AlertIn] | None = None
     diagnosis: dict[str, Any] | None = None
+    # The identity licensed procedures are matched on; the technician confirms it.
+    vehicle_make: str | None = Field(default=None, max_length=80)
+    vehicle_model: str | None = Field(default=None, max_length=120)
+    model_year: int | None = Field(default=None, ge=1980, le=2100)
 
 
 class JobAssign(BaseModel):
@@ -106,6 +114,19 @@ class JobClose(BaseModel):
     dtcs_cleared: bool = False
     publish_case: bool = False
     engine_family: str = Field(default="", max_length=120)
+
+
+def _vin_identity(vin: str | None) -> tuple[str | None, int | None]:
+    """Make (from the WMI) and model year (VIN position 10) when the VIN gives them."""
+    if not vin:
+        return None, None
+    try:
+        year = model_year(vin, latest=datetime.now(UTC).year + 1)
+    except ValueError:
+        return None, None
+    decoded = decode_vin_platform(vin)
+    make = decoded.get("make") if decoded.get("matched") else None
+    return make, year
 
 
 def _vin_fields(vin: str | None) -> tuple[str | None, str | None]:
@@ -163,6 +184,9 @@ def _job_dict(row: DiagnosticSession) -> dict[str, Any]:
         "lease_tier": row.lease_tier,
         "customer_ref": row.customer_ref,
         "complaint": row.complaint,
+        "vehicle_make": row.vehicle_make,
+        "vehicle_model": row.vehicle_model,
+        "model_year": row.model_year,
         "dtcs": list(row.dtcs or []),
         "alerts": list(row.alerts or []),
         "diagnosis": row.diagnosis,
@@ -230,6 +254,9 @@ def start_job(req: JobStart, principal: RequirePrincipal) -> dict[str, Any]:
             lease_tier=req.lease_tier,
             customer_ref=scrub_text(req.customer_ref) if req.customer_ref else None,
             complaint=req.complaint,
+            vehicle_make=(req.vehicle_make or "").strip() or _vin_identity(req.vin)[0],
+            vehicle_model=(req.vehicle_model or "").strip() or None,
+            model_year=req.model_year or _vin_identity(req.vin)[1],
             dtcs=[],
             alerts=[],
         )
@@ -335,6 +362,15 @@ def update_job(job_id: str, req: JobUpdate, principal: RequirePrincipal) -> dict
             row.edge_session_id = req.edge_session_id
         if "vin" in fields:
             row.vin_hmac, row.vin_redacted = _vin_fields(req.vin)
+            make, year = _vin_identity(req.vin)
+            row.vehicle_make = row.vehicle_make or make
+            row.model_year = row.model_year or year
+        for name in ("vehicle_make", "vehicle_model"):
+            if name in fields:
+                value = (getattr(req, name) or "").strip()
+                setattr(row, name, " ".join(value.split()) or None)
+        if "model_year" in fields:
+            row.model_year = req.model_year
         for name in ("vehicle_label", "vehicle_profile", "odometer_km", "complaint"):
             if name in fields:
                 setattr(row, name, getattr(req, name))
