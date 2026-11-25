@@ -100,6 +100,10 @@ class User(Base):
     id: Mapped[uuid.UUID] = _uuid_pk()
     email: Mapped[str] = mapped_column(Text, unique=True)
     display_name: Mapped[str | None] = mapped_column(Text)
+    password_hash: Mapped[str | None] = mapped_column(Text)
+    failed_logins: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _created()
 
 
@@ -136,6 +140,25 @@ class DiagnosticSession(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     summary: Mapped[dict] = mapped_column(JSONB, default=dict)
+    status: Mapped[str] = mapped_column(Text, default="OPEN")
+    vehicle_label: Mapped[str | None] = mapped_column(Text)
+    vehicle_profile: Mapped[str | None] = mapped_column(Text)
+    vin_hmac: Mapped[str | None] = mapped_column(Text)
+    vin_redacted: Mapped[str | None] = mapped_column(Text)
+    odometer_km: Mapped[int | None] = mapped_column(Integer)
+    adapter_id: Mapped[str | None] = mapped_column(Text)
+    adapter_kind: Mapped[str | None] = mapped_column(Text)
+    daemon_version: Mapped[str | None] = mapped_column(Text)
+    lease_tier: Mapped[str | None] = mapped_column(Text)
+    customer_ref: Mapped[str | None] = mapped_column(Text)
+    complaint: Mapped[str | None] = mapped_column(Text)
+    dtcs: Mapped[list] = mapped_column(JSONB, default=list)
+    alerts: Mapped[list] = mapped_column(JSONB, default=list)
+    diagnosis: Mapped[dict | None] = mapped_column(JSONB)
+    closeout: Mapped[dict | None] = mapped_column(JSONB)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class TelemetrySample(Base):

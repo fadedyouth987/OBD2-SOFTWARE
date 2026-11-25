@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
@@ -11,6 +13,8 @@ from pydantic import BaseModel, Field
 from app.api.deps import RequirePrincipal
 from app.api.v1.billing import charge_ai_quota
 from app.api.v1.sessions import list_published_cases
+from app.db.models import DiagnosticSession
+from app.db.session import tenant_session
 from app.db.vin import wmi_vds
 from app.observability.metrics import inc
 from app.services.ai_diagnostic_agent import answer_technician_followup, diagnose_session
@@ -121,7 +125,33 @@ def run_diagnosis(
     result["quota_charged"] = True
     result["quota_used"] = used
     result["quota_limit"] = limit
+    _attach_diagnosis(principal, session_id, req, result)
     return result
+
+
+def _attach_diagnosis(principal, session_id: str, req: DiagnoseRequest, result: dict) -> None:
+    """Keep the latest diagnosis on the open job so the report and close-out can use it."""
+    try:
+        job_id = UUID(session_id)
+    except ValueError:
+        return
+    with tenant_session(principal.tenant_id) as store:
+        row = (
+            store.query(DiagnosticSession)
+            .filter(
+                DiagnosticSession.tenant_id == principal.tenant_id,
+                DiagnosticSession.id == job_id,
+            )
+            .one_or_none()
+        )
+        if row is None or row.status != "OPEN":
+            return
+        row.diagnosis = {
+            "dtcs": list(req.dtcs),
+            "vehicle_profile": req.vehicle_profile,
+            "result": {k: v for k, v in result.items() if not k.startswith("quota_")},
+            "at": datetime.now(UTC).isoformat(),
+        }
 
 
 @router.post("/diagnose/{session_id}/ask")
