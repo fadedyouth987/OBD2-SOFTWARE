@@ -9,6 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 
 from app.api.v1 import (
+    accreditation,
+    admin,
     auth,
     billing,
     dbc,
@@ -53,6 +55,8 @@ app.include_router(diagnose.router)
 app.include_router(immo.router)
 app.include_router(team.router)
 app.include_router(schematics.router)
+app.include_router(accreditation.router)
+app.include_router(admin.router)
 
 
 @app.get("/healthz")

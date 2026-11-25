@@ -19,7 +19,7 @@ from app.db.models import (
 from app.db.session import tenant_session
 from app.db.vin import normalize_vin, resolve_secret, vin_hmac
 from app.services.aasra import default_verifier
-from app.services.flags import auth_allow_dev_login, immo_feature_enabled
+from app.services.flags import immo_feature_enabled
 from app.services.immo_catalog import (
     IMMO_LEASE_DEFAULT_TTL_S,
     lookup_profile,
@@ -191,39 +191,34 @@ def enrol_technician(
     repairer_licence_renewed_at: date | None,
     declared: bool,
 ) -> TechnicianCredential:
+    """JSON enrolment without evidence files (older clients).
+
+    Goes through the same reviewed workflow as ``POST /accreditation/technician``,
+    so in production it needs evidence and ends up pending admin review; only
+    the explicit local dev flag approves on submit.
+    """
+    from fastapi import HTTPException
+
+    from app.services import accreditation
+
     require_feature()
-    member = aasra_member_id.strip()
-    if not member:
-        raise ImmoDenied(400, "aasra_member_id is required")
-    if national_police_check_dated is None and repairer_licence_renewed_at is None:
-        raise ImmoDenied(
-            400, "A national police check date or repairer licence renewal date is required"
+    try:
+        accreditation.submit(
+            principal,
+            accreditation.TECHNICIAN,
+            aasra_member_id=aasra_member_id,
+            declared=declared,
+            files=[],
+            national_police_check_dated=national_police_check_dated,
+            repairer_licence_renewed_at=repairer_licence_renewed_at,
         )
-    if not declared:
-        raise ImmoDenied(400, "A written declaration is required")
-    now = _now()
+    except HTTPException as exc:
+        raise ImmoDenied(
+            400 if exc.status_code == 422 else exc.status_code, str(exc.detail)
+        ) from exc
     with tenant_session(principal.tenant_id) as session:
         cred = session.get(TechnicianCredential, (principal.tenant_id, principal.user_id))
-        if cred is None:
-            cred = TechnicianCredential(
-                tenant_id=principal.tenant_id,
-                user_id=principal.user_id,
-                aasra_member_id=member,
-            )
-            session.add(cred)
-        cred.aasra_member_id = member
-        cred.national_police_check_dated = national_police_check_dated
-        cred.repairer_licence_renewed_at = repairer_licence_renewed_at
-        cred.declaration_at = now
-        cred.updated_at = now
-        if auth_allow_dev_login() and paperwork_current(cred):
-            cred.vsp_status = "active"
-            cred.accredited_until = now + timedelta(days=365)
-        else:
-            # Production: record paperwork only. Real AASRA verification is not built yet.
-            cred.vsp_status = "pending"
-            cred.accredited_until = None
-        session.flush()
+        assert cred is not None
         session.expunge(cred)
     return cred
 

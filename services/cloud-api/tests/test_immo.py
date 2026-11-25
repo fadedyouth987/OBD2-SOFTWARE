@@ -200,7 +200,7 @@ def test_start_denied_when_technician_not_accredited(client: TestClient):
     token = sess["access_token"]
     _mark_aasra(client, token)
     with flags(immo=True, dev_login=True):
-        # Stale police check: enrol records paperwork but must not accredit.
+        # Stale police check: refused outright, so nothing is accredited.
         enrol = client.post(
             "/api/v1/immo/technicians/enrol",
             headers=_auth(token),
@@ -210,9 +210,8 @@ def test_start_denied_when_technician_not_accredited(client: TestClient):
                 "declared": True,
             },
         )
-        assert enrol.status_code == 200, enrol.text
-        assert enrol.json()["accredited"] is False
-        assert enrol.json()["vsp_status"] == "pending"
+        assert enrol.status_code == 400, enrol.text
+        assert "last 2 years" in enrol.json()["detail"]
         authz = client.post(
             "/api/v1/immo/owner-authorisations",
             headers=_auth(token),

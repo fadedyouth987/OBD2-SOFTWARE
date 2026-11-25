@@ -78,6 +78,7 @@ class Tenant(Base):
     ai_diagnoses_used: Mapped[int] = mapped_column(Integer, default=0)
     schematic_pages_used: Mapped[int] = mapped_column(Integer, default=0)
     aasra_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    aasra_verified_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ai_quota_period_start: Mapped[date] = mapped_column(Date, default=date.today)
     stripe_customer_id: Mapped[str | None] = mapped_column(Text)
     stripe_subscription_id: Mapped[str | None] = mapped_column(Text)
@@ -104,6 +105,7 @@ class User(Base):
     failed_logins: Mapped[int] = mapped_column(Integer, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    platform_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = _created()
 
 
@@ -343,6 +345,58 @@ class TechnicianCredential(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class AccreditationRequest(Base):
+    """A workshop's or technician's AASRA details awaiting or past review (migration 009)."""
+
+    __tablename__ = "accreditation_requests"
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"))
+    kind: Mapped[str] = mapped_column(Text)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    aasra_member_id: Mapped[str] = mapped_column(Text)
+    business_abn: Mapped[str | None] = mapped_column(Text)
+    national_police_check_dated: Mapped[date | None] = mapped_column(Date)
+    repairer_licence_renewed_at: Mapped[date | None] = mapped_column(Date)
+    declaration_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(Text, default="PENDING")
+    submitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    decision_reason: Mapped[str | None] = mapped_column(Text)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reminders_sent: Mapped[list[int]] = mapped_column(ARRAY(Integer), default=list)
+
+
+class AccreditationEvidence(Base):
+    __tablename__ = "accreditation_evidence"
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    request_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("accreditation_requests.id"))
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"))
+    s3_key: Mapped[str] = mapped_column(Text)
+    filename: Mapped[str] = mapped_column(Text)
+    content_type: Mapped[str] = mapped_column(Text)
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(Text)
+    uploaded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class AccreditationEvent(Base):
+    """Append-only accreditation audit (migration 009)."""
+
+    __tablename__ = "accreditation_events"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    request_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("accreditation_requests.id"))
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"))
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    event: Mapped[str] = mapped_column(Text)
+    detail: Mapped[dict] = mapped_column(JSONB, default=dict)
 
 
 class OwnerAuthorisation(Base):

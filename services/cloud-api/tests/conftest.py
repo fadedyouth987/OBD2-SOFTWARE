@@ -18,3 +18,7 @@ os.environ["STRIPE_PRICE_IMMO_YEAR"] = "price_test_immo_year"
 
 os.environ.setdefault("VIN_HMAC_KEY_REF", "env://VIN_HMAC_KEY")
 os.environ.setdefault("VIN_HMAC_KEY", "test-only-vin-hmac-key-0123456789")
+# The older immo tests enrol and expect approval on submit; that shortcut only
+# exists behind this explicit local flag (with AUTH_ALLOW_DEV_LOGIN). Tests of
+# the reviewed workflow switch it off.
+os.environ.setdefault("AASRA_DEV_AUTO_APPROVE", "true")

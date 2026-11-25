@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, status
@@ -16,6 +16,7 @@ from app.db.models import MembershipRole, SubscriptionTier, Tenant, TenantMember
 from app.db.session import owner_engine, tenant_session
 from app.observability.metrics import inc
 from app.services.aasra import default_verifier
+from app.services.accreditation import is_platform_admin
 from app.services.billing import entitlement_for, maybe_expire_grace, schematic_pages_used
 from app.services.flags import immo_feature_enabled
 from app.services.identity import (
@@ -162,6 +163,7 @@ def dev_mark_aasra(principal: RequirePrincipal) -> dict:
         if tenant is None:
             raise HTTPException(status_code=401, detail="Unknown tenant")
         tenant.aasra_verified = True
+        tenant.aasra_verified_until = datetime.now(UTC) + timedelta(days=365)
     inc("auth_dev_aasra_marked")
     return {"tenant_id": str(principal.tenant_id), "aasra_verified": True}
 
@@ -400,5 +402,6 @@ def me(principal: RequirePrincipal) -> dict:
         "entitlements": ent,
         "usage": usage,
         "immo_feature_enabled": immo_feature_enabled(),
+        "platform_admin": is_platform_admin(principal.user_id),
         "dev_login_enabled": _dev_login_enabled(),
     }
