@@ -114,7 +114,38 @@ class TenantMembership(Base):
     role: Mapped[MembershipRole] = mapped_column(
         Enum(MembershipRole, name="membership_role", create_type=False)
     )
+    site_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("sites.id"))
     created_at: Mapped[datetime] = _created()
+
+
+class Site(Base):
+    """A workshop location (migration 006). Plan caps are enforced by the API."""
+
+    __tablename__ = "sites"
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"))
+    name: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created()
+
+
+class TenantInvite(Base):
+    """An emailed invitation to join a workshop. Only the token's SHA-256 is kept."""
+
+    __tablename__ = "tenant_invites"
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"))
+    email: Mapped[str] = mapped_column(Text)
+    role: Mapped[MembershipRole] = mapped_column(
+        Enum(MembershipRole, name="membership_role", create_type=False)
+    )
+    site_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("sites.id"))
+    token_hash: Mapped[str] = mapped_column(Text)
+    invited_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = _created()
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    accepted_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Vehicle(Base):

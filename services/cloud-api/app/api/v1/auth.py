@@ -67,6 +67,8 @@ class SignupRequest(BaseModel):
     password: str = Field(max_length=256)
     display_name: str = Field(default="", max_length=120)
     workshop_name: str = Field(default="", max_length=200)
+    # Joining a workshop from an invite link instead of creating a new one.
+    invite_token: str | None = Field(default=None, min_length=20, max_length=200)
 
 
 class LoginRequest(BaseModel):
@@ -267,6 +269,8 @@ def signup(req: SignupRequest) -> dict:
             status_code=409, detail="An account with this email already exists. Sign in instead."
         )
     display = req.display_name.strip() or email.split("@", 1)[0]
+    if req.invite_token:
+        return _signup_from_invite(req, email, display)
     workshop = req.workshop_name.strip() or f"{display}'s workshop"
     tenant_id = uuid4()
     user_id = uuid4()
@@ -288,6 +292,33 @@ def signup(req: SignupRequest) -> dict:
             session.add(
                 TenantMembership(tenant_id=tenant_id, user_id=user_id, role=MembershipRole.OWNER)
             )
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=409, detail="An account with this email already exists. Sign in instead."
+        ) from exc
+    inc("auth_signup")
+    return {
+        **_issue(tenant_id, user_id),
+        "tenant_id": str(tenant_id),
+        "user_id": str(user_id),
+        "workspaces": _workspace_list(user_id),
+    }
+
+
+def _signup_from_invite(req: SignupRequest, email: str, display: str) -> dict:
+    """Create the account straight into the inviting workshop (no workshop of its own)."""
+    from app.api.v1.team import join_with_invite
+
+    user_id = uuid4()
+    user = User(
+        id=user_id,
+        email=email,
+        display_name=display[:120],
+        password_hash=hash_password(req.password),
+        last_login_at=datetime.now(UTC),
+    )
+    try:
+        tenant_id = join_with_invite(req.invite_token or "", user_id, email, new_user=user)
     except IntegrityError as exc:
         raise HTTPException(
             status_code=409, detail="An account with this email already exists. Sign in instead."
