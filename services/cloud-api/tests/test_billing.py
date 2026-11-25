@@ -479,29 +479,47 @@ def test_stale_event_does_not_rewind_tier(client: TestClient):
 
 
 @pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
-def test_quota_is_atomic_and_returns_429_and_ignores_llm_error(client: TestClient):
+def test_quota_is_atomic_and_only_model_answers_count(client: TestClient):
+    from app.services import llm
+
+    class Model:
+        name = "fake"
+        label = "Test model"
+
+        def complete_json(self, *, system, prompt):
+            return {
+                "summary": "s",
+                "ranked_causes": [
+                    {"dtc": "P2463", "confidence_band": "LOW", "hypothesis": "Soot loading"}
+                ],
+            }
+
     session = _dev_session(client)
     token = session["access_token"]
     tenant_id = session["tenant_id"]
-    # Community cap is 5.
-    for i in range(5):
-        res = client.post(
-            f"/api/v1/diagnose/sess-q-{i}",
-            json={"dtcs": ["P2463"], "vehicle_profile": "ford_ranger_px3", "llm_error": "timeout"},
+    llm.set_provider_for_tests(Model())
+    try:
+        # Community cap is 5.
+        for i in range(5):
+            res = client.post(
+                f"/api/v1/diagnose/sess-q-{i}",
+                json={"dtcs": ["P2463"], "vehicle_profile": "ford_ranger_px3", "llm_error": "x"},
+                headers=_auth(token),
+            )
+            assert res.status_code == 200, res.text
+            assert res.json()["quota_charged"] is True and res.json()["analysis"] == "llm"
+        # Out of quota: the rules still answer, free, and say why.
+        over = client.post(
+            "/api/v1/diagnose/sess-q-overflow",
+            json={"dtcs": ["P2463"], "vehicle_profile": "ford_ranger_px3"},
             headers=_auth(token),
         )
-        assert res.status_code == 200, res.text
-        assert res.json()["quota_charged"] is True
-        # Public API must not honour a client-supplied llm_error skip.
-        assert res.json()["mode"] != "FALLBACK_NO_LLM"
-
-    denied = client.post(
-        "/api/v1/diagnose/sess-q-overflow",
-        json={"dtcs": ["P2463"], "vehicle_profile": "ford_ranger_px3"},
-        headers=_auth(token),
-    )
-    assert denied.status_code == 429, denied.text
-    assert denied.json()["detail"]["limit"] == 5
+        assert over.status_code == 200, over.text
+        body = over.json()
+        assert body["analysis"] == "rules" and body["quota_charged"] is False
+        assert body["fallback_reason"] == "quota_exhausted" and body["quota_limit"] == 5
+    finally:
+        llm.set_provider_for_tests(None, active=False)
 
     # Concurrent increments must not exceed the cap.
     # Reset used to 0 for a fresh race on this tenant (same calendar month).
@@ -546,3 +564,23 @@ def test_immo_denied_without_addon_even_on_workshop(client: TestClient):
         assert "add-on" in res.json()["detail"].lower() or "immo" in res.json()["detail"].lower()
     finally:
         os.environ["IMMO_FEATURE_ENABLED"] = "false"
+
+
+def test_checkout_redirects_only_to_paths_on_this_app():
+    from app.api.v1.billing import _app_url
+    from app.config import get_settings
+
+    base = get_settings().public_app_url.rstrip("/")
+    assert (
+        _app_url("/workshop/billing?checkout=success", "/x")
+        == f"{base}/workshop/billing?checkout=success"
+    )
+    for hostile in (
+        "https://evil.example/",
+        "//evil.example/x",
+        "/\\\\evil.example",
+        "javascript:alert(1)",
+        "",
+        None,
+    ):
+        assert _app_url(hostile, "/workshop/billing") == f"{base}/workshop/billing"

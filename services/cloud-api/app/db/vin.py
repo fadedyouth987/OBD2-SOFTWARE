@@ -36,6 +36,26 @@ def wmi_vds(vin: str) -> str:
     return normalize_vin(vin)[:9]
 
 
+_YEAR_CODES = "ABCDEFGHJKLMNPRSTVWXY123456789"  # 1980..2009, then the cycle repeats
+
+
+def model_year(vin: str, *, latest: int) -> int | None:
+    """Model year from VIN position 10 (ISO 3779 / SAE 30-year cycle).
+
+    The code repeats every 30 years, so the most recent year not after
+    ``latest`` (normally next calendar year) is chosen. None for a code that
+    isn't a year (some pre-1981 and grey-import VINs).
+    """
+    code = normalize_vin(vin)[9]
+    idx = _YEAR_CODES.find(code)
+    if idx < 0:
+        return None
+    year = 1980 + idx
+    while year + 30 <= latest:
+        year += 30
+    return year
+
+
 def resolve_secret(ref: str) -> bytes:
     """Resolves a secret reference: ``env://NAME`` or ``file:///path``.
 

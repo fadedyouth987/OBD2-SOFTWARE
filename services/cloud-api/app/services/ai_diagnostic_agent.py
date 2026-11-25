@@ -1,11 +1,32 @@
-"""KG-guided root-cause localizer and repair assistant (Task 3.3, A-CEO-1)."""
+"""KG-guided root-cause localizer and repair assistant (Task 3.3, A-CEO-1).
+
+Two engines produce the same response shape:
+
+- ``rules``: the built-in, evidence-scored rules over the vehicle platform's
+  circuit graph and the workshop's resolved cases. Always available, free.
+- ``llm``: a language model (``app.services.llm``) given the same evidence and
+  the rules' ranking, asked to reason over it. Its answer is checked: it may
+  only cite circuit nodes and case IDs it was given, and only for the DTCs
+  asked about. Anything else is dropped; an answer with nothing left is
+  treated as a failure.
+
+Only a successful ``llm`` answer consumes AI quota; the route charges first and
+refunds when the model fails, so a fallback never costs the workshop anything.
+"""
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from app.services.embeddings import EMBEDDING_MODEL, embed_canonical_text
+from app.services.llm import LlmError, LlmProvider
 from app.services.vehicle_registry import get_vehicle_platform
+
+ENGINE_RULES = "rules"
+ENGINE_LLM = "llm"
+RULES_LABEL = "Built-in rules"
+BANDS = ("HIGH", "MEDIUM", "LOW")
 
 
 def score_to_confidence_band(score: float) -> str:
@@ -62,30 +83,14 @@ def diagnose_session(
     dtcs: list[str],
     shared_graph_nodes: list[str] | None = None,
     matched_cases: list[dict[str, Any]] | None = None,
-    llm_error: str | None = None,
     vehicle_profile: str = "ford_ranger_px3",
 ) -> dict[str, Any]:
-    """Produces schema-validated diagnosis citing only verified graph nodes & case IDs.
-    Implements A-CEO-1 fallback: on LLM timeout/malformed/refusal, returns case matches
-    and wiring nodes with no AI summary and zero quota charge."""
+    """The rules engine: a ranked diagnosis citing only known graph nodes and real case IDs."""
     platform = get_vehicle_platform(vehicle_profile)
     nodes = shared_graph_nodes or platform["shared_nodes"]
     cases = matched_cases or []
     canonical = f"session={session_id} profile={vehicle_profile} dtcs={','.join(sorted(dtcs))}"
     _embedding = embed_canonical_text(canonical)
-
-    if llm_error:
-        return {
-            "session_id": session_id,
-            "vehicle": f"{platform['make']} {platform['model']}",
-            "mode": "FALLBACK_NO_LLM",
-            "fallback_reason": llm_error,
-            "quota_charged": False,
-            "embedding_model": EMBEDDING_MODEL,
-            "shared_circuit_nodes": nodes,
-            "matched_cases": cases,
-            "ranked_causes": [],
-        }
 
     ranked = []
     for code in dtcs or ["P0000"]:
@@ -126,8 +131,11 @@ def diagnose_session(
         "vehicle": f"{platform['make']} {platform['model']}",
         "engine": platform["engine"],
         "modules": platform["modules"],
-        "mode": "KG_RAG_SYNTHESIS",
-        "quota_charged": True,
+        "mode": "RULES",
+        "analysis": ENGINE_RULES,
+        "analysis_label": RULES_LABEL,
+        "summary": None,
+        "quota_charged": False,
         "embedding_model": EMBEDDING_MODEL,
         "shared_circuit_nodes": nodes,
         "matched_cases": cases,
@@ -140,19 +148,10 @@ def answer_technician_followup(
     question: str,
     vehicle_profile: str = "ford_ranger_px3",
     dtcs: list[str] | None = None,
-    llm_error: str | None = None,
 ) -> dict[str, Any]:
-    """Interactive make/model-aware AI assistant for step-by-step repair follow-ups."""
+    """The rules engine's make/model-aware answer to a technician's follow-up question."""
     platform = get_vehicle_platform(vehicle_profile)
     nodes = platform["shared_nodes"]
-    if llm_error:
-        return {
-            "session_id": session_id,
-            "mode": "FALLBACK_NO_LLM",
-            "quota_charged": False,
-            "cited_nodes": nodes,
-            "answer": "",
-        }
 
     q = question.lower()
     if "0v" in q or "0.0v" in q or "no voltage" in q or "open" in q:
@@ -191,9 +190,158 @@ def answer_technician_followup(
     return {
         "session_id": session_id,
         "vehicle": f"{platform['make']} {platform['model']}",
-        "mode": "KG_RAG_COPILOT",
-        "quota_charged": True,
+        "mode": "RULES",
+        "analysis": ENGINE_RULES,
+        "analysis_label": RULES_LABEL,
+        "quota_charged": False,
         "cited_nodes": nodes[:2],
         "answer": guidance,
         "recommended_next_step": next_step,
+    }
+
+
+# --- language model ---------------------------------------------------------------
+
+_SYSTEM = (
+    "You are an automotive diagnostic assistant for qualified workshop technicians in "
+    "Australia. Reason only from the evidence given: DTCs, the vehicle platform, its circuit "
+    "nodes and the workshop's resolved cases. Never invent part numbers, case IDs, circuit "
+    "nodes, security-access procedures, PINs or seed/key methods. Reply with a single JSON "
+    "object and nothing else."
+)
+
+
+def _evidence(rules: dict[str, Any], dtcs: list[str], vehicle_profile: str) -> dict[str, Any]:
+    platform = get_vehicle_platform(vehicle_profile)
+    return {
+        "vehicle": rules.get("vehicle"),
+        "engine": platform.get("engine"),
+        "protocols": platform.get("protocols"),
+        "modules": [m.get("id") for m in platform.get("modules", [])],
+        "dtcs": [d.upper() for d in dtcs],
+        "platform_notes": {
+            code: note
+            for code, note in platform.get("common_dtcs", {}).items()
+            if code in {d.upper() for d in dtcs}
+        },
+        "circuit_nodes": rules.get("shared_circuit_nodes", []),
+        "resolved_cases": [
+            {
+                "case_id": str(c.get("case_id")),
+                "dtcs": c.get("dtcs", []),
+                "verified_fix": c.get("verified_fix"),
+                "summary": c.get("symptom_summary") or c.get("canonical_summary"),
+            }
+            for c in rules.get("matched_cases", [])
+            if c.get("case_id")
+        ][:12],
+        "rules_ranking": [
+            {"dtc": r["dtc"], "band": r["confidence_band"], "hypothesis": r["hypothesis"]}
+            for r in rules.get("ranked_causes", [])
+        ],
+    }
+
+
+def llm_diagnosis(
+    provider: LlmProvider,
+    rules: dict[str, Any],
+    dtcs: list[str],
+    vehicle_profile: str,
+) -> dict[str, Any]:
+    """Ask the model to rank root causes from the evidence; checked before it's returned.
+
+    Raises LlmError when the call fails or nothing valid comes back.
+    """
+    evidence = _evidence(rules, dtcs, vehicle_profile)
+    prompt = (
+        "Evidence:\n"
+        + json.dumps(evidence, ensure_ascii=False)
+        + '\n\nReturn JSON: {"summary": string (2-4 sentences for the technician), '
+        '"ranked_causes": [{"dtc": one of evidence.dtcs, "confidence_band": "HIGH"|"MEDIUM"|'
+        '"LOW", "hypothesis": string, "cited_nodes": [names from evidence.circuit_nodes], '
+        '"cited_case_ids": [ids from evidence.resolved_cases], "multimeter_test": string}]}. '
+        "Use HIGH only when a resolved case or platform note supports it."
+    )
+    raw = provider.complete_json(system=_SYSTEM, prompt=prompt)
+    allowed_nodes = set(evidence["circuit_nodes"])
+    allowed_cases = {c["case_id"] for c in evidence["resolved_cases"]}
+    allowed_dtcs = set(evidence["dtcs"])
+    steps = {r["dtc"]: r.get("guided_steps", []) for r in rules.get("ranked_causes", [])}
+    ranked: list[dict[str, Any]] = []
+    for item in raw.get("ranked_causes") or []:
+        if not isinstance(item, dict):
+            continue
+        dtc = str(item.get("dtc", "")).upper()
+        hypothesis = str(item.get("hypothesis") or "").strip()
+        if dtc not in allowed_dtcs or not hypothesis:
+            continue
+        band = str(item.get("confidence_band", "")).upper()
+        cases = [str(c) for c in item.get("cited_case_ids") or [] if str(c) in allowed_cases]
+        if band not in BANDS or (
+            band == "HIGH" and not cases and dtc not in evidence["platform_notes"]
+        ):
+            band = "MEDIUM" if band == "HIGH" else "LOW"
+        ranked.append(
+            {
+                "dtc": dtc,
+                "confidence_band": band,
+                "cited_nodes": [
+                    str(n) for n in item.get("cited_nodes") or [] if n in allowed_nodes
+                ][:4],
+                "cited_case_ids": cases,
+                "hypothesis": hypothesis[:600],
+                "multimeter_test": str(item.get("multimeter_test") or "").strip()[:400],
+                "guided_steps": steps.get(dtc, []),
+            }
+        )
+    if not ranked:
+        raise LlmError("the model's answer had no usable causes")
+    summary = str(raw.get("summary") or "").strip()[:1200] or None
+    return {
+        **rules,
+        "mode": "LLM_SYNTHESIS",
+        "analysis": ENGINE_LLM,
+        "analysis_label": provider.label,
+        "summary": summary,
+        "ranked_causes": ranked,
+    }
+
+
+def llm_followup(
+    provider: LlmProvider,
+    rules_answer: dict[str, Any],
+    question: str,
+    vehicle_profile: str,
+    dtcs: list[str],
+) -> dict[str, Any]:
+    platform = get_vehicle_platform(vehicle_profile)
+    nodes = platform["shared_nodes"]
+    evidence = {
+        "vehicle": f"{platform['make']} {platform['model']}",
+        "engine": platform.get("engine"),
+        "dtcs": [d.upper() for d in dtcs],
+        "circuit_nodes": nodes,
+        "rules_answer": rules_answer.get("answer"),
+    }
+    prompt = (
+        "Evidence:\n"
+        + json.dumps(evidence, ensure_ascii=False)
+        + "\n\nTechnician's question: "
+        + question.strip()[:2000]
+        + '\n\nReturn JSON: {"answer": string, "recommended_next_step": string, '
+        '"cited_nodes": [names from evidence.circuit_nodes]}'
+    )
+    raw = provider.complete_json(system=_SYSTEM, prompt=prompt)
+    answer = str(raw.get("answer") or "").strip()
+    if not answer:
+        raise LlmError("the model's answer was empty")
+    return {
+        **rules_answer,
+        "mode": "LLM_COPILOT",
+        "analysis": ENGINE_LLM,
+        "analysis_label": provider.label,
+        "answer": answer[:2000],
+        "recommended_next_step": str(raw.get("recommended_next_step") or "").strip()[:600]
+        or rules_answer.get("recommended_next_step"),
+        "cited_nodes": [str(n) for n in raw.get("cited_nodes") or [] if n in set(nodes)][:4],
     }

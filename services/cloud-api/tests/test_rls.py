@@ -205,11 +205,24 @@ def test_app_role_is_unprivileged_and_rls_is_forced(db):
                 text(
                     "SELECT relname, relforcerowsecurity AND relrowsecurity FROM pg_class "
                     "WHERE relkind = 'r' AND relnamespace = 'public'::regnamespace "
-                    "AND relname NOT IN ('alembic_version', 'tier_retention', 'telemetry_samples')"
+                    "AND relname NOT IN ('alembic_version', 'tier_retention', 'telemetry_samples', "
+                    "'procedure_sources', 'procedure_records')"
                 )
             ).all()
         )
         assert forced and all(forced.values()), forced
+        # Licensed procedures are shared reference data: the app may only read them.
+        for table in ("procedure_sources", "procedure_records"):
+            privs = c.execute(
+                text(
+                    "SELECT has_table_privilege('diag_app', :t, 'SELECT'), "
+                    "has_table_privilege('diag_app', :t, 'INSERT'), "
+                    "has_table_privilege('diag_app', :t, 'UPDATE'), "
+                    "has_table_privilege('diag_app', :t, 'DELETE')"
+                ),
+                {"t": table},
+            ).one()
+            assert tuple(privs) == (True, False, False, False), table
         owners = (
             c.execute(text("SELECT DISTINCT tableowner FROM pg_tables WHERE schemaname = 'public'"))
             .scalars()

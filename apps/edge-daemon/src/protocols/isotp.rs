@@ -288,6 +288,14 @@ impl<A: VehicleBusAdapter> IsoTpLink<A> {
 
 #[async_trait]
 impl<A: VehicleBusAdapter> Link for IsoTpLink<A> {
+    async fn drain(&mut self) {
+        for _ in 0..1_024 {
+            if self.adapter.recv_frame(Duration::ZERO).await.is_err() {
+                break;
+            }
+        }
+    }
+
     async fn send_pdu(&mut self, data: &[u8]) -> Result<()> {
         self.send_message(data).await
     }

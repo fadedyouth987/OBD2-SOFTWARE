@@ -15,6 +15,11 @@ pub const IO_IDLE_ACTUATOR: u16 = 0x0B2A;
 pub const ROUTINE_CHECK_PRECONDITIONS: u16 = 0x0203;
 /// Calibration-data DID with a 100-byte value (multi-frame ISO-TP tests).
 pub const DID_CALIBRATION: u16 = 0xF1A0;
+/// Simulated service routines (stand-ins for the service-function UI).
+pub const ROUTINE_THROTTLE_RELEARN: u16 = 0x0401;
+pub const ROUTINE_DPF_REGEN: u16 = 0x0402;
+pub const ROUTINE_CKP_RELEARN: u16 = 0x0403;
+pub const ROUTINE_BMS_RESET: u16 = 0x0404;
 
 const KEY_MASK: [u8; 4] = [0x5A, 0x3C, 0x96, 0xE1];
 
@@ -48,6 +53,13 @@ pub fn engine_spec() -> EcuSpec {
         lockout_ms: 10_000,
     });
     spec.routines = vec![ROUTINE_CHECK_PRECONDITIONS];
+    // Simulated service routines (stand-ins for the service-function UI).
+    spec.session_routines = vec![
+        ROUTINE_THROTTLE_RELEARN,
+        ROUTINE_DPF_REGEN,
+        ROUTINE_CKP_RELEARN,
+        ROUTINE_BMS_RESET,
+    ];
     spec.io_ids = vec![IO_IDLE_ACTUATOR];
     spec.p2_ms = 12;
     spec.slow_ms = 150;

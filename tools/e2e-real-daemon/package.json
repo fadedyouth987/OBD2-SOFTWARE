@@ -1,0 +1,17 @@
+{
+  "name": "e2e-real-daemon",
+  "private": true,
+  "type": "module",
+  "description": "Browser end-to-end runs against a locally running API, web app and edge daemon (virtual vehicles).",
+  "scripts": {
+    "community": "node p0-community.mjs",
+    "workshop": "node p1-workshop.mjs",
+    "team": "node p2-team.mjs",
+    "files": "node p2-files.mjs",
+    "a11y": "node a11y.mjs"
+  },
+  "dependencies": {
+    "@axe-core/playwright": "^4.10.0",
+    "playwright": "1.65.1"
+  }
+}

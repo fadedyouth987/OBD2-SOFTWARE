@@ -9,12 +9,12 @@ from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db.models import StripeEvent, SubscriptionTier, Tenant
-from app.db.session import tenant_session
+from app.db.session import owner_engine, tenant_session
 
 log = logging.getLogger(__name__)
 
@@ -350,37 +350,32 @@ def lookup_tenant_id(
     client_reference_id: str | None = None,
 ) -> UUID | None:
     """Resolve a tenant using the owner (bypass-RLS) connection."""
-    settings = get_settings()
-    engine = create_engine(settings.migration_database_url)
-    try:
-        with engine.connect() as conn:
-            if customer_id:
-                row = conn.execute(
-                    text("SELECT id FROM tenants WHERE stripe_customer_id = :c"),
-                    {"c": customer_id},
-                ).first()
-                if row:
-                    return UUID(str(row[0]))
-            if subscription_id:
-                row = conn.execute(
-                    text("SELECT id FROM tenants WHERE stripe_subscription_id = :s"),
-                    {"s": subscription_id},
-                ).first()
-                if row:
-                    return UUID(str(row[0]))
-            if client_reference_id:
-                try:
-                    tid = UUID(str(client_reference_id))
-                except ValueError:
-                    return None
-                row = conn.execute(
-                    text("SELECT id FROM tenants WHERE id = :i"),
-                    {"i": tid},
-                ).first()
-                if row:
-                    return UUID(str(row[0]))
-    finally:
-        engine.dispose()
+    with owner_engine().connect() as conn:
+        if customer_id:
+            row = conn.execute(
+                text("SELECT id FROM tenants WHERE stripe_customer_id = :c"),
+                {"c": customer_id},
+            ).first()
+            if row:
+                return UUID(str(row[0]))
+        if subscription_id:
+            row = conn.execute(
+                text("SELECT id FROM tenants WHERE stripe_subscription_id = :s"),
+                {"s": subscription_id},
+            ).first()
+            if row:
+                return UUID(str(row[0]))
+        if client_reference_id:
+            try:
+                tid = UUID(str(client_reference_id))
+            except ValueError:
+                return None
+            row = conn.execute(
+                text("SELECT id FROM tenants WHERE id = :i"),
+                {"i": tid},
+            ).first()
+            if row:
+                return UUID(str(row[0]))
     return None
 
 
@@ -727,6 +722,28 @@ def charge_ai_quota(tenant_id: UUID) -> tuple[bool, int, int]:
         return True, int(row[0]), limit
 
 
+def refund_ai_quota(tenant_id: UUID) -> int:
+    """Give back one AI diagnosis reserved by ``charge_ai_quota`` when the model failed.
+
+    Only within the same quota month; never below zero. Returns the new count.
+    """
+    period = current_quota_period()
+    with tenant_session(tenant_id) as session:
+        row = session.execute(
+            text(
+                """
+                UPDATE tenants
+                   SET ai_diagnoses_used = GREATEST(0, ai_diagnoses_used - 1)
+                 WHERE id = :id
+                   AND ai_quota_period_start >= :period
+             RETURNING ai_diagnoses_used
+                """
+            ),
+            {"id": tenant_id, "period": period},
+        ).first()
+        return int(row[0]) if row else 0
+
+
 def charge_schematic_pages(tenant_id: UUID, pages: int) -> tuple[bool, int, int]:
     """Atomically consume schematic page views. ``pages`` must be >= 1."""
     if pages < 1:
@@ -784,6 +801,54 @@ def charge_schematic_pages(tenant_id: UUID, pages: int) -> tuple[bool, int, int]
             ).scalar_one()
             return False, int(used), limit
         return True, int(row[0]), limit
+
+
+def current_quota_period() -> date:
+    """The first day of this quota month (calendar month in Australia/Adelaide)."""
+    return period_start_adelaide(today_adelaide())
+
+
+def refund_schematic_pages(
+    session: Session, tenant_id: UUID, pages: int, charged_period: date | None
+) -> int:
+    """Give back pages charged for a file deleted in the same quota month.
+
+    Runs inside the caller's transaction (the one deleting the file), so the
+    refund and the delete commit or roll back together. Returns the pages
+    refunded: 0 when the upload was charged in an earlier month, or the
+    counter has already rolled to a new month.
+    """
+    if pages < 1 or charged_period is None:
+        return 0
+    period = current_quota_period()
+    if charged_period != period:
+        return 0
+    row = session.execute(
+        text(
+            """
+            UPDATE tenants
+               SET schematic_pages_used = GREATEST(0, schematic_pages_used - :pages)
+             WHERE id = :id
+               AND ai_quota_period_start >= :period
+         RETURNING schematic_pages_used
+            """
+        ),
+        {"id": tenant_id, "pages": pages, "period": period},
+    ).first()
+    return pages if row is not None else 0
+
+
+def schematic_pages_used(session: Session, tenant_id: UUID) -> int:
+    """Pages used this quota month (0 if the counter is from an earlier month)."""
+    row = session.execute(
+        text("SELECT schematic_pages_used, ai_quota_period_start FROM tenants WHERE id = :id"),
+        {"id": tenant_id},
+    ).first()
+    if row is None:
+        return 0
+    used, start = row
+    # The watermark is any day in the current month once it has rolled.
+    return int(used or 0) if start is not None and start >= current_quota_period() else 0
 
 
 def member_count(session: Session, tenant_id: UUID) -> int:

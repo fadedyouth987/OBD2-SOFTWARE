@@ -8,6 +8,7 @@ set them.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -76,7 +77,12 @@ def get_principal(
                 tenant_id=tenant.id,
                 user_id=user_id,
                 tier=tier,
-                aasra_verified=bool(tenant.aasra_verified),
+                # An approval with an expiry stops counting the moment it lapses.
+                aasra_verified=bool(tenant.aasra_verified)
+                and (
+                    tenant.aasra_verified_until is None
+                    or tenant.aasra_verified_until > datetime.now(UTC)
+                ),
                 tenant_name=tenant.name,
                 role=membership.role,
                 immo_entitled=immo,

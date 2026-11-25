@@ -1,22 +1,38 @@
-"""Edge lease, pairing, JWKS, and (dev-only) session issuance."""
+"""Sign-in (password and OIDC), edge lease, pairing, JWKS, and dev-only sessions."""
 
 from __future__ import annotations
 
 import os
-from uuid import uuid4
+from datetime import UTC, datetime, timedelta
+from typing import Annotated
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as OrmSession
 
 from app.api.deps import RequirePrincipal
 from app.config import get_settings
 from app.db.models import MembershipRole, SubscriptionTier, Tenant, TenantMembership, User
-from app.db.session import tenant_session
+from app.db.session import owner_engine, tenant_session
 from app.observability.metrics import inc
+from app.services import oidc
 from app.services.aasra import default_verifier
+from app.services.accreditation import is_platform_admin
+from app.services.billing import entitlement_for, maybe_expire_grace, schematic_pages_used
+from app.services.flags import immo_feature_enabled
+from app.services.identity import (
+    IdentityError,
+    authenticate,
+    check_password_policy,
+    hash_password,
+    normalize_email,
+    user_by_email,
+    user_profile,
+    workspaces_for,
+)
+from app.services.permissions import permission_list
 from app.services.signing import (
     SigningKeyError,
     get_public_jwk,
@@ -49,6 +65,25 @@ class DevSessionRequest(BaseModel):
     display_name: str = "Local technician"
 
 
+class SignupRequest(BaseModel):
+    email: str = Field(max_length=254)
+    password: str = Field(max_length=256)
+    display_name: str = Field(default="", max_length=120)
+    workshop_name: str = Field(default="", max_length=200)
+    # Joining a workshop from an invite link instead of creating a new one.
+    invite_token: str | None = Field(default=None, min_length=20, max_length=200)
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(max_length=254)
+    password: str = Field(max_length=256)
+    tenant_id: UUID | None = None
+
+
+class SwitchWorkspaceRequest(BaseModel):
+    tenant_id: UUID
+
+
 class DevGrantPlanRequest(BaseModel):
     tier: SubscriptionTier = SubscriptionTier.WORKSHOP
     immo_entitled: bool = False
@@ -56,13 +91,9 @@ class DevGrantPlanRequest(BaseModel):
 
 def _existing_user_id(email: str):
     """Owner-role lookup: RLS hides users until they belong to the current tenant."""
-    engine = create_engine(get_settings().migration_database_url)
-    try:
-        with OrmSession(engine) as session:
-            row = session.query(User).filter(User.email == email).one_or_none()
-            return None if row is None else row.id
-    finally:
-        engine.dispose()
+    with OrmSession(owner_engine()) as session:
+        row = session.query(User).filter(User.email == email).one_or_none()
+        return None if row is None else row.id
 
 
 def _dev_login_enabled() -> bool:
@@ -135,6 +166,7 @@ def dev_mark_aasra(principal: RequirePrincipal) -> dict:
         if tenant is None:
             raise HTTPException(status_code=401, detail="Unknown tenant")
         tenant.aasra_verified = True
+        tenant.aasra_verified_until = datetime.now(UTC) + timedelta(days=365)
     inc("auth_dev_aasra_marked")
     return {"tenant_id": str(principal.tenant_id), "aasra_verified": True}
 
@@ -206,3 +238,257 @@ def create_edge_pairing(req: PairingRequest, principal: RequirePrincipal) -> dic
         ) from exc
     inc("auth_edge_pairing_issued")
     return issued
+
+
+def _issue(tenant_id: UUID, user_id: UUID) -> dict:
+    try:
+        return issue_session_jwt(str(tenant_id), str(user_id))
+    except SigningKeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
+
+
+def _workspace_list(user_id: UUID) -> list[dict]:
+    return [
+        {"tenant_id": str(w.tenant_id), "name": w.name, "role": w.role, "tier": w.tier}
+        for w in workspaces_for(user_id)
+    ]
+
+
+def _require_password_auth() -> None:
+    if not get_settings().auth_password_enabled:
+        cfg = oidc.config()
+        via = f" Use “Sign in with {cfg.provider_name}”." if cfg else ""
+        raise HTTPException(
+            status_code=403, detail=f"Password sign-in is turned off on this server.{via}"
+        )
+
+
+@router.get("/config")
+def auth_config() -> dict:
+    """What the sign-in page offers. Public: no secrets, only switches and names."""
+    cfg = oidc.config()
+    return {
+        "password_enabled": get_settings().auth_password_enabled,
+        "oidc": (
+            {
+                "enabled": True,
+                "provider_name": cfg.provider_name,
+                "logout_url": cfg.logout_url or None,
+            }
+            if cfg
+            else {"enabled": False, "provider_name": None, "logout_url": None}
+        ),
+        "dev_login": _dev_login_enabled(),
+    }
+
+
+@router.get("/oidc/start")
+def oidc_start(
+    return_to: Annotated[str | None, Query(max_length=500)] = None,
+    invite_token: Annotated[str | None, Query(min_length=20, max_length=200)] = None,
+) -> dict:
+    """The provider URL to send the browser to (state, nonce and PKCE are set up here)."""
+    return oidc.start(return_to=return_to, invite_token=invite_token)
+
+
+class OidcCallbackRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=4096)
+    state: str = Field(min_length=20, max_length=200)
+
+
+@router.post("/oidc/callback")
+def oidc_callback(req: OidcCallbackRequest) -> dict:
+    """Finish provider sign-in: checks the ID token, then signs in like /login."""
+    try:
+        done = oidc.finish(code=req.code, state=req.state)
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=409, detail="An account with this email already exists. Sign in instead."
+        ) from exc
+    spaces = workspaces_for(done.user_id)
+    if not spaces:
+        raise HTTPException(
+            status_code=403, detail="This account is not a member of any workshop yet"
+        )
+    chosen = next((w for w in spaces if w.tenant_id == done.tenant_id), spaces[0])
+    return {
+        **_issue(chosen.tenant_id, done.user_id),
+        "tenant_id": str(chosen.tenant_id),
+        "user_id": str(done.user_id),
+        "workspaces": _workspace_list(done.user_id),
+        "return_to": done.return_to,
+        "created": done.created,
+    }
+
+
+@router.post("/signup", status_code=201)
+def signup(req: SignupRequest) -> dict:
+    """Create an account and its workshop (the new user is the Owner)."""
+    _require_password_auth()
+    try:
+        email = normalize_email(req.email)
+        check_password_policy(req.password)
+    except IdentityError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    if user_by_email(email) is not None:
+        raise HTTPException(
+            status_code=409, detail="An account with this email already exists. Sign in instead."
+        )
+    display = req.display_name.strip() or email.split("@", 1)[0]
+    if req.invite_token:
+        return _signup_from_invite(req, email, display)
+    workshop = req.workshop_name.strip() or f"{display}'s workshop"
+    tenant_id = uuid4()
+    user_id = uuid4()
+    try:
+        with tenant_session(tenant_id) as session:
+            session.add(
+                User(
+                    id=user_id,
+                    email=email,
+                    display_name=display[:120],
+                    password_hash=hash_password(req.password),
+                    # Signing up signs you in.
+                    last_login_at=datetime.now(UTC),
+                )
+            )
+            session.flush()
+            session.add(Tenant(id=tenant_id, name=workshop[:200]))
+            session.flush()
+            session.add(
+                TenantMembership(tenant_id=tenant_id, user_id=user_id, role=MembershipRole.OWNER)
+            )
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=409, detail="An account with this email already exists. Sign in instead."
+        ) from exc
+    inc("auth_signup")
+    return {
+        **_issue(tenant_id, user_id),
+        "tenant_id": str(tenant_id),
+        "user_id": str(user_id),
+        "workspaces": _workspace_list(user_id),
+    }
+
+
+def _signup_from_invite(req: SignupRequest, email: str, display: str) -> dict:
+    """Create the account straight into the inviting workshop (no workshop of its own)."""
+    from app.api.v1.team import join_with_invite
+
+    user_id = uuid4()
+    user = User(
+        id=user_id,
+        email=email,
+        display_name=display[:120],
+        password_hash=hash_password(req.password),
+        last_login_at=datetime.now(UTC),
+    )
+    try:
+        tenant_id = join_with_invite(req.invite_token or "", user_id, email, new_user=user)
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=409, detail="An account with this email already exists. Sign in instead."
+        ) from exc
+    inc("auth_signup")
+    return {
+        **_issue(tenant_id, user_id),
+        "tenant_id": str(tenant_id),
+        "user_id": str(user_id),
+        "workspaces": _workspace_list(user_id),
+    }
+
+
+@router.post("/login")
+def login(req: LoginRequest) -> dict:
+    """Email + password sign-in. Picks the requested workspace or the first one."""
+    _require_password_auth()
+    try:
+        user_id = authenticate(req.email, req.password)
+    except IdentityError as exc:
+        inc("auth_login_failed")
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    spaces = workspaces_for(user_id)
+    if not spaces:
+        raise HTTPException(
+            status_code=403, detail="This account is not a member of any workshop yet"
+        )
+    chosen = next((w for w in spaces if w.tenant_id == req.tenant_id), spaces[0])
+    inc("auth_login")
+    return {
+        **_issue(chosen.tenant_id, user_id),
+        "tenant_id": str(chosen.tenant_id),
+        "user_id": str(user_id),
+        "workspaces": _workspace_list(user_id),
+    }
+
+
+@router.post("/switch-workspace")
+def switch_workspace(req: SwitchWorkspaceRequest, principal: RequirePrincipal) -> dict:
+    spaces = workspaces_for(principal.user_id)
+    if not any(w.tenant_id == req.tenant_id for w in spaces):
+        raise HTTPException(status_code=403, detail="You are not a member of that workshop")
+    return {
+        **_issue(req.tenant_id, principal.user_id),
+        "tenant_id": str(req.tenant_id),
+        "user_id": str(principal.user_id),
+        "workspaces": _workspace_list(principal.user_id),
+    }
+
+
+def _ai_engine() -> dict:
+    from app.services.llm import configured_llm
+
+    try:
+        provider = configured_llm()
+    except Exception:  # noqa: BLE001 - a misconfigured model must not break /me
+        provider = None
+    return {
+        "model_configured": provider is not None,
+        "model_label": provider.label if provider else None,
+    }
+
+
+@router.get("/me")
+def me(principal: RequirePrincipal) -> dict:
+    """Everything the app shell shows: who, which workshop, plan, usage, entitlements."""
+    profile = user_profile(principal.user_id) or {}
+    with tenant_session(principal.tenant_id) as session:
+        tenant = session.get(Tenant, principal.tenant_id)
+        if tenant is None:
+            raise HTTPException(status_code=401, detail="Unknown tenant")
+        maybe_expire_grace(session, tenant)
+        ent = entitlement_for(tenant)
+        usage = {
+            "ai_diagnoses_used": int(tenant.ai_diagnoses_used or 0),
+            "schematic_pages_used": schematic_pages_used(session, principal.tenant_id),
+            "quota_period_start": (
+                tenant.ai_quota_period_start.isoformat() if tenant.ai_quota_period_start else None
+            ),
+            "quota_timezone": "Australia/Adelaide",
+        }
+    last_login = profile.get("last_login_at")
+    return {
+        "user": {
+            "id": str(principal.user_id),
+            "email": profile.get("email"),
+            "display_name": profile.get("display_name"),
+            "last_login_at": last_login.isoformat() if last_login else None,
+        },
+        "workspace": {
+            "tenant_id": str(principal.tenant_id),
+            "name": principal.tenant_name,
+            "role": principal.role.value,
+            "aasra_verified": principal.aasra_verified,
+            "permissions": permission_list(principal.role),
+        },
+        "workspaces": _workspace_list(principal.user_id),
+        "entitlements": ent,
+        "usage": usage,
+        "immo_feature_enabled": immo_feature_enabled(),
+        "platform_admin": is_platform_admin(principal.user_id),
+        "dev_login_enabled": _dev_login_enabled(),
+        # Which engine a diagnosis will use: a model (counts against quota) or the free rules.
+        "ai": _ai_engine(),
+    }

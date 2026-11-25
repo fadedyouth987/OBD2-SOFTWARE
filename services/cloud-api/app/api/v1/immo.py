@@ -14,6 +14,7 @@ from app.services.immo import (
     ImmoDenied,
     complete_or_abort,
     create_authorisation,
+    eligibility,
     enrol_technician,
     fetch_token,
     get_session,
@@ -22,7 +23,12 @@ from app.services.immo import (
     require_workshop_and_tech,
     start_session,
 )
-from app.services.immo_catalog import IMMO_LEASE_DEFAULT_TTL_S, IMMO_LEASE_MAX_TTL_S
+from app.services.immo_catalog import (
+    ALLOW_LIST,
+    IMMO_LEASE_DEFAULT_TTL_S,
+    IMMO_LEASE_MAX_TTL_S,
+    IMMO_MIN_BATTERY_V,
+)
 
 router = APIRouter(prefix="/api/v1/immo", tags=["immo"])
 
@@ -59,6 +65,37 @@ class StartJobRequest(BaseModel):
     aasra_verified: bool | None = None
     tenant_id: str | None = None
     user_id: str | None = None
+
+
+@router.get("/eligibility")
+def get_eligibility(principal: RequirePrincipal) -> dict:
+    """Which key-programming gates pass for this user (works when the flag is off)."""
+    return eligibility(principal)
+
+
+@router.get("/profiles")
+def profiles(principal: RequirePrincipal) -> dict:
+    """Allow-listed procedures this deployment can run, for the guided flow."""
+    try:
+        require_feature()
+    except ImmoDenied as exc:
+        _raise(exc)
+        raise
+    return {
+        "min_battery_v": IMMO_MIN_BATTERY_V,
+        "default_ttl_s": IMMO_LEASE_DEFAULT_TTL_S,
+        "profiles": [
+            {
+                "oem": p.oem,
+                "operation": p.operation,
+                "device_tier": p.device_tier,
+                "ecu_tx": p.ecu_tx,
+                "ecu_rx": p.ecu_rx,
+                "profile_id": p.profile_id,
+            }
+            for p in ALLOW_LIST
+        ],
+    }
 
 
 @router.post("/technicians/enrol")

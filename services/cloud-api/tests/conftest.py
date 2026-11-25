@@ -18,3 +18,14 @@ os.environ["STRIPE_PRICE_IMMO_YEAR"] = "price_test_immo_year"
 
 os.environ.setdefault("VIN_HMAC_KEY_REF", "env://VIN_HMAC_KEY")
 os.environ.setdefault("VIN_HMAC_KEY", "test-only-vin-hmac-key-0123456789")
+# The older immo tests enrol and expect approval on submit; that shortcut only
+# exists behind this explicit local flag (with AUTH_ALLOW_DEV_LOGIN). Tests of
+# the reviewed workflow switch it off.
+os.environ.setdefault("AASRA_DEV_AUTO_APPROVE", "true")
+# Keep tests independent of a developer's local .env (which may turn on the dev
+# OIDC provider or a file mailbox). Tests that need these set them themselves.
+os.environ["EMAIL_PROVIDER"] = "none"
+os.environ["OIDC_ISSUER"] = ""
+os.environ["AUTH_PASSWORD_ENABLED"] = "true"
+os.environ["PROCEDURE_PROVIDER_FEED_URL"] = ""
+os.environ["LLM_PROVIDER"] = "none"

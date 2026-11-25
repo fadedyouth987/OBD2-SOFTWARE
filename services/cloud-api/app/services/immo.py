@@ -19,7 +19,7 @@ from app.db.models import (
 from app.db.session import tenant_session
 from app.db.vin import normalize_vin, resolve_secret, vin_hmac
 from app.services.aasra import default_verifier
-from app.services.flags import auth_allow_dev_login, immo_feature_enabled
+from app.services.flags import immo_feature_enabled
 from app.services.immo_catalog import (
     IMMO_LEASE_DEFAULT_TTL_S,
     lookup_profile,
@@ -138,6 +138,51 @@ def require_workshop_and_tech(principal: Principal) -> TechnicianCredential:
     return cred
 
 
+def eligibility(principal: Principal) -> dict:
+    """Each gate for key programming, so the UI can show what is missing.
+
+    Read-only; the gates are still enforced by ``require_workshop_and_tech``.
+    """
+    enabled = immo_feature_enabled()
+    plan_ok = principal.tier in {SubscriptionTier.WORKSHOP, SubscriptionTier.FLEET}
+    aasra_ok = bool(
+        default_verifier().is_verified(principal.tenant_id, tenant_flag=principal.aasra_verified)
+    )
+    with tenant_session(principal.tenant_id) as session:
+        cred = session.get(TechnicianCredential, (principal.tenant_id, principal.user_id))
+        if cred is not None:
+            session.expunge(cred)
+    if cred is None:
+        tech_status = "not_enrolled"
+    elif is_accredited(cred):
+        tech_status = "accredited"
+    elif not paperwork_current(cred):
+        tech_status = "paperwork_expired"
+    elif cred.vsp_status == "active":
+        tech_status = "expired"
+    else:
+        tech_status = "pending"
+    accredited_until = None
+    if cred is not None and cred.accredited_until is not None:
+        accredited_until = cred.accredited_until.isoformat()
+    checks = {
+        "feature_enabled": enabled,
+        "plan": plan_ok,
+        "addon": bool(principal.immo_entitled),
+        "aasra": aasra_ok,
+        "technician": tech_status == "accredited",
+    }
+    return {
+        "checks": checks,
+        "ready": all(checks.values()),
+        "technician": {
+            "status": tech_status,
+            "aasra_member_id": cred.aasra_member_id if cred else None,
+            "accredited_until": accredited_until,
+        },
+    }
+
+
 def enrol_technician(
     principal: Principal,
     *,
@@ -146,39 +191,34 @@ def enrol_technician(
     repairer_licence_renewed_at: date | None,
     declared: bool,
 ) -> TechnicianCredential:
+    """JSON enrolment without evidence files (older clients).
+
+    Goes through the same reviewed workflow as ``POST /accreditation/technician``,
+    so in production it needs evidence and ends up pending admin review; only
+    the explicit local dev flag approves on submit.
+    """
+    from fastapi import HTTPException
+
+    from app.services import accreditation
+
     require_feature()
-    member = aasra_member_id.strip()
-    if not member:
-        raise ImmoDenied(400, "aasra_member_id is required")
-    if national_police_check_dated is None and repairer_licence_renewed_at is None:
-        raise ImmoDenied(
-            400, "A national police check date or repairer licence renewal date is required"
+    try:
+        accreditation.submit(
+            principal,
+            accreditation.TECHNICIAN,
+            aasra_member_id=aasra_member_id,
+            declared=declared,
+            files=[],
+            national_police_check_dated=national_police_check_dated,
+            repairer_licence_renewed_at=repairer_licence_renewed_at,
         )
-    if not declared:
-        raise ImmoDenied(400, "A written declaration is required")
-    now = _now()
+    except HTTPException as exc:
+        raise ImmoDenied(
+            400 if exc.status_code == 422 else exc.status_code, str(exc.detail)
+        ) from exc
     with tenant_session(principal.tenant_id) as session:
         cred = session.get(TechnicianCredential, (principal.tenant_id, principal.user_id))
-        if cred is None:
-            cred = TechnicianCredential(
-                tenant_id=principal.tenant_id,
-                user_id=principal.user_id,
-                aasra_member_id=member,
-            )
-            session.add(cred)
-        cred.aasra_member_id = member
-        cred.national_police_check_dated = national_police_check_dated
-        cred.repairer_licence_renewed_at = repairer_licence_renewed_at
-        cred.declaration_at = now
-        cred.updated_at = now
-        if auth_allow_dev_login() and paperwork_current(cred):
-            cred.vsp_status = "active"
-            cred.accredited_until = now + timedelta(days=365)
-        else:
-            # Production: record paperwork only. Real AASRA verification is not built yet.
-            cred.vsp_status = "pending"
-            cred.accredited_until = None
-        session.flush()
+        assert cred is not None
         session.expunge(cred)
     return cred
 

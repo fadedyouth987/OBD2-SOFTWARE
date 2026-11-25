@@ -4,11 +4,12 @@ Client-supplied flags such as ``aasra_verified`` or ``vsp_authorized`` are never
 trusted. Verification is gated behind :class:`AasraVerifier`, which fails closed
 unless a trusted record already exists on the tenant.
 
-TODO: replace :class:`FailClosedAasraVerifier` with the real AASRA / OEM
-integration (member lookup, VSP assertion, AutoAuth). Until that hook exists,
-the only accepted signal is ``tenants.aasra_verified``, which must be set by a
-trusted operator — or, for local development only, by
-``POST /api/v1/auth/dev-mark-aasra`` when ``AUTH_ALLOW_DEV_LOGIN=true``.
+The trusted signal is ``tenants.aasra_verified`` (with ``aasra_verified_until``),
+set only when a platform admin approves the workshop's submitted AASRA details
+and evidence (``app.services.accreditation``), or, for local development
+only, by ``POST /api/v1/auth/dev-mark-aasra`` when ``AUTH_ALLOW_DEV_LOGIN=true``.
+AASRA has no public verification API, so review is manual by design; a direct
+integration can replace this verifier if one becomes available.
 """
 
 from __future__ import annotations

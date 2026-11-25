@@ -126,6 +126,8 @@ fn suppresses_positive(protocol: DiagProtocol, payload: &[u8]) -> bool {
 /// through [`DiagChannel`], which always runs the interlock (A-ENG-4).
 #[async_trait]
 pub(crate) trait Link: Send {
+    /// Discards frames that queued up while another channel owned the bus.
+    async fn drain(&mut self) {}
     async fn send_pdu(&mut self, data: &[u8]) -> crate::hal::Result<()>;
     async fn recv_pdu(&mut self, timeout: Duration) -> crate::hal::Result<Vec<u8>>;
     /// (tx, rx) identifiers or addresses, for the safety token binding.
@@ -137,6 +139,11 @@ pub(crate) trait Link: Send {
 pub struct DiagChannel {
     link: Box<dyn Link>,
     interlock: Arc<SafetyInterlock>,
+    /// Shared by every channel on one physical/virtual bus connection, so one
+    /// request/response exchange completes before the next starts: two ISO-TP
+    /// receivers on the same response id (PID poll + a DTC read) would
+    /// otherwise interleave each other's multi-frame replies.
+    bus_lock: Option<Arc<tokio::sync::Mutex<()>>>,
 }
 
 impl DiagChannel {
@@ -147,6 +154,7 @@ impl DiagChannel {
         Self {
             link: Box::new(link),
             interlock,
+            bus_lock: None,
         }
     }
 
@@ -157,6 +165,7 @@ impl DiagChannel {
         Self {
             link: Box::new(link),
             interlock,
+            bus_lock: None,
         }
     }
 
@@ -167,7 +176,14 @@ impl DiagChannel {
         Self {
             link: Box::new(link),
             interlock,
+            bus_lock: None,
         }
+    }
+
+    /// Serializes this channel's exchanges with every other channel holding `lock`.
+    pub fn with_bus_lock(mut self, lock: Arc<tokio::sync::Mutex<()>>) -> Self {
+        self.bus_lock = Some(lock);
+        self
     }
 
     pub fn interlock(&self) -> &Arc<SafetyInterlock> {
@@ -195,6 +211,11 @@ impl DiagTransport for DiagChannel {
         };
         // A-ENG-4: the one check, before anything reaches the bus.
         self.interlock.check(&gated, req.safety_token)?;
+        let _bus = match &self.bus_lock {
+            Some(lock) => Some(Arc::clone(lock).lock_owned().await),
+            None => None,
+        };
+        self.link.drain().await;
         self.link.send_pdu(req.payload).await?;
 
         let timing = self.link.timing();

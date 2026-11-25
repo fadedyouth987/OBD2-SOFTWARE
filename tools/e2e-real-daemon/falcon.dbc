@@ -1,0 +1,5 @@
+VERSION ""
+
+BO_ 513 ENGINE_DATA: 8 PCM
+ SG_ RPM : 0|16@1+ (0.25,0) [0|16383] "rpm" Vector__XXX
+ SG_ COOLANT : 16|8@1+ (1,-40) [-40|215] "degC" Vector__XXX
