@@ -119,8 +119,17 @@ pub struct ServerConfig {
     pub immo_lease_token: Option<String>,
     /// Live immobilizer lease, replaced by `LeaseInstallRequest { kind: IMMO }`.
     pub live_immo_lease: Arc<Mutex<Option<String>>>,
-    /// Where installed leases are saved (`lease.jwt`, `immo_lease.jwt`); None keeps them in memory (tests).
+    /// Where installed leases are saved; None keeps them in memory (tests).
+    /// Native (code-paired) installs write `lease.jwt` / `immo_lease.jwt`;
+    /// browser installs write `leases/<user>.jwt` / `immo_leases/<user>.jwt`.
     pub data_dir: Option<std::path::PathBuf>,
+    /// Diagnostic leases installed by browser users, keyed by pairing user id.
+    pub user_leases: Arc<Mutex<HashMap<String, String>>>,
+    /// Immobilizer leases installed by browser users, keyed by pairing user id.
+    pub user_immo_leases: Arc<Mutex<HashMap<String, String>>>,
+    /// Per-user lease generation: replacing one user's lease only closes that
+    /// user's other sockets.
+    pub user_epochs: Arc<Mutex<HashMap<String, u64>>>,
     pub immo_registry: ImmoRegistry,
     pub pairing: Arc<PairingStore>,
     pub audit: Arc<dyn AuditSink>,
@@ -144,6 +153,9 @@ impl ServerConfig {
             immo_lease_token: None,
             live_immo_lease: Arc::new(Mutex::new(None)),
             data_dir: None,
+            user_leases: Arc::default(),
+            user_immo_leases: Arc::default(),
+            user_epochs: Arc::default(),
             immo_registry: ImmoRegistry::new(),
             pairing,
             audit,
@@ -152,6 +164,52 @@ impl ServerConfig {
             diag_per_second: DIAG_PER_SECOND,
             stream_period: STREAM_PERIOD,
         }
+    }
+
+    /// Loads per-user leases saved under `data_dir` (`leases/`, `immo_leases/`).
+    pub fn load_user_leases(&self) {
+        let Some(dir) = self.data_dir.as_ref() else {
+            return;
+        };
+        for (sub, store) in [
+            ("leases", &self.user_leases),
+            ("immo_leases", &self.user_immo_leases),
+        ] {
+            let Ok(entries) = std::fs::read_dir(dir.join(sub)) else {
+                continue;
+            };
+            let Ok(mut map) = store.lock() else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let Some(user) = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .and_then(|n| n.strip_suffix(".jwt"))
+                    .filter(|u| valid_user_id(u))
+                else {
+                    continue;
+                };
+                if let Ok(token) = std::fs::read_to_string(&path) {
+                    map.insert(user.to_owned(), token.trim().to_owned());
+                }
+            }
+        }
+    }
+
+    fn user_epoch(&self, user: Option<&str>) -> u64 {
+        user.and_then(|u| self.user_epochs.lock().ok()?.get(u).copied())
+            .unwrap_or(0)
+    }
+
+    fn bump_user_epoch(&self, user: &str) -> u64 {
+        let Ok(mut map) = self.user_epochs.lock() else {
+            return 0;
+        };
+        let epoch = map.entry(user.to_owned()).or_insert(0);
+        *epoch += 1;
+        *epoch
     }
 
     fn allowed_hosts(&self) -> [String; 3] {
@@ -215,6 +273,36 @@ impl Server {
             let _ = l.await;
         }
     }
+}
+
+/// Lease files are readable only by the daemon's user where the OS supports it.
+fn write_private(path: &std::path::Path, data: &str) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?;
+        f.write_all(data.as_bytes())
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, data)
+    }
+}
+
+/// User ids come from cloud-signed pairing tokens; they also name lease files,
+/// so only plain id characters are accepted.
+fn valid_user_id(user: &str) -> bool {
+    !user.is_empty()
+        && user.len() <= 64
+        && user
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 fn reject(why: &str) -> ErrorResponse {
@@ -334,8 +422,11 @@ async fn handle(cfg: Arc<ServerConfig>, stream: TcpStream) {
     };
 
     let mut my_epoch = cfg.lease_epoch.load(Ordering::SeqCst);
+    let mut my_user_epoch = cfg.user_epoch(session.user.as_deref());
     while let Some(text) = next_text(&mut source).await {
-        if cfg.lease_epoch.load(Ordering::SeqCst) != my_epoch {
+        if cfg.lease_epoch.load(Ordering::SeqCst) != my_epoch
+            || cfg.user_epoch(session.user.as_deref()) != my_user_epoch
+        {
             let _ = tx
                 .send(Outbound::Msg(err(
                     request_id_of(&text),
@@ -350,6 +441,9 @@ async fn handle(cfg: Arc<ServerConfig>, stream: TcpStream) {
         if let Some(epoch) = session.adopted_epoch.take() {
             // This connection installed the new lease itself, so it stays open.
             my_epoch = epoch;
+        }
+        if let Some(epoch) = session.adopted_user_epoch.take() {
+            my_user_epoch = epoch;
         }
         if tx.send(Outbound::Msg(reply)).await.is_err() {
             break;
@@ -448,42 +542,14 @@ fn authenticate(
             }
         }
     };
-    let live = cfg
-        .live_lease
-        .lock()
-        .ok()
-        .and_then(|g| g.clone())
-        .or_else(|| cfg.lease_token.clone());
-    let lease = lease::effective_lease_constrained(
-        live.as_deref(),
-        &cfg.keys,
-        now,
-        cfg.device_id.as_deref(),
-        cfg.lease_min_version.load(Ordering::SeqCst),
-    );
-    let immo_token = cfg
-        .live_immo_lease
-        .lock()
-        .ok()
-        .and_then(|g| g.clone())
-        .or_else(|| cfg.immo_lease_token.clone());
-    let immo_lease = match immo_token.as_deref() {
-        None => None,
-        Some(token) => match lease::verify_immo_lease(token, &cfg.keys, now) {
-            Ok(immo) => Some(immo),
-            Err(e) => {
-                tracing::warn!("immo lease rejected ({e})");
-                None
-            }
-        },
-    };
+    let (lease, immo_lease) = leases_for(cfg, user.as_deref(), now);
     let session_id = random_session_id();
     let interlock = Arc::new(SafetyInterlock::new(
         session_id.clone(),
         Arc::clone(&cfg.audit),
     ));
     interlock.set_immo_registry(cfg.immo_registry.clone());
-    interlock.set_identity(user, None);
+    interlock.set_identity(user.clone(), None);
     let hello_resp = m::HelloResponse {
         daemon_version: env!("CARGO_PKG_VERSION")
             .try_into()
@@ -514,8 +580,66 @@ fn authenticate(
         stream_period: cfg.stream_period,
         cfg: Arc::clone(cfg),
         adopted_epoch: None,
+        adopted_user_epoch: None,
+        user,
     };
     Ok((session, hello_resp.into()))
+}
+
+/// The leases a new connection runs under.
+///
+/// A browser session (paired with a cloud token for user U) uses U's own
+/// installed lease. Failing that it may use the machine lease (`lease.jwt`,
+/// `EDGE_LEASE`) only when that lease was issued to U or to no one in
+/// particular (an operator-provisioned lease). A native, code-paired client
+/// uses the machine lease. One technician's paid lease never carries over to
+/// another technician on the same machine.
+fn leases_for(cfg: &ServerConfig, user: Option<&str>, now: u64) -> (Lease, Option<ImmoLease>) {
+    let machine = cfg
+        .live_lease
+        .lock()
+        .ok()
+        .and_then(|g| g.clone())
+        .or_else(|| cfg.lease_token.clone());
+    let own = user.and_then(|u| cfg.user_leases.lock().ok()?.get(u).cloned());
+    let token = match (user, own) {
+        (Some(_), Some(own)) => Some(own),
+        (Some(u), None) => machine.filter(|t| {
+            lease::verify_lease(t.trim(), &cfg.keys, now)
+                .is_ok_and(|l| l.user_id.as_deref().is_none_or(|owner| owner == u))
+        }),
+        (None, _) => machine,
+    };
+    let lease = lease::effective_lease_constrained(
+        token.as_deref(),
+        &cfg.keys,
+        now,
+        cfg.device_id.as_deref(),
+        cfg.lease_min_version.load(Ordering::SeqCst),
+    );
+    let machine_immo = cfg
+        .live_immo_lease
+        .lock()
+        .ok()
+        .and_then(|g| g.clone())
+        .or_else(|| cfg.immo_lease_token.clone());
+    let own_immo = user.and_then(|u| cfg.user_immo_leases.lock().ok()?.get(u).cloned());
+    let candidates = match user {
+        Some(_) => [own_immo, machine_immo],
+        None => [machine_immo, None],
+    };
+    let immo_lease = candidates.into_iter().flatten().find_map(|token| {
+        match lease::verify_immo_lease(&token, &cfg.keys, now) {
+            // Key-learn leases always name their technician.
+            Ok(immo) if user.is_none_or(|u| immo.user_id == u) => Some(immo),
+            Ok(_) => None,
+            Err(e) => {
+                tracing::warn!("immo lease rejected ({e})");
+                None
+            }
+        }
+    });
+    (lease, immo_lease)
 }
 
 /// Token bucket: `rate` requests per second, bursts up to `rate`.
@@ -589,6 +713,10 @@ struct Session {
     cfg: Arc<ServerConfig>,
     /// Set when this connection installed a lease: it adopts the new epoch instead of closing.
     adopted_epoch: Option<u64>,
+    /// Same, for the per-user epoch (browser installs).
+    adopted_user_epoch: Option<u64>,
+    /// Pairing user for browser sessions; None for native, code-paired clients.
+    user: Option<String>,
 }
 
 /// A diagnostic channel on its own port of the virtual or shared physical bus.
@@ -760,17 +888,34 @@ impl Session {
                         "lease is for another device or has been superseded; fetch a new one",
                     );
                 }
-                {
-                    let Ok(mut live) = self.cfg.live_lease.lock() else {
+                if let Some(user) = self.user.clone() {
+                    if let Some(refusal) =
+                        self.check_owner(rid.clone(), &user, lease.user_id.as_deref())
+                    {
+                        return refusal;
+                    }
+                    let Ok(mut map) = self.cfg.user_leases.lock() else {
                         return err(rid, ErrorCode::AdapterError, "lease store unavailable");
                     };
-                    if let Err(e) = self.save("lease.jwt", &token) {
+                    if let Err(e) = self.save(&format!("leases/{user}.jwt"), &token) {
                         return err(rid, ErrorCode::AdapterError, &e);
                     }
-                    *live = Some(token);
+                    map.insert(user.clone(), token);
+                    drop(map);
+                    self.adopted_user_epoch = Some(self.cfg.bump_user_epoch(&user));
+                } else {
+                    {
+                        let Ok(mut live) = self.cfg.live_lease.lock() else {
+                            return err(rid, ErrorCode::AdapterError, "lease store unavailable");
+                        };
+                        if let Err(e) = self.save("lease.jwt", &token) {
+                            return err(rid, ErrorCode::AdapterError, &e);
+                        }
+                        *live = Some(token);
+                    }
+                    let epoch = self.cfg.lease_epoch.fetch_add(1, Ordering::SeqCst) + 1;
+                    self.adopted_epoch = Some(epoch);
                 }
-                let epoch = self.cfg.lease_epoch.fetch_add(1, Ordering::SeqCst) + 1;
-                self.adopted_epoch = Some(epoch);
                 tracing::info!(tier = %constrained.tier, "diagnostic lease installed");
                 self.lease = constrained;
             }
@@ -792,7 +937,19 @@ impl Session {
                         )
                     }
                 };
-                {
+                if let Some(user) = self.user.clone() {
+                    if let Some(refusal) = self.check_owner(rid.clone(), &user, Some(&immo.user_id))
+                    {
+                        return refusal;
+                    }
+                    let Ok(mut map) = self.cfg.user_immo_leases.lock() else {
+                        return err(rid, ErrorCode::AdapterError, "lease store unavailable");
+                    };
+                    if let Err(e) = self.save(&format!("immo_leases/{user}.jwt"), &token) {
+                        return err(rid, ErrorCode::AdapterError, &e);
+                    }
+                    map.insert(user, token);
+                } else {
                     let Ok(mut live) = self.cfg.live_immo_lease.lock() else {
                         return err(rid, ErrorCode::AdapterError, "lease store unavailable");
                     };
@@ -808,14 +965,42 @@ impl Session {
         self.lease_status(r.request_id)
     }
 
+    /// A browser session may only install a lease the cloud issued to its own user.
+    fn check_owner(
+        &self,
+        rid: Option<RequestId>,
+        user: &str,
+        lease_user: Option<&str>,
+    ) -> Option<EdgeMessage> {
+        if !valid_user_id(user) {
+            return Some(err(
+                rid,
+                ErrorCode::TokenInvalid,
+                "pairing user id is not usable",
+            ));
+        }
+        if lease_user != Some(user) {
+            return Some(err(
+                rid,
+                ErrorCode::TokenInvalid,
+                "that lease was issued to a different user; sign in as yourself and fetch your own",
+            ));
+        }
+        None
+    }
+
     /// Atomically writes a lease file under the data directory (no-op without one).
     fn save(&self, name: &str, token: &str) -> Result<(), String> {
         let Some(dir) = self.cfg.data_dir.as_ref() else {
             return Ok(());
         };
-        let tmp = dir.join(format!(".{name}.tmp"));
-        std::fs::write(&tmp, token)
-            .and_then(|()| std::fs::rename(&tmp, dir.join(name)))
+        let path = dir.join(name);
+        let parent = path.parent().unwrap_or(dir);
+        let file = path.file_name().and_then(|n| n.to_str()).unwrap_or("lease");
+        let tmp = parent.join(format!(".{file}.tmp"));
+        std::fs::create_dir_all(parent)
+            .and_then(|()| write_private(&tmp, token))
+            .and_then(|()| std::fs::rename(&tmp, &path))
             .map_err(|e| format!("could not save {name}: {e}"))
     }
 

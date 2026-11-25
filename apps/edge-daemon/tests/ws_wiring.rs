@@ -439,3 +439,170 @@ async fn falcon_service_functions_run_in_extended_session_without_security_acces
     let late = gated(&mut ws, "late", 0x760, 0x768, 0x31, "31010602").await;
     assert_eq!(late["positive"], false, "{late}");
 }
+
+// --- per-technician leases -----------------------------------------------------
+
+fn pairing_for(d: &Daemon, user: &str) -> String {
+    let now = unix_now();
+    jws::sign(
+        &json!({"aud": "edge-ws", "user_id": user, "tenant_id": "t-1", "origin": APP, "iat": now, "exp": now + 240}),
+        "cloud-test",
+        &d.cloud,
+    )
+}
+
+fn user_lease(cloud: &SigningKey, user: Option<&str>, tier: &str, features: &[&str]) -> String {
+    let now = unix_now();
+    let mut claims = json!({"aud": "edge-daemon", "tenant_id": "t-1", "tier": tier, "features": features,
+                            "nbf": now - 60, "exp": now + 3_600});
+    if let Some(u) = user {
+        claims["sub"] = json!(u);
+        claims["user_id"] = json!(u);
+    }
+    jws::sign(&claims, "cloud-test", cloud)
+}
+
+/// A browser session for `user`; returns the socket and its lease tier.
+async fn browser(d: &Daemon, user: &str) -> (Ws, String) {
+    let mut ws = d.app().await;
+    send(&mut ws, &hello(&pairing_for(d, user))).await;
+    let resp = next(&mut ws).await.unwrap();
+    assert_eq!(resp["type"], "HelloResponse", "{resp}");
+    let tier = resp["lease_tier"].as_str().unwrap().to_owned();
+    (ws, tier)
+}
+
+async fn install(ws: &mut Ws, id: &str, kind: &str, token: &str) -> Value {
+    send(
+        ws,
+        &json!({"type": "LeaseInstallRequest", "request_id": id, "kind": kind, "lease_token": token}),
+    )
+    .await;
+    reply(ws, id).await
+}
+
+#[tokio::test]
+async fn browser_leases_are_per_technician() {
+    let dir = std::env::temp_dir().join(format!("edge-peruser-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let dir_for_cfg = dir.clone();
+    let d = start(move |cfg, _| cfg.data_dir = Some(dir_for_cfg)).await;
+    let (mut alice, tier) = browser(&d, "alice-1").await;
+    assert_eq!(tier, "COMMUNITY");
+    let (mut alice_tab, _) = browser(&d, "alice-1").await;
+    let (mut bob, _) = browser(&d, "bob-2").await;
+
+    // Someone else's lease, or one issued to nobody, can't be installed from a browser.
+    let bobs = user_lease(&d.cloud, Some("bob-2"), "WORKSHOP", &["UDS_ACTIVE"]);
+    let st = install(&mut alice, "i0", "DIAGNOSTIC", &bobs).await;
+    assert_eq!(st["code"], "TOKEN_INVALID", "{st}");
+    assert!(st["message"].as_str().unwrap().contains("different user"));
+    let nobodys = user_lease(&d.cloud, None, "WORKSHOP", &["UDS_ACTIVE"]);
+    assert_eq!(
+        install(&mut alice, "i1", "DIAGNOSTIC", &nobodys).await["code"],
+        "TOKEN_INVALID"
+    );
+
+    let alices = user_lease(&d.cloud, Some("alice-1"), "WORKSHOP", &["UDS_ACTIVE"]);
+    let st = install(&mut alice, "i2", "DIAGNOSTIC", &alices).await;
+    assert_eq!(st["lease_tier"], "WORKSHOP", "{st}");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("leases/alice-1.jwt")).unwrap(),
+        alices
+    );
+    assert!(!dir.join("lease.jwt").exists(), "machine lease untouched");
+
+    // Bob's socket stays open and stays on his own (community) tier.
+    send(
+        &mut bob,
+        &json!({"type": "LeaseStatusRequest", "request_id": "b1"}),
+    )
+    .await;
+    assert_eq!(reply(&mut bob, "b1").await["lease_tier"], "COMMUNITY");
+    // Alice's other tab is asked to reconnect to pick up her new lease.
+    send(
+        &mut alice_tab,
+        &json!({"type": "AdapterListRequest", "request_id": "l1"}),
+    )
+    .await;
+    assert_eq!(next(&mut alice_tab).await.unwrap()["code"], "TOKEN_INVALID");
+
+    assert_eq!(browser(&d, "alice-1").await.1, "WORKSHOP");
+    assert_eq!(browser(&d, "bob-2").await.1, "COMMUNITY");
+    // A code-paired native client uses the machine lease (none here).
+    let mut native = d.app().await;
+    send(&mut native, &hello(&d.code())).await;
+    assert_eq!(next(&mut native).await.unwrap()["lease_tier"], "COMMUNITY");
+
+    // After a restart the saved per-user leases are loaded again.
+    let dir_again = dir.clone();
+    let d2 = start(move |cfg, _| {
+        cfg.data_dir = Some(dir_again);
+        cfg.load_user_leases();
+    })
+    .await;
+    assert_eq!(browser(&d2, "alice-1").await.1, "WORKSHOP");
+    assert_eq!(browser(&d2, "bob-2").await.1, "COMMUNITY");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn machine_lease_reaches_browsers_only_when_it_is_theirs() {
+    let d = start(|cfg, cloud| {
+        cfg.lease_token = Some(user_lease(cloud, Some("alice-1"), "PRO", &["UDS_ACTIVE"]));
+    })
+    .await;
+    assert_eq!(browser(&d, "alice-1").await.1, "PRO");
+    assert_eq!(browser(&d, "bob-2").await.1, "COMMUNITY");
+    let mut native = d.app().await;
+    send(&mut native, &hello(&d.code())).await;
+    assert_eq!(next(&mut native).await.unwrap()["lease_tier"], "PRO");
+
+    // An operator-provisioned lease (no user) is machine-wide.
+    let shared = start(|cfg, cloud| {
+        cfg.lease_token = Some(user_lease(cloud, None, "PRO", &["UDS_ACTIVE"]));
+    })
+    .await;
+    assert_eq!(browser(&shared, "bob-2").await.1, "PRO");
+}
+
+#[tokio::test]
+async fn immo_leases_are_per_technician() {
+    let d = start(|_, _| {}).await;
+    let now = unix_now();
+    let immo_for = |user: &str| {
+        jws::sign(
+            &json!({"aud": "edge-daemon", "lease_kind": "immo_lease", "tenant_id": "t-1", "user_id": user,
+                    "session_id": "immo-1", "jti": "j-1", "vin": "SBXTESTVAN0000001", "device_id": "virtual-sandbox-immo",
+                    "device_tier": "dongle", "oem": "sandbox", "operation": "add_key", "aasra_verified": true,
+                    "nbf": now - 10, "exp": now + 600}),
+            "cloud-test",
+            &d.cloud,
+        )
+    };
+    let (mut alice, _) = browser(&d, "alice-1").await;
+    assert_eq!(
+        install(&mut alice, "i1", "IMMO", &immo_for("bob-2")).await["code"],
+        "TOKEN_INVALID"
+    );
+    let st = install(&mut alice, "i2", "IMMO", &immo_for("alice-1")).await;
+    assert!(st["immo_expires_at"].as_str().is_some(), "{st}");
+
+    let (mut bob, _) = browser(&d, "bob-2").await;
+    send(
+        &mut bob,
+        &json!({"type": "LeaseStatusRequest", "request_id": "s"}),
+    )
+    .await;
+    assert_eq!(reply(&mut bob, "s").await["immo_expires_at"], Value::Null);
+    let (mut again, _) = browser(&d, "alice-1").await;
+    send(
+        &mut again,
+        &json!({"type": "LeaseStatusRequest", "request_id": "s"}),
+    )
+    .await;
+    assert!(reply(&mut again, "s").await["immo_expires_at"]
+        .as_str()
+        .is_some());
+}

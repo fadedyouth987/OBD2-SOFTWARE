@@ -59,6 +59,9 @@ pub struct Lease {
     pub rcid: Option<String>,
     /// Monotonic tenant lease generation; older than `EDGE_LEASE_MIN_VERSION` is revoked.
     pub lease_ver: i64,
+    /// Who the cloud issued it to (`user_id`, else `sub`). Browser sessions only
+    /// use leases issued to their own pairing user.
+    pub user_id: Option<String>,
 }
 
 impl Lease {
@@ -73,6 +76,7 @@ impl Lease {
             expires_at: None,
             rcid: None,
             lease_ver: 0,
+            user_id: None,
         }
     }
 
@@ -165,7 +169,15 @@ pub fn verify_lease(token: &str, keys: &KeyRing, now: u64) -> Result<Lease, Toke
         .get("lease_ver")
         .and_then(|v| v.as_i64().or_else(|| v.as_u64().map(|u| u as i64)))
         .unwrap_or(0);
+    let user_id = ["user_id", "sub"].iter().find_map(|name| {
+        claims
+            .get(*name)
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+    });
     Ok(Lease {
+        user_id,
         tenant_id: Some(tenant_id),
         tier,
         features,
@@ -333,6 +345,27 @@ mod tests {
         );
         assert!(
             lease.aasra_verified && lease.has(Feature::UdsActive) && !lease.has(Feature::CanRePro)
+        );
+    }
+
+    #[test]
+    fn lease_records_its_user() {
+        let (key, keys) = setup();
+        let lease = verify_lease(&jws::sign(&lease_claims(), "cloud-1", &key), &keys, NOW).unwrap();
+        assert_eq!(
+            lease.user_id, None,
+            "operator-provisioned lease without a user"
+        );
+        let mut claims = lease_claims();
+        claims["sub"] = json!("u-sub");
+        let lease = verify_lease(&jws::sign(&claims, "cloud-1", &key), &keys, NOW).unwrap();
+        assert_eq!(lease.user_id.as_deref(), Some("u-sub"));
+        claims["user_id"] = json!("u-1");
+        let lease = verify_lease(&jws::sign(&claims, "cloud-1", &key), &keys, NOW).unwrap();
+        assert_eq!(
+            lease.user_id.as_deref(),
+            Some("u-1"),
+            "user_id wins over sub"
         );
     }
 

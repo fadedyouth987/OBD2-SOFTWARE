@@ -13,7 +13,11 @@
 //! `EDGE_LEASE_MIN_VERSION` (leases with a lower `lease_ver` are revoked),
 //! `RUST_LOG` (default `info`). An offline lease is read from
 //! `<data dir>/lease.jwt` when present, and an immobilizer lease from
-//! `<data dir>/immo_lease.jwt` when present. Replacing `lease.jwt` or
+//! `<data dir>/immo_lease.jwt` when present; those machine leases serve
+//! code-paired native clients (and browser users only when issued to them).
+//! Leases installed from the web app are per technician, under
+//! `<data dir>/leases/<user>.jwt` and `<data dir>/immo_leases/<user>.jwt`.
+//! Replacing `lease.jwt` or
 //! `<data dir>/lease.min_ver` bumps the lease epoch and closes open sockets.
 
 use std::{
@@ -86,6 +90,8 @@ async fn serve(dir: PathBuf) -> ExitCode {
     cfg.lease_token = std::fs::read_to_string(dir.join("lease.jwt")).ok();
     cfg.immo_lease_token = std::fs::read_to_string(dir.join("immo_lease.jwt")).ok();
     cfg.data_dir = Some(dir.clone());
+    // Leases browser users installed for themselves (leases/<user>.jwt).
+    cfg.load_user_leases();
     if let Ok(mut immo) = cfg.live_immo_lease.lock() {
         immo.clone_from(&cfg.immo_lease_token);
     }
