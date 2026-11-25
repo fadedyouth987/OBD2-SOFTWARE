@@ -25,6 +25,7 @@ describe("readIdent", () => {
       { label: "VIN", value: "SBXTESTVAN0••••••" },
       { label: "Part number", value: "GEN-ECU-0001" },
     ]);
+    expect(r.missing).toEqual(["Serial number", "Hardware number", "Software version"]);
   });
   it("reads KWP identification", async () => {
     const r = await readIdent(async ({ payloadHex }) => (payloadHex === "1A80" ? reply(true, `5A80${ascii("6943835 CAS3")}`) : reply(false, "7F1A31")), {

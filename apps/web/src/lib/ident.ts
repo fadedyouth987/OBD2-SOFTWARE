@@ -14,6 +14,8 @@ export interface IdentResult {
   fields: IdentField[];
   /** Why nothing was read, when fields is empty. */
   message: string;
+  /** Identifiers the module was asked for but didn't report. */
+  missing?: string[];
 }
 
 export const UDS_IDENT_DIDS: [number, string][] = [
@@ -75,8 +77,10 @@ export async function readIdent(diag: DiagFn, t: ScanTarget): Promise<IdentResul
       }
     }
   }
+  const got = new Set(fields.map((f) => f.label));
   return {
     fields,
     message: fields.length ? "" : lastProblem || "The module doesn't report identification.",
+    missing: fields.length ? list.map(([, l]) => l).filter((l) => !got.has(l)) : [],
   };
 }

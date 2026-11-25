@@ -308,7 +308,13 @@ export default function KeyProgrammingPage() {
                   <Badge tone={elig.checks[k] ? "ok" : "warn"}>{elig.checks[k] ? "Pass" : "Missing"}</Badge>
                   <span>
                     <span className="block font-semibold">{CHECK_TEXT[k].label}</span>
-                    {!elig.checks[k] ? <span className="text-muted">{CHECK_TEXT[k].fix}</span> : null}
+                    {!elig.checks[k] ? (
+                      <span className="text-muted">
+                        {k === "technician" && !elig.checks.feature_enabled
+                          ? "You can enrol once key programming is switched on."
+                          : CHECK_TEXT[k].fix}
+                      </span>
+                    ) : null}
                   </span>
                 </li>
               ))}

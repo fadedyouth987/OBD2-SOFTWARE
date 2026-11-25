@@ -193,3 +193,33 @@ export function mergeDtcs(list: ScanDtc[]): ScanDtc[] {
 }
 
 export { dtcText };
+
+/** The shape the job stores (matches JobDtc in lib/api). */
+export interface RecordedDtc {
+  code: string;
+  module: string;
+  status: string;
+  source: string;
+  description: string;
+  status_byte: number | null;
+}
+
+/**
+ * Combine a fresh scan with the codes already recorded on the job, so a
+ * rescan (for example verifying a clear) never erases what was found:
+ * - codes read now replace the recorded entry for the same code and module;
+ * - a recorded code whose module answered this scan without it is kept as
+ *   "cleared" (it was there earlier this visit, it's gone now);
+ * - codes from modules that didn't answer this time are left as they were.
+ */
+export function mergeJobDtcs(previous: RecordedDtc[], results: ModuleResult[], fresh: RecordedDtc[]): RecordedDtc[] {
+  const answered = new Set(
+    results.filter((r) => r.outcome === "codes" || r.outcome === "clear").map((r) => r.target.module),
+  );
+  const key = (d: { code: string; module: string }) => `${d.module}|${d.code}`;
+  const now = new Set(fresh.map(key));
+  const kept = previous
+    .filter((d) => !now.has(key(d)))
+    .map((d) => (answered.has(d.module) && d.status !== "cleared" ? { ...d, status: "cleared" } : d));
+  return [...fresh, ...kept];
+}

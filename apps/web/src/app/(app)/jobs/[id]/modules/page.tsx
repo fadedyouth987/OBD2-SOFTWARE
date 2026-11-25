@@ -138,14 +138,19 @@ export default function ModulesPage() {
                           </div>
                         ) : id ? (
                           id.fields.length ? (
-                            <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
-                              {id.fields.map((f) => (
-                                <div key={f.label} className="contents">
-                                  <dt className="text-muted">{f.label}</dt>
-                                  <dd className="font-mono">{f.value}</dd>
-                                </div>
-                              ))}
-                            </dl>
+                            <>
+                              <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
+                                {id.fields.map((f) => (
+                                  <div key={f.label} className="contents">
+                                    <dt className="text-muted">{f.label}</dt>
+                                    <dd className="font-mono">{f.value}</dd>
+                                  </div>
+                                ))}
+                              </dl>
+                              {id.missing?.length ? (
+                                <p className="mt-1 text-[11px] text-faint">Not reported by this module: {id.missing.join(", ")}.</p>
+                              ) : null}
+                            </>
                           ) : (
                             <p className="mt-2 text-xs text-muted">{id.message}</p>
                           )

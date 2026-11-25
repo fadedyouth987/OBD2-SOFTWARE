@@ -8,7 +8,7 @@ import { useAuth } from "@/context/auth";
 import { useJob } from "@/context/job";
 import { api, ApiError, type CopilotAnswer, type DiagnosisResult } from "@/lib/api";
 import { describeDtc } from "@/lib/dtc-library";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, safetyTierLabel } from "@/lib/format";
 
 interface Turn {
   q: string;
@@ -165,7 +165,7 @@ export default function CopilotPage() {
                         {c.guided_steps.map((s, j) => (
                           <li key={j}>
                             <span className="font-semibold text-text">{s.step}</span>: {s.action}
-                            {s.safety_tier ? <Badge tone="warn">Tier {s.safety_tier}</Badge> : null}
+                            {s.safety_tier ? <Badge tone={safetyTierLabel(s.safety_tier).tone}>{safetyTierLabel(s.safety_tier).label}</Badge> : null}
                           </li>
                         ))}
                       </ol>

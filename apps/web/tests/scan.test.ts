@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EdgeRequestError } from "@/lib/edge-client";
-import { mergeDtcs, parseKwpDtcs, scanModule, scanTargets, type DiagFn } from "@/lib/scan";
+import { mergeDtcs, mergeJobDtcs, parseKwpDtcs, scanModule, scanTargets, type DiagFn } from "@/lib/scan";
 
 const ok = (hex: string) => ({ type: "DiagCommandResponse" as const, request_id: "x", positive: true, response_hex: hex, nrc: null });
 const nrc = (sid: number, code: number) => ({
@@ -79,5 +79,23 @@ describe("mergeDtcs", () => {
     expect(m).toHaveLength(1);
     expect(m[0].status).toBe("confirmed");
     expect(m[0].source).toBe("A, B");
+  });
+});
+
+describe("mergeJobDtcs", () => {
+  const rec = (code: string, module: string, status = "confirmed") => ({ code, module, status, source: "UDS 19 02", description: "", status_byte: null });
+  const res = (module: string, outcome: "codes" | "clear" | "no_response") =>
+    ({ target: { module, tx: 0x7e0, rx: 0x7e8, protocol: "UDS", obd: false }, outcome, dtcs: [], message: "" }) as never;
+  it("keeps codes that a verification rescan no longer sees, marked cleared", () => {
+    const merged = mergeJobDtcs([rec("P0171", "PCM"), rec("C1145", "ABS")], [res("PCM", "clear"), res("ABS", "clear")], []);
+    expect(merged.map((d) => [d.code, d.status])).toEqual([["P0171", "cleared"], ["C1145", "cleared"]]);
+  });
+  it("replaces codes read again and leaves silent modules alone", () => {
+    const merged = mergeJobDtcs(
+      [rec("P0171", "PCM", "pending"), rec("C1145", "ABS")],
+      [res("PCM", "codes"), res("ABS", "no_response")],
+      [rec("P0171", "PCM", "confirmed")],
+    );
+    expect(merged.map((d) => [d.code, d.status])).toEqual([["P0171", "confirmed"], ["C1145", "confirmed"]]);
   });
 });

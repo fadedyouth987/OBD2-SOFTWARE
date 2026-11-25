@@ -71,6 +71,16 @@ export function formatNumber(value: number, digits = 0): string {
 
 /** A sensor reading with sensible precision for its magnitude. */
 export function formatReading(value: number): string {
+  // Whole numbers (0 rpm, 20 °C) read better without trailing zeros.
+  if (Number.isInteger(value)) return formatNumber(value, 0);
   const a = Math.abs(value);
   return formatNumber(value, a >= 100 ? 0 : a >= 10 ? 1 : 2);
+}
+
+/** Plain-English label for a guided-step safety tier ("SILENT", "TIER A", "TIER A / B"). */
+export function safetyTierLabel(tier: string): { label: string; tone: "ok" | "warn" } {
+  const t = tier.trim().toUpperCase().replace(/_/g, " ");
+  if (t === "SILENT" || t === "READ ONLY") return { label: "Read-only", tone: "ok" };
+  const parts = t.replace(/^TIER\s*/, "").split(/\s*\/\s*/).map((p) => p.replace(/^TIER\s*/, ""));
+  return { label: `Confirm · Tier ${parts.join("/")}`, tone: "warn" };
 }

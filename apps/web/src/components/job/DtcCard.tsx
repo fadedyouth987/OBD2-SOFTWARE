@@ -12,7 +12,7 @@ import { useJob } from "@/context/job";
 import { hexId, udsStatusWords } from "@/lib/diag";
 import { describeDtc } from "@/lib/dtc-library";
 import { formatTime } from "@/lib/format";
-import { scanModule, type ModuleResult, type ScanTarget } from "@/lib/scan";
+import { mergeJobDtcs, scanModule, type ModuleResult, type ScanTarget } from "@/lib/scan";
 import type { JobDtc } from "@/lib/api";
 
 const STATUS_TONE: Record<string, Tone> = {
@@ -21,6 +21,7 @@ const STATUS_TONE: Record<string, Tone> = {
   permanent: "warn",
   pending: "warn",
   history: "neutral",
+  cleared: "ok",
 };
 
 const OUTCOME: Record<ModuleResult["outcome"], [Tone, string]> = {
@@ -45,6 +46,8 @@ export function DtcCard() {
   const [clearBusy, setClearBusy] = useState(false);
   const [clearError, setClearError] = useState<string | null>(null);
   const [clearResults, setClearResults] = useState<GatedResult[] | null>(null);
+  // How many steps the clear was asked to run; the step list is rebuilt from the verification rescan.
+  const [clearExpected, setClearExpected] = useState(0);
   const autoScanned = useRef(false);
 
   const connected = edge.ready && edge.link?.state === "CONNECTED";
@@ -77,7 +80,7 @@ export function DtcCard() {
       );
       if (job.status === "OPEN") {
         try {
-          await update({ dtcs });
+          await update({ dtcs: mergeJobDtcs(job.dtcs ?? [], results, dtcs) });
         } catch (e) {
           setSaveError(e instanceof Error ? e.message : "Couldn't save the codes to the job.");
         }
@@ -113,6 +116,7 @@ export function DtcCard() {
   const doClear = async () => {
     setClearBusy(true);
     setClearError(null);
+    setClearExpected(clearSteps.length);
     const results = await run(
       clearSteps,
       `Clear diagnostic trouble codes on ${modules.join(", ")}. Freeze-frame data and readiness monitors reset.`,
@@ -186,13 +190,15 @@ export function DtcCard() {
         {scanError ? <Banner tone="warn">{scanError}</Banner> : null}
         {saveError ? <Banner tone="danger" title="Codes read but not saved">{saveError}</Banner> : null}
         {clearResults && !clearOpen ? (
-          clearResults.every((r) => r.ok) && clearResults.length === clearSteps.length ? (
+          clearResults.every((r) => r.ok) && clearResults.length === clearExpected ? (
             <Banner tone="ok" title="Codes cleared">
               Every module confirmed the clear. The scan above shows what&apos;s left (codes can return if the fault is still there).
             </Banner>
           ) : (
             <Banner tone="danger" title="Not every module cleared">
-              {clearResults.filter((r) => !r.ok).map((r) => `${r.step.module}: ${r.message}`).join(" ") || clearError}
+              {clearResults.filter((r) => !r.ok).map((r) => `${r.step.module}: ${r.message}`).join(" ") ||
+                clearError ||
+                "Stopped before every module was cleared. Scan again to see what's left."}
             </Banner>
           )
         ) : null}
