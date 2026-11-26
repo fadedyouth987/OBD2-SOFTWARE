@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from app.api.deps import RequirePrincipal
-from app.api.v1.sessions import list_published_cases
+from app.api.v1.sessions import find_similar_cases
 from app.db.models import DiagnosticSession
 from app.db.session import tenant_session
 from app.db.vin import wmi_vds
@@ -39,10 +39,12 @@ log = logging.getLogger(__name__)
 
 
 class DiagnoseRequest(BaseModel):
+    """Only what the technician knows. Circuit nodes and resolved cases are always
+    looked up here, never taken from the client, so the model can only cite real
+    evidence (A-CEO-1, A-DES-4)."""
+
     dtcs: list[str]
     vehicle_profile: str = "generic_obd2_uds"
-    shared_graph_nodes: list[str] | None = None
-    matched_cases: list[dict[str, Any]] | None = None
 
 
 class FollowupRequest(BaseModel):
@@ -188,15 +190,11 @@ def run_diagnosis(
     session_id: str, req: DiagnoseRequest, principal: RequirePrincipal
 ) -> dict[str, Any]:
     inc("ai_diagnose_requests")
-    cases = (
-        req.matched_cases
-        if req.matched_cases is not None
-        else list_published_cases(principal.tenant_id, req.dtcs)
-    )
+    engine_family = str(get_vehicle_platform(req.vehicle_profile).get("engine") or "")
+    cases = find_similar_cases(principal.tenant_id, req.dtcs, engine_family)
     rules = diagnose_session(
         session_id=session_id,
         dtcs=req.dtcs,
-        shared_graph_nodes=req.shared_graph_nodes,
         matched_cases=cases,
         vehicle_profile=req.vehicle_profile,
     )

@@ -8,6 +8,9 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import Text, literal, text
+from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import RequirePrincipal
@@ -21,7 +24,7 @@ from app.db.models import (
 from app.db.session import tenant_session
 from app.observability.metrics import inc
 from app.services.anonymizer import anonymize_audit_entry, anonymize_case, anonymize_telemetry_row
-from app.services.embeddings import EMBEDDING_MODEL, embed_canonical_text
+from app.services.embeddings import EMBEDDING_MODEL, cosine_similarity, embed_canonical_text
 
 router = APIRouter(prefix="/api/v1", tags=["sessions"])
 
@@ -97,6 +100,51 @@ def list_published_cases(tenant_id: UUID, dtcs: list[str] | None = None) -> list
         return items
     wanted = {d.upper() for d in dtcs}
     return [c for c in items if any(str(code).upper() in wanted for code in c.get("dtcs", []))]
+
+
+CASE_MATCH_LIMIT = 5
+# Second-pass ceiling when the indexed search comes back short (A-ENG-7).
+_WIDEN_CANDIDATES = 500
+
+
+def case_query_text(engine_family: str, dtcs: list[str]) -> str:
+    """The text a case is embedded from at publish time, minus what a diagnosis can't know."""
+    return " ".join(["", engine_family or "", " ".join(dtcs), ""])
+
+
+def find_similar_cases(
+    tenant_id: UUID,
+    dtcs: list[str],
+    engine_family: str = "",
+    limit: int = CASE_MATCH_LIMIT,
+    engine: Engine | None = None,
+) -> list[dict[str, Any]]:
+    """The resolved cases closest to this diagnosis, found server-side (A-ENG-7).
+
+    Eligible cases share at least one DTC. A filtered HNSW search can return
+    fewer rows than exist, so iterative index scans are switched on (pgvector
+    0.8+; a harmless placeholder setting on older versions) and, if the result
+    is still short, a second exact pass ranks every eligible row.
+    """
+    wanted = sorted({d.strip().upper() for d in dtcs if d and d.strip()})
+    if not wanted:
+        return []
+    query_vec = embed_canonical_text(case_query_text(engine_family, wanted))
+    with tenant_session(tenant_id, engine) as store:
+        store.execute(text("SELECT set_config('hnsw.iterative_scan', 'relaxed_order', true)"))
+        eligible = store.query(ResolvedCase).filter(
+            ResolvedCase.embedding.isnot(None),
+            ResolvedCase.dtcs.op("&&")(literal(wanted, PG_ARRAY(Text))),
+        )
+        rows = (
+            eligible.order_by(ResolvedCase.embedding.cosine_distance(query_vec)).limit(limit).all()
+        )
+        if len(rows) < limit:
+            candidates = eligible.limit(_WIDEN_CANDIDATES).all()
+            if len(candidates) > len(rows):
+                candidates.sort(key=lambda r: -cosine_similarity(list(r.embedding), query_vec))
+                rows = candidates[:limit]
+        return [_case_to_dict(r) for r in rows]
 
 
 def _case_to_dict(row: ResolvedCase) -> dict[str, Any]:

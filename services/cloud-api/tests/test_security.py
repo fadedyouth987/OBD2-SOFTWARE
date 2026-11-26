@@ -376,6 +376,47 @@ def test_session_sync_and_case_publish_round_trip(client: TestClient):
 
 
 @pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
+def test_sync_partial_failure_leaves_nothing_and_retry_succeeds(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+):
+    """A-CEO-2: a batch that fails part-way commits nothing, so the edge keeps its
+    watermark and the retry with the same batch_id is accepted exactly once."""
+    import app.api.v1.sessions as sessions
+
+    headers = _auth(_dev_session(client)["access_token"])
+    edge_session = f"sess-partial-{uuid.uuid4().hex[:10]}"
+    batch = {
+        "batch_id": f"batch-{uuid.uuid4()}",
+        "session_id": edge_session,
+        "watermark_us": 5000,
+        "telemetry_rows": [{"pid": 12, "value": 800, "name": "rpm"}],
+        "audit_entries": [{"seq": 1, "action": "0x14", "status": "APPROVED"}],
+    }
+    real = sessions.anonymize_audit_entry
+
+    def fail_after_telemetry(entry):
+        raise RuntimeError("database went away mid-batch")
+
+    monkeypatch.setattr(sessions, "anonymize_audit_entry", fail_after_telemetry)
+    with pytest.raises(RuntimeError):
+        client.post("/api/v1/sessions/sync", json=batch, headers=headers)
+    # Nothing from the failed attempt was kept: no session, so no watermark moved.
+    assert client.get(f"/api/v1/sessions/{edge_session}", headers=headers).status_code == 404
+
+    monkeypatch.setattr(sessions, "anonymize_audit_entry", real)
+    retry = client.post("/api/v1/sessions/sync", json=batch, headers=headers)
+    assert retry.status_code == 200, retry.text
+    assert retry.json()["status"] == "accepted"
+    assert retry.json()["telemetry_ingested"] == 1 and retry.json()["audit_ingested"] == 1
+    again = client.post("/api/v1/sessions/sync", json=batch, headers=headers)
+    assert again.json()["status"] == "duplicate_ignored"
+    assert (
+        client.get(f"/api/v1/sessions/{edge_session}", headers=headers).json()["watermark_us"]
+        == 5000
+    )
+
+
+@pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
 def test_dev_login_disabled_is_404(client: TestClient, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("AUTH_ALLOW_DEV_LOGIN", "false")
     res = client.post("/api/v1/auth/dev-session", json={"email": "nope@localhost"})

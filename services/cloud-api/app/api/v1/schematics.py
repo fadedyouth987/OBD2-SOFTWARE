@@ -35,7 +35,7 @@ from app.services.permissions import Permission, require_own_or
 router = APIRouter(prefix="/api/v1/schematics", tags=["schematics"])
 
 MAX_BYTES = 25 * 1024 * 1024
-MAX_PAGES = 300
+MAX_PAGES = 200  # A-ENG-8: same cap as the ingest worker
 
 _TYPES = {
     "application/pdf": "pdf",
