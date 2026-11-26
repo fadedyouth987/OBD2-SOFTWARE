@@ -37,7 +37,7 @@
   --faint: #56637a;
   --accent: #c01822;
   --blue: #0b5ad9;
-  --blue-ink: #0b5ad9;
+  --blue-ink: #0a4fc0;
   --danger-ink: #b91c1c;
   --accent-ink: #c01822;
   --ok: #047857;
@@ -106,7 +106,7 @@ body {
     --ok: #047857;
     --warn: #92400e;
     --danger: #b91c1c;
-    --blue-ink: #0b5ad9;
+    --blue-ink: #0a4fc0;
     --danger-ink: #b91c1c;
     --accent-ink: #c01822;
     color-scheme: light;

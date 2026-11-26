@@ -79,7 +79,7 @@ export default function ReportPage() {
   return (
     <main className="mx-auto max-w-3xl space-y-4 p-6 print:max-w-none print:p-0">
       <div className="no-print flex flex-wrap items-center justify-between gap-2">
-        <Link href={`/jobs/${job.id}${draft ? "/closeout" : ""}`} className="text-sm underline">
+        <Link href={`/jobs/${job.id}${draft ? "/closeout" : ""}`} className="inline-flex min-h-[44px] items-center text-sm underline">
           ← Back to the job
         </Link>
         <Button size="sm" onClick={() => window.print()}>

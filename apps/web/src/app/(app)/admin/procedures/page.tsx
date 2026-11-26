@@ -81,7 +81,7 @@ export default function AdminProceduresPage() {
                 type="file"
                 accept="application/json,.json"
                 disabled={Boolean(busy)}
-                className="text-sm file:mr-3 file:min-h-[40px] file:rounded-lg file:border file:border-line file:bg-panel file:px-3 file:text-sm file:font-semibold file:text-text"
+                className="text-sm file:mr-3 file:min-h-[44px] file:rounded-lg file:border file:border-line file:bg-panel file:px-3 file:text-sm file:font-semibold file:text-text"
                 onChange={(e) => {
                   const f = e.target.files?.[0];
                   if (f) void importFile(f);

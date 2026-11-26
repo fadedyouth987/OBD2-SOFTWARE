@@ -100,7 +100,7 @@ export default function CanStudioPage() {
 
   const leaseProblem =
     access === "lease_missing" ? (
-      <Banner tone="warn" title="The daemon's lease doesn't include CAN Studio yet" action={<Link className="text-sm font-semibold underline" href="/devices#lease">Refresh lease</Link>}>
+      <Banner tone="warn" title="The daemon's lease doesn't include CAN Studio yet" action={<Link className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center text-sm font-semibold underline" href="/devices#lease">Refresh lease</Link>}>
         The daemon only streams raw frames with a lease that includes it. Refresh the lease, then reconnect the vehicle.
       </Banner>
     ) : null;

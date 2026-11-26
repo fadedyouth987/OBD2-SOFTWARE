@@ -320,7 +320,7 @@ export default function KeyProgrammingPage() {
                     <legend className="text-xs font-semibold text-muted">Procedure</legend>
                     {profiles.profiles.map((p) => (
                       <label key={p.profile_id} className="flex min-h-[44px] items-center gap-2 text-sm">
-                        <input type="radio" name="profile" checked={profile?.profile_id === p.profile_id} onChange={() => setProfile(p)} />
+                        <input type="radio" name="profile" className="h-5 w-5" checked={profile?.profile_id === p.profile_id} onChange={() => setProfile(p)} />
                         {p.oem} · {OPERATION_LABEL[p.operation] ?? p.operation}
                       </label>
                     ))}

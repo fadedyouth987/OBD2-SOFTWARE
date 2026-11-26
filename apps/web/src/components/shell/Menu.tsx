@@ -53,7 +53,7 @@ export function Menu({
         aria-controls={id}
         onClick={() => setOpen((o) => !o)}
         className={cx(
-          "inline-flex min-h-[40px] items-center gap-2 rounded-lg border border-line bg-raised px-2.5 text-xs font-semibold hover:border-muted",
+          "inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-line bg-raised px-2.5 text-xs font-semibold hover:border-muted",
           buttonClassName,
         )}
       >
@@ -89,7 +89,7 @@ export function MenuItem({
       data-menu-item
       disabled={disabled}
       onClick={onSelect}
-      className="flex min-h-[40px] w-full items-center gap-2 rounded-md px-2.5 text-left text-sm hover:bg-raised disabled:opacity-50"
+      className="flex min-h-[44px] w-full items-center gap-2 rounded-md px-2.5 text-left text-sm hover:bg-raised disabled:opacity-50"
     >
       {children}
     </button>

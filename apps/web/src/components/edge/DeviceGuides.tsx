@@ -66,7 +66,7 @@ export function DeviceGuides() {
       <div className="space-y-2">
         {GUIDES.map((g) => (
           <details key={g.group} className="rounded-lg border border-line bg-raised p-3">
-            <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-sm font-semibold">
+            <summary className="flex min-h-[44px] cursor-pointer flex-wrap items-center gap-2 text-sm font-semibold">
               {GROUP_TITLE[g.group]}
               {adapters ? (
                 count(g.group) ? <Badge tone="ok">{count(g.group)} found</Badge> : <Badge>none found</Badge>

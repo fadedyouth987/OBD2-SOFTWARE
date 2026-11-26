@@ -69,7 +69,7 @@ export function AdapterPicker({ onConnected }: { onConnected?: (a: AdapterInfo |
               checked={active && activeAccess === "available"}
               disabled={activeAccess !== "available"}
               onChange={(e) => setActive(e.target.checked)}
-              className="h-4 w-4"
+              className="h-5 w-5"
             />
             Allow confirmed actions (Active mode)
           </label>

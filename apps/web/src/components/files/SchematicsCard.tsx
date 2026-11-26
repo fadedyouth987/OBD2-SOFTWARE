@@ -217,7 +217,7 @@ export function SchematicsCard({
                 id="schematic-file"
                 type="file"
                 accept={ACCEPT}
-                className="mt-1 block w-full text-sm file:mr-3 file:min-h-[40px] file:rounded-lg file:border file:border-line file:bg-panel file:px-3 file:text-sm file:font-semibold file:text-text"
+                className="mt-1 block w-full text-sm file:mr-3 file:min-h-[44px] file:rounded-lg file:border file:border-line file:bg-panel file:px-3 file:text-sm file:font-semibold file:text-text"
                 onChange={(e) => setFile(e.target.files?.[0] ?? null)}
               />
             </div>

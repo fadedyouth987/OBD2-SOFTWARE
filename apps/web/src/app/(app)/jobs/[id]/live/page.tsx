@@ -9,6 +9,7 @@ import { PID_WINDOW_MS, useEdge, type PidSeries } from "@/context/edge";
 import { useJob } from "@/context/job";
 import { formatNumber, formatReading } from "@/lib/format";
 import { ensureSyncSession, syncBatch, type TelemetryRow } from "@/lib/job-sync";
+import { useNow } from "@/lib/use-now";
 
 const DEFAULT_CHARTS = [0x0c, 0x0d, 0x05, 0x06];
 const WINDOWS = [
@@ -17,6 +18,8 @@ const WINDOWS = [
   { ms: 120_000, label: "2 min" },
 ];
 const FLUSH_MS = 5_000;
+/** No sample for this long while connected counts as a stalled stream (A-DES-2). */
+const STALL_MS = 2_000;
 
 function pidLabel(pid: number) {
   return `0x${pid.toString(16).toUpperCase().padStart(2, "0")}`;
@@ -41,7 +44,8 @@ export default function LivePage() {
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const series: PidSeries[] = useMemo(() => [...(edge.pidHistory.current?.values() ?? [])].sort((a, b) => a.pid - b.pid), [edge.pidTick, edge.pidHistory]);
-  const now = paused ?? Date.now();
+  const clock = useNow(250);
+  const now = paused ?? clock;
 
   useEffect(() => {
     if (!recording) return;
@@ -93,17 +97,27 @@ export default function LivePage() {
 
   if (!connected) {
     return (
-      <EmptyState title="No live data" action={<Link href="/devices" className="text-sm font-semibold text-accent-ink underline">Connect a device</Link>}>
+      <EmptyState title="No live data" action={<Link href="/devices" className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center text-sm font-semibold text-accent-ink underline">Connect a device</Link>}>
         Live data streams while a vehicle is connected. {edge.ready ? "Choose an adapter on Devices." : "The diagnostic daemon isn't connected."}
       </EmptyState>
     );
   }
 
+  const stalledFor = edge.lastSampleAt !== null ? clock - edge.lastSampleAt : null;
+  const stalled = !paused && stalledFor !== null && stalledFor > STALL_MS;
   const bySeries = new Map(series.map((s) => [s.pid, s]));
   const chartSeries = charts.map((pid) => bySeries.get(pid)).filter(Boolean) as PidSeries[];
 
   return (
     <div className="space-y-4">
+      {stalled ? (
+        <Banner tone="warn" title="Live data has stopped">
+          No new readings for {Math.round((stalledFor ?? 0) / 1000)} s. The charts show the last values received. Check the
+          adapter is still plugged in and the ignition is on.
+        </Banner>
+      ) : edge.lastSampleAt === null ? (
+        <Banner tone="info">Waiting for the first reading from the vehicle…</Banner>
+      ) : null}
       <Card
         title="Live data"
         subtitle={`${series.length} PID${series.length === 1 ? "" : "s"} streaming from ${edge.link?.adapter?.display_name ?? edge.link?.adapterId}`}

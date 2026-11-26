@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
+import { useNow } from "@/lib/use-now";
 import { useAuth } from "@/context/auth";
 import { useEdge, type DiagRequest } from "@/context/edge";
 import { EdgeRequestError } from "@/lib/edge-client";
@@ -32,11 +33,21 @@ export function tierFor(req: DiagRequest): "A" | "B" | null {
 }
 
 export function useLiveReadings(): LiveReadings {
-  const { pids, link } = useEdge();
+  const { pids, pidSeenAt, link } = useEdge();
+  const now = useNow(500);
+  const age = (pid: number) => {
+    const at = pidSeenAt.get(pid);
+    return at === undefined ? null : Math.max(0, now - at);
+  };
+  const batteryPid = pids.get(0x42);
   return {
     speedKmh: pids.get(0x0d)?.value ?? null,
     rpm: pids.get(0x0c)?.value ?? null,
-    batteryV: pids.get(0x42)?.value ?? link?.batteryV ?? null,
+    batteryV: batteryPid?.value ?? link?.batteryV ?? null,
+    speedAgeMs: age(0x0d),
+    rpmAgeMs: age(0x0c),
+    // Adapter-reported voltage arrives with AdapterStatus and has no sample time.
+    batteryAgeMs: batteryPid ? age(0x42) : null,
   };
 }
 

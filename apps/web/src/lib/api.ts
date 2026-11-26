@@ -23,6 +23,18 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Server errors (5xx) show the API's detail only when it reads as a short plain
+ * sentence (e.g. a 503 "payments aren't configured"); an unhandled 500, or
+ * anything that looks like a stack trace or debug text, gets the fallback.
+ */
+export function serverErrorMessage(status: number, detail: unknown, fallback: string): string {
+  if (status === 500) return fallback;
+  const msg = detailMessage(detail, fallback);
+  const debugLike = /traceback|exception|\bfile "|\n|\bat \w+\.|stack/i.test(msg);
+  return msg.length > 200 || debugLike ? fallback : msg;
+}
+
 /** Turns FastAPI's `detail` (string, object or validation list) into one sentence. */
 export function detailMessage(detail: unknown, fallback: string): string {
   if (typeof detail === "string" && detail.trim()) return detail;
@@ -86,7 +98,8 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
         : res.status >= 500
           ? `The cloud API had a problem (HTTP ${res.status}). Try again shortly.`
           : `Request failed (HTTP ${res.status}).`;
-    throw new ApiError(res.status, detailMessage(detail, fallback), detail);
+    const message = res.status >= 500 ? serverErrorMessage(res.status, detail, fallback) : detailMessage(detail, fallback);
+    throw new ApiError(res.status, message, detail);
   }
   return data as T;
 }
@@ -578,7 +591,9 @@ export async function apiBlob(path: string, token: string | null): Promise<Blob>
     } catch {
       /* not JSON */
     }
-    throw new ApiError(res.status, detailMessage(detail, `Couldn't open the file (HTTP ${res.status}).`), detail);
+    const fallback = `Couldn't open the file (HTTP ${res.status}).`;
+    const message = res.status >= 500 ? serverErrorMessage(res.status, detail, fallback) : detailMessage(detail, fallback);
+    throw new ApiError(res.status, message, detail);
   }
   return res.blob();
 }

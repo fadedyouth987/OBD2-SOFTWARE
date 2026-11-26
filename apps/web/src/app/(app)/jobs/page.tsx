@@ -69,7 +69,7 @@ export default function JobsPage() {
                 aria-selected={filter === f}
                 onClick={() => setFilter(f)}
                 className={cx(
-                  "min-h-[36px] rounded-md px-3 text-xs font-semibold",
+                  "min-h-[44px] min-w-[44px] rounded-md px-3 text-xs font-semibold",
                   filter === f ? "bg-raised text-text" : "text-muted hover:text-text",
                 )}
               >
@@ -84,7 +84,7 @@ export default function JobsPage() {
               placeholder="Search vehicle, customer, code…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="min-h-[40px] w-64 rounded-lg border border-line bg-bg px-3 text-sm text-text placeholder:text-faint"
+              className="min-h-[44px] w-64 rounded-lg border border-line bg-bg px-3 text-sm text-text placeholder:text-faint"
             />
           </label>
         </div>

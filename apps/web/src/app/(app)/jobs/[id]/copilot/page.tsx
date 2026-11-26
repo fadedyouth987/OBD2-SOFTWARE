@@ -37,7 +37,7 @@ function QuotaUsedUp({ canUpgrade }: { canUpgrade: boolean }) {
       title="This month's AI diagnoses are used up"
       action={
         canUpgrade ? (
-          <Link href="/workshop/billing" className="text-sm font-semibold underline">
+          <Link href="/workshop/billing" className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center text-sm font-semibold underline">
             Upgrade
           </Link>
         ) : undefined
@@ -153,7 +153,7 @@ export default function CopilotPage() {
             {!codes.length ? (
               <EmptyState
                 title="No codes to diagnose"
-                action={<Link href={`/jobs/${job.id}`} className="text-sm font-semibold text-accent-ink underline">Scan on Overview</Link>}
+                action={<Link href={`/jobs/${job.id}`} className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center text-sm font-semibold text-accent-ink underline">Scan on Overview</Link>}
               >
                 Scan the vehicle first. With no stored codes, ask the Copilot about the symptoms instead.
               </EmptyState>

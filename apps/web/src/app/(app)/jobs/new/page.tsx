@@ -166,7 +166,7 @@ export default function NewJobPage() {
               tone="info"
               title="This connection already belongs to an open job"
               action={
-                <Link href={`/jobs/${existing.id}`} className="text-sm font-semibold underline">
+                <Link href={`/jobs/${existing.id}`} className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center text-sm font-semibold underline">
                   Continue {existing.vehicle_label || "that job"}
                 </Link>
               }

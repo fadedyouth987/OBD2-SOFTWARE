@@ -82,7 +82,7 @@ export function LeaseCard() {
             It has no RootCause cloud key built in, so it stays on the free read-only tier whatever your plan is.
             Install the production edge daemon to use paid features.
             <details className="mt-2 text-xs">
-              <summary className="cursor-pointer">For developers</summary>
+              <summary className="min-h-[44px] cursor-pointer py-3 leading-5">For developers</summary>
               Debug builds can trust the local API&apos;s key: set EDGE_DEV_CLOUD_KEYS from
               scripts/dev_cloud_keys.py and restart the daemon. Release builds ignore it.
             </details>
