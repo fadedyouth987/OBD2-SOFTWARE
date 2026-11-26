@@ -40,7 +40,7 @@
   --blue-ink: #0a4fc0;
   --danger-ink: #b91c1c;
   --accent-ink: #c01822;
-  --ok: #047857;
+  --ok: #046c4e;
   --warn: #92400e;
   --danger: #b91c1c;
   --ok-soft: rgb(4 120 87 / 0.12);
@@ -103,7 +103,7 @@ body {
     --faint: #555555;
     --accent: #c01822;
     --blue: #0b5ad9;
-    --ok: #047857;
+    --ok: #046c4e;
     --warn: #92400e;
     --danger: #b91c1c;
     --blue-ink: #0a4fc0;

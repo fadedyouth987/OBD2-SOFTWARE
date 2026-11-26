@@ -7,6 +7,7 @@ AI-assisted vehicle diagnostics for Australian workshops: a local Rust edge daem
 - Build status and deferred gates: [`docs/status.md`](docs/status.md)
 - Edge WebSocket protocol: [`docs/protocol.md`](docs/protocol.md) (generated from `packages/schemas/edge_ws.schema.json`)
 - Plan review: [`docs/reviews/2026-11-19-autoplan-review.md`](docs/reviews/2026-11-19-autoplan-review.md)
+- Operations: [`docs/runbooks/`](docs/runbooks/) (alerts in `infra/monitoring/alerts.yml`)
 
 ## Quickstart
 
@@ -17,6 +18,7 @@ just bootstrap     # install all dependencies, create .env from .env.example
 just infra-gate    # start Postgres, Neo4j, Redis and S3 storage, then verify them
 just test          # every test suite
 just dev           # infrastructure + API (localhost:8000) + web app (localhost:3000)
+just e2e           # web end-to-end tests (Playwright; no infrastructure needed)
 ```
 
 Target: a fresh checkout reaches a passing `just infra-gate` within 15 minutes. CI checks this on every push (`.github/workflows/quickstart.yml`). Once Tasks 1.4 and 4.1 land, the target becomes the first live stream from the virtual vehicle.
@@ -28,6 +30,7 @@ No Docker? See [`docs/dev/no-docker.md`](docs/dev/no-docker.md).
 ```bash
 cargo run -p edge-daemon             # serves ws://127.0.0.1:8765 (loopback only)
 cargo run -p edge-daemon -- pair     # prints a 6-digit pairing code (single use, 2 minutes)
+cargo run -p edge-daemon -- diagnostics   # writes a redacted support bundle (no VIN serials, tokens or keys)
 ```
 
 Settings: `EDGE_ALLOWED_ORIGINS` (default `http://localhost:3000`), `EDGE_PORT`, `EDGE_DATA_DIR`. Clients send the code in `HelloRequest`; see [`docs/protocol.md`](docs/protocol.md). The virtual vehicles (`virtual-generic-uds` and friends) stream live data with no hardware attached.

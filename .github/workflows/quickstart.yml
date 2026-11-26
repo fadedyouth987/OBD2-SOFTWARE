@@ -39,6 +39,11 @@ jobs:
         run: cd apps/web && pnpm build
         env:
           NEXT_TELEMETRY_DISABLED: "1"
+      # A-DES gates: session flow, state table, copilot evidence, axe + 44 px targets.
+      - name: Install Playwright Chromium
+        run: cd apps/web && pnpm exec playwright install --with-deps chromium
+      - name: Web end-to-end tests
+        run: cd apps/web && pnpm e2e --trace off
 
   # A-ENG-1: the J2534 bridge is a 32-bit Windows process. Build it for
   # i686-pc-windows-msvc and run its round trip through the daemon's adapter.

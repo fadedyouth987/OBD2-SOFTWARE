@@ -60,6 +60,10 @@ test:
     cd apps/web && pnpm typecheck
     cd apps/web && pnpm test
 
+# Web end-to-end tests for the A-DES gates (builds first; no infrastructure needed)
+e2e:
+    cd apps/web && pnpm build && pnpm e2e --trace off
+
 # Lint and format checks across all languages, plus generated-code drift
 lint: codegen-check
     cargo fmt --all --check

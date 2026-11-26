@@ -134,3 +134,22 @@ Deviations from the Task 1.1 target paths, on purpose:
 | 5.1–5.2 Packaging, CI, telemetry, runbooks | Implemented | `apps/edge-daemon/src/telemetry/`, `packaging/{linux,windows}/`, `scripts/export_cloud_keys.py`, `.github/workflows/ci.yml`, `infra/monitoring/prometheus.yml`, `docs/runbooks/incident-response.md`. |
 
 Remaining verification requiring local host/hardware: `cargo test --workspace`, `pnpm --filter web build`, live Postgres/Neo4j integration tests, and physical `A-ENG-10` vehicle captures.
+
+## Review amendment verification (2026-11-26)
+
+Every amendment in [`reviews/2026-11-19-autoplan-review.md`](reviews/2026-11-19-autoplan-review.md) was checked against the code and its test. Gaps found were built and tested the same day. All suites were run against real Postgres, Neo4j, Redis and S3 containers.
+
+| Amendment | Found | Done |
+| --- | --- | --- |
+| A-ENG-7, A-CEO-1 | `/diagnose` read every resolved case and filtered in Python (no vector search), and accepted cases and circuit nodes from the client as "evidence" the model could cite | Server-side pgvector search (iterative HNSW scan plus an exact second pass, ranked by shared codes, engine family, similarity, recency); client evidence ignored. Tests: 5 results when 5 eligible rows exist; forged client cases never reach the prompt |
+| A-CEO-1 | No test per failure class | Tests for malformed, empty, refused, timed-out, unavailable and ungrounded-citation answers, prompt injection, and no charge on fallback |
+| A-CEO-2 | No partial-failure test | A batch failing mid-way commits nothing; retry accepted once |
+| A-ENG-8 | API allowed 300 pages; no per-page timeout; worker had no memory or network limits | 200-page cap everywhere; per-page timeout marks a page failed; worker memory cap and no network but the broker |
+| A-ENG-6 | No check against raw Neo4j driver use | Test fails on any driver use outside `app/graph/neo4j_client.py` |
+| A-CEO-5 (Task 5.2) | Only basic counters and one runbook | Rotating daemon log; `edge-daemon diagnostics` redacted support bundle; JSON logs with `X-Request-ID` web → API → worker; metrics for sync lag, diagnose latency and fallback rate, webhook and ingest failures, daemons by version, HTTP status by route; `infra/monitoring/alerts.yml` with a runbook per alert; signing-key rotation and daemon rollback runbooks |
+| A-ENG-10 | No checklist | [`runbooks/hil-release-checklist.md`](runbooks/hil-release-checklist.md) |
+| A-DES-1/2/3/4/6/7 gates | No browser tests | Playwright suite (`just e2e`, in CI): session flow, state table, copilot evidence, axe + 44 px targets in both themes. Component tests for the safety modal (copy, 1.5 s hold, fail closed on unknown or stale readings, hold stops mid-way). 29-bit CAN ID formatting unit test. The suite found and fixed one more daylight contrast failure (green badges) |
+
+Already in place and confirmed: A-CEO-3, A-CEO-4, A-CEO-6, A-DX-1 to A-DX-5, A-ENG-1 to A-ENG-5, A-ENG-9, A-DES-5.
+
+Still needs people or hardware: the A-ENG-10 bench run, a staging drill that fires each alert (the rules are checked by tests, not yet fired against a live Prometheus), and pinning a production signing key.
