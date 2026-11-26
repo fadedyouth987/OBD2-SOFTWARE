@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="t">
+  <title id="t">RootCause Diagnostics</title>
+  <defs>
+    <linearGradient id="chrome" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/><stop offset="0.42" stop-color="#C9D1DC"/>
+      <stop offset="0.5" stop-color="#7D8898"/><stop offset="0.62" stop-color="#E8EDF3"/>
+      <stop offset="1" stop-color="#9AA5B4"/>
+    </linearGradient>
+    <linearGradient id="navy" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1D4E9E"/><stop offset="1" stop-color="#0A1F45"/>
+    </linearGradient>
+    <linearGradient id="blueText" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5AA9FF"/><stop offset="1" stop-color="#1F6FE0"/>
+    </linearGradient>
+  </defs>
+  <path d="M128 10 L214 34 Q226 38 226 52 L226 132 Q226 196 128 246 Q30 196 30 132 L30 52 Q30 38 42 34 Z" fill="#0B1220"/>
+  <path d="M128 10 L214 34 Q226 38 226 52 L226 132 Q226 196 128 246 Q30 196 30 132 L30 52 Q30 38 42 34 Z" fill="url(#navy)" stroke="url(#chrome)" stroke-width="9" stroke-linejoin="round" transform="translate(128 128) scale(0.93) translate(-128 -128)"/>
+  <path d="M70 128 V150 L58 154 V168" stroke="#2B7FFF" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="58" cy="168" r="5.5" fill="#0B1220" stroke="#2B7FFF" stroke-width="3"/><path d="M88 128 V150 L78 182 V196" stroke="#F07A2A" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="78" cy="196" r="5.5" fill="#0B1220" stroke="#F07A2A" stroke-width="3"/><path d="M106 128 V150 L102 200 V214" stroke="#5AA9FF" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="102" cy="214" r="5.5" fill="#0B1220" stroke="#5AA9FF" stroke-width="3"/><path d="M128 128 V150 L128 214 V228" stroke="#2B7FFF" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="128" cy="228" r="5.5" fill="#0B1220" stroke="#2B7FFF" stroke-width="3"/><path d="M150 128 V150 L154 200 V214" stroke="#F07A2A" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="154" cy="214" r="5.5" fill="#0B1220" stroke="#F07A2A" stroke-width="3"/><path d="M168 128 V150 L178 182 V196" stroke="#5AA9FF" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="178" cy="196" r="5.5" fill="#0B1220" stroke="#5AA9FF" stroke-width="3"/><path d="M186 128 V150 L198 154 V168" stroke="#2B7FFF" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="198" cy="168" r="5.5" fill="#0B1220" stroke="#2B7FFF" stroke-width="3"/>
+  <rect x="70" y="40" width="34" height="34" rx="4" fill="url(#chrome)" stroke="#0B1220" stroke-width="3"/>
+  <rect x="111" y="40" width="34" height="34" rx="4" fill="url(#chrome)" stroke="#0B1220" stroke-width="3"/>
+  <rect x="152" y="40" width="34" height="34" rx="4" fill="url(#chrome)" stroke="#0B1220" stroke-width="3"/>
+  <path d="M58 82 H198 L186 132 H70 Z" fill="url(#chrome)" stroke="#0B1220" stroke-width="3.5" stroke-linejoin="round"/>
+  <path d="M74 96 H182 M76 108 H180 M78 120 H178" stroke="#6B7686" stroke-width="3"/>
+  <rect x="88" y="84" width="80" height="10" rx="3" fill="#E0242F" stroke="#0B1220" stroke-width="2"/>
+  <path d="M214.0 120.1 h30.6 v23.8 h-30.6 Z" fill="url(#chrome)" stroke="#0B1220" stroke-width="2"/><circle cx="180" cy="132" r="34" fill="url(#chrome)" stroke="#0B1220" stroke-width="2.5"/><circle cx="180" cy="132" r="23.1" fill="#1B2433" stroke="#0B1220" stroke-width="1.5"/><path d="M188.5 132.0 Q198.6 133.9 198.5 142.1 M186.0 138.0 Q191.8 146.5 185.9 152.2 M180.0 140.5 Q178.1 150.6 169.9 150.5 M174.0 138.0 Q165.5 143.8 159.8 137.9 M171.5 132.0 Q161.4 130.1 161.5 121.9 M174.0 126.0 Q168.2 117.5 174.1 111.8 M180.0 123.5 Q181.9 113.4 190.1 113.5 M186.0 126.0 Q194.5 120.2 200.2 126.1" stroke="#C9D3E0" stroke-width="3.1" fill="none" stroke-linecap="round"/><circle cx="180" cy="132" r="5.4" fill="#E0242F"/>
+</svg>

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { BrandLockup } from "@/components/brand/Logo";
 import { Badge, Banner, Button, cx } from "@/components/ui";
 import { Menu, MenuItem } from "@/components/shell/Menu";
 import { useTheme } from "@/components/shell/theme";
@@ -315,7 +316,7 @@ function MobileNav() {
           <div className="absolute inset-0 bg-black/60" onClick={() => setOpen(false)} />
           <div ref={panel} className="absolute inset-y-0 left-0 w-72 border-r border-line bg-panel p-4">
             <div className="mb-4 flex items-center justify-between">
-              <span className="text-sm font-extrabold">{APP_NAME}</span>
+              <BrandLockup />
               <Button variant="ghost" size="sm" onClick={() => setOpen(false)} aria-label="Close menu">
                 ✕
               </Button>
@@ -376,9 +377,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         Skip to content
       </a>
       <aside className="no-print hidden border-r border-line bg-panel p-4 lg:block">
-        <Link href="/home" className="mb-6 flex items-center gap-2 px-1">
-          <span aria-hidden className="h-6 w-1.5 rounded bg-accent" />
-          <span className="text-sm font-extrabold tracking-tight">{APP_NAME}</span>
+        <Link href="/home" className="mb-6 flex items-center px-1" aria-label={`${APP_NAME} home`}>
+          <BrandLockup />
         </Link>
         <NavLinks />
       </aside>

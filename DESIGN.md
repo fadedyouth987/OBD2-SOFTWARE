@@ -1,4 +1,9 @@
-# RootCause OBD — Design System (A-DES-5)
+# RootCause Diagnostics — Design System (A-DES-5)
+
+## Logo
+- **Files:** `apps/web/public/brand/rootcause-wordmark.svg` (full wordmark, 960:440) and `rootcause-badge.svg` (square badge). Both are vector with text converted to outlines, so they need no fonts and stay sharp at any size.
+- **Use:** wordmark on standalone pages (sign-in, sign-up); badge plus the product name in the app shell; badge as the favicon and app icon (`src/app/icon.svg`, `favicon.ico`, `apple-icon.png`). Components: `src/components/brand/Logo.tsx`.
+- Both carry their own dark artwork, so they work in Night Cab and Daylight Glare without a variant.
 
 ## Visual Language (Autel MaxiSys Ultra-Inspired Industrial UI)
 - **Palette (Night Cab / Workshop Dark Default):** Background `#0C0F14`, Panel `#151A22`, Raised Surface `#1D2430`, Border `#2A3342`, Autel Accent Red `#E0242F`, Diagnostic Blue `#2B7FFF`, Healthy `#10B981`, Caution `#F59E0B`.
