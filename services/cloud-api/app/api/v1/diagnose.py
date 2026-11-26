@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -15,7 +16,7 @@ from app.api.v1.sessions import find_similar_cases
 from app.db.models import DiagnosticSession
 from app.db.session import tenant_session
 from app.db.vin import wmi_vds
-from app.observability.metrics import inc
+from app.observability.metrics import count, inc, observe
 from app.services.ai_diagnostic_agent import (
     answer_technician_followup,
     diagnose_session,
@@ -176,6 +177,11 @@ def run_with_quota(principal, rules: dict[str, Any], call_llm) -> dict[str, Any]
         inc("ai_llm_answers")
     else:
         inc("ai_rules_answers")
+    count(
+        "obd2_diagnose_total",
+        engine="llm" if charged else "rules",
+        fallback_reason=reason or "none",
+    )
     result = dict(result)
     result["quota_charged"] = charged
     result["fallback_reason"] = reason
@@ -190,6 +196,7 @@ def run_diagnosis(
     session_id: str, req: DiagnoseRequest, principal: RequirePrincipal
 ) -> dict[str, Any]:
     inc("ai_diagnose_requests")
+    started = time.perf_counter()
     engine_family = str(get_vehicle_platform(req.vehicle_profile).get("engine") or "")
     cases = find_similar_cases(principal.tenant_id, req.dtcs, engine_family)
     rules = diagnose_session(
@@ -204,6 +211,7 @@ def run_diagnosis(
         lambda provider: llm_diagnosis(provider, rules, req.dtcs, req.vehicle_profile),
     )
     _attach_diagnosis(principal, session_id, req, result)
+    observe("obd2_diagnose_duration_seconds", time.perf_counter() - started, kind="diagnosis")
     return result
 
 

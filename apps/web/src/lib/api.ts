@@ -59,8 +59,17 @@ export interface ApiOptions {
   form?: FormData;
 }
 
+/** One ID per request, carried web → API → worker and on every log line (Task 5.2). */
+export function newRequestId(): string {
+  try {
+    return `web-${crypto.randomUUID()}`;
+  } catch {
+    return `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+  }
+}
+
 export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { "X-Request-ID": newRequestId() };
   if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
   let body: BodyInit | undefined;
   if (opts.form) {
@@ -580,7 +589,9 @@ export const ROLE_LABEL: Record<TeamRole, string> = { OWNER: "Owner", LEAD_TECH:
 export async function apiBlob(path: string, token: string | null): Promise<Blob> {
   let res: Response;
   try {
-    res = await fetch(`${CLOUD_API_URL}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    res = await fetch(`${CLOUD_API_URL}${path}`, {
+      headers: { "X-Request-ID": newRequestId(), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    });
   } catch {
     throw new ApiError(0, "Can't reach the RootCause cloud. Check your internet connection.");
   }

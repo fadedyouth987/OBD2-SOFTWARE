@@ -23,9 +23,16 @@ from app.api.v1 import (
     team,
 )
 from app.config import get_settings
+from app.observability.logging import (
+    REQUEST_ID_HEADER,
+    RequestIdMiddleware,
+    configure_json_logging,
+)
 from app.observability.metrics import render_prometheus
 
 settings = get_settings()  # fails fast on ap-southeast-2 residency violation
+if os.environ.get("LOG_FORMAT", "json").lower() == "json":
+    configure_json_logging()
 
 app = FastAPI(title="obd2-diag cloud API", version="0.2.0")
 
@@ -43,7 +50,10 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=[REQUEST_ID_HEADER],
 )
+# Outermost, so the request ID covers CORS responses and errors too.
+app.add_middleware(RequestIdMiddleware)
 
 app.include_router(auth.router)
 app.include_router(sessions.router)

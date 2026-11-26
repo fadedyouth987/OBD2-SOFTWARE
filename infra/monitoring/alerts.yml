@@ -1,0 +1,84 @@
+# Alert rules (Task 5.2, A-CEO-5). Each alert links to its runbook in docs/runbooks/.
+# Thresholds are starting points [estimated]; tune them after the first staging drill.
+groups:
+  - name: obd2-cloud
+    rules:
+      - alert: StripeWebhookSignatureFailures
+        expr: sum(increase(obd2_stripe_webhook_failures_total{reason=~"bad_signature|bad_payload"}[10m])) > 5
+        labels:
+          severity: page
+        annotations:
+          summary: "More than 5 Stripe webhooks failed signature checks in 10 minutes"
+          description: "Either the webhook secret is wrong after a rotation, or someone is sending forged events."
+          runbook_url: docs/runbooks/stripe-webhook-failures.md
+
+      - alert: StripeWebhookNotApplied
+        expr: sum(increase(obd2_stripe_webhook_failures_total{reason=~"apply|tenant_lookup|unknown_customer"}[30m])) > 0
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Stripe events are being retried because they could not be applied"
+          description: "Plans may be out of date until the event applies. Stripe retries for up to 3 days."
+          runbook_url: docs/runbooks/stripe-webhook-failures.md
+
+      - alert: SyncBacklog
+        expr: |
+          (sum(rate(obd2_sync_lag_seconds_sum[15m])) / sum(rate(obd2_sync_lag_seconds_count[15m]))) > 900
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Edge sync batches arrive more than 15 minutes after they were recorded"
+          description: "Workshops are offline or the API is slow to accept batches; audit rows reach the cloud late."
+          runbook_url: docs/runbooks/sync-backlog.md
+
+      - alert: DiagnoseFallbackRate
+        expr: |
+          (
+            sum(rate(obd2_diagnose_total{fallback_reason="llm_error"}[30m]))
+            / sum(rate(obd2_diagnose_total{fallback_reason=~"none|llm_error"}[30m]))
+          ) > 0.2
+          and sum(increase(obd2_diagnose_total[30m])) > 10
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "More than 20% of AI diagnoses fell back to the built-in rules"
+          description: "The model is failing, timing out or returning unusable answers. Workshops still get rule results and are not charged."
+          runbook_url: docs/runbooks/diagnose-fallback.md
+
+      - alert: SchematicIngestFailureRate
+        expr: |
+          (
+            sum(increase(obd2_schematic_ingest_failures_total{reason=~"unreadable|storage"}[1h]))
+            / (sum(increase(obd2_schematic_ingest_failures_total{reason=~"unreadable|storage"}[1h]))
+               + sum(increase(obd2_schematic_uploads_total[1h])))
+          ) > 0.1
+          and sum(increase(obd2_schematic_ingest_failures_total[1h])) > 3
+        labels:
+          severity: ticket
+        annotations:
+          summary: "More than 10% of schematic uploads failed in the last hour"
+          description: "Check file storage first (reason=storage), then unreadable PDFs (reason=unreadable)."
+          runbook_url: docs/runbooks/schematic-ingest-failures.md
+
+      - alert: ApiErrorBudgetFastBurn
+        expr: |
+          (sum(rate(obd2_http_requests_total{status="5xx"}[5m])) / sum(rate(obd2_http_requests_total[5m]))) > 0.05
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "More than 5% of API requests are failing with 5xx"
+          runbook_url: docs/runbooks/api-error-budget.md
+
+      - alert: ApiErrorBudgetSlowBurn
+        expr: |
+          (sum(rate(obd2_http_requests_total{status="5xx"}[1h])) / sum(rate(obd2_http_requests_total[1h]))) > 0.01
+        for: 1h
+        labels:
+          severity: ticket
+        annotations:
+          summary: "API 5xx rate above the 1% error budget for an hour"
+          runbook_url: docs/runbooks/api-error-budget.md
