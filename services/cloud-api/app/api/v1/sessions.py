@@ -7,9 +7,10 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import Text, literal, text
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
@@ -23,6 +24,7 @@ from app.db.models import (
 )
 from app.db.session import tenant_session
 from app.observability.metrics import count, inc, observe
+from app.services import can_traces
 from app.services.anonymizer import anonymize_audit_entry, anonymize_case, anonymize_telemetry_row
 from app.services.embeddings import EMBEDDING_MODEL, cosine_similarity, embed_canonical_text
 
@@ -177,6 +179,10 @@ class SyncBatchRequest(BaseModel):
     watermark_us: int
     telemetry_rows: list[dict[str, Any]] = []
     audit_entries: list[dict[str, Any]] = []
+    # Raw CAN frames for this session, stored in S3 as a candump log (optional).
+    can_frames: list[can_traces.CanFrameIn] = Field(
+        default_factory=list, max_length=can_traces.MAX_FRAMES_PER_BATCH
+    )
     # Ignored: tenant is taken from the session, never the body.
     tenant_id: str | None = None
 
@@ -237,8 +243,12 @@ def sync_session_batch(req: SyncBatchRequest, principal: RequirePrincipal) -> di
                     seq = int(entry.get("seq", index + 1))
                 except (TypeError, ValueError):
                     seq = index + 1
-                store.add(
-                    AuditLogEntry(
+                # One row per attempt (A-CEO-4). A record re-sent in a new batch
+                # (the edge lost its ack) is skipped, never a conflict: a 409
+                # here would block this session's sync for good.
+                inserted = store.execute(
+                    pg_insert(AuditLogEntry)
+                    .values(
                         tenant_id=principal.tenant_id,
                         edge_session_id=req.session_id,
                         seq=seq,
@@ -255,9 +265,16 @@ def sync_session_batch(req: SyncBatchRequest, principal: RequirePrincipal) -> di
                         nrc=int(entry["nrc"]) if str(entry.get("nrc") or "").isdigit() else None,
                         detail=str(entry.get("detail") or ""),
                     )
-                )
-                audit_ingested += 1
+                    .on_conflict_do_nothing(index_elements=["tenant_id", "edge_session_id", "seq"])
+                    .returning(AuditLogEntry.id)
+                ).scalar_one_or_none()
+                if inserted is not None:
+                    audit_ingested += 1
 
+            # Raw frames go to S3 through the outbox, committed with the batch.
+            can_traces.queue_trace(
+                store, principal.tenant_id, req.batch_id, sess.id, req.can_frames
+            )
             store.add(
                 SyncBatch(
                     tenant_id=principal.tenant_id,
@@ -278,6 +295,13 @@ def sync_session_batch(req: SyncBatchRequest, principal: RequirePrincipal) -> di
                 }
         raise HTTPException(status_code=409, detail="session sync conflict") from exc
 
+    traces_pending = 0
+    if req.can_frames:
+        # Committed: upload this batch's trace now. If S3 refuses, the batch has
+        # still succeeded and the trace waits in the outbox for the drain.
+        with tenant_session(principal.tenant_id) as store:
+            traces_pending = can_traces.upload_pending(store, batch_id=req.batch_id)
+
     inc("sessions_sync_accepted")
     count("obd2_sync_batches_total", outcome="accepted")
     lag = datetime.now(UTC).timestamp() - req.watermark_us / 1_000_000
@@ -288,6 +312,8 @@ def sync_session_batch(req: SyncBatchRequest, principal: RequirePrincipal) -> di
         "batch_id": req.batch_id,
         "telemetry_ingested": telemetry_ingested,
         "audit_ingested": audit_ingested,
+        "can_frames_ingested": len(req.can_frames),
+        "traces_pending": traces_pending,
         "watermark_us": req.watermark_us,
     }
 

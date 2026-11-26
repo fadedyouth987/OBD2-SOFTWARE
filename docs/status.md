@@ -126,7 +126,7 @@ Deviations from the Task 1.1 target paths, on purpose:
 
 | Task | Status | Notes |
 | --- | --- | --- |
-| 2.2 Control plane, signing, anonymizer, sync | Implemented | `services/cloud-api/app/api/v1/{auth,sessions,dbc}.py`, `services/{signing,anonymizer}.py` (`py_compile` verified). |
+| 2.2 Control plane, signing, anonymizer, sync | Done, gate verified | `services/cloud-api/app/api/v1/{auth,sessions,dbc}.py`, `services/{signing,anonymizer,can_traces}.py`. Verification Gate run on 2026-11-26; see "Task 2.2 gate verification" below. |
 | 2.3 Billing & AU MVIS/AASRA gateways | Implemented | `services/cloud-api/app/api/v1/{billing,gateways}.py` with Stripe HMAC verification & event idempotency. |
 | 3.1–3.2 Neo4j tenant repo & PDF pipeline | Implemented | `services/ai-worker/app/{graph,vision,tasks}/` with A-ENG-6 tenant filter & A-ENG-8 50 MB/200-page limits. |
 | 3.3 KG-guided RAG localizer | Implemented | `services/cloud-api/app/services/{embeddings,ai_diagnostic_agent}.py`, `api/v1/diagnose.py` (A-CEO-1 fallback, A-DES-4 bands). |
@@ -153,3 +153,19 @@ Every amendment in [`reviews/2026-11-19-autoplan-review.md`](reviews/2026-11-19-
 Already in place and confirmed: A-CEO-3, A-CEO-4, A-CEO-6, A-DX-1 to A-DX-5, A-ENG-1 to A-ENG-5, A-ENG-9, A-DES-5.
 
 Still needs people or hardware: the A-ENG-10 bench run, a staging drill that fires each alert (the rules are checked by tests, not yet fired against a live Prometheus), and pinning a production signing key.
+
+## Task 2.2 gate verification (2026-11-26)
+
+The Task 2.2 row above was marked from `py_compile` only. Its Verification Gate was run against real Postgres and SeaweedFS; three contract items were missing and one sync bug was found. All are fixed and tested.
+
+| Gate or contract item | Before | Now |
+| --- | --- | --- |
+| Lease and pairing tokens from `signing.py` verify in the Rust daemon with the pinned key (shared fixture); other keys or wrong `aud` rejected | No shared fixture: the Rust tests signed their own tokens | `packages/schemas/fixtures/signing/cloud_tokens.json`, issued by the real `signing.py` functions with a test-only key and a pinned clock (`services/cloud-api/tests/signing_fixture.py`), verified by `apps/edge-daemon/tests/cloud_token_fixture.rs`: lease (tier, features, `rcid`, `lease_ver`, expiry), pairing (origin-bound), immobilizer lease. Rejected: another key under the right `kid`, unknown `kid`, expired, pairing and session tokens as leases, a lease as a pairing token or immobilizer lease, an immobilizer lease as a diagnostic lease, anything with no pinned keys. `tests/test_signing_fixture.py` fails if the fixture drifts from `signing.py` |
+| Raw CAN traces to S3 ap-southeast-2 | Not implemented: sync took telemetry and audit rows only | Optional `can_frames` on `POST /api/v1/sessions/sync`, stored as a gzipped candump log (`can_traces/<tenant>/<id>.log.gz`) through a transactional outbox (`can_trace_outbox`, migration 012). `tests/test_can_traces.py::test_gate_sync_stores_raw_can_trace_in_s3` checks the object byte for byte |
+| Compressed batches | Plain JSON only | `Content-Encoding: gzip` on the sync route (`app/api/gzip_body.py`): 8 MiB compressed, 32 MiB inflated, 413 past either (gzip bomb), 400 for corrupt or truncated gzip, 415 for other encodings (`tests/test_sync_gzip.py`) |
+| A-CEO-2 partial failure, S3 | No S3 step to fail | S3 down after commit: the batch is acknowledged with `traces_pending`, the trace stays in the outbox, `python -m app.cli drain-can-traces` uploads it later; uploads stop at the first failure so a request never waits out a chain of timeouts (`test_partial_failure_s3_down_trace_waits_in_outbox`, `test_upload_stops_at_the_first_failure`) |
+| A-CEO-2 re-sent records (bug) | An audit record re-sent in a new batch (the edge lost its ack) raised a unique violation and the route returned 409 on every retry, so that session could never sync again | Audit rows insert with `ON CONFLICT DO NOTHING`; only new rows count as ingested (`tests/test_sync_resend.py`, which failed with the 409 before the fix) |
+
+The plain JSON batches the web app's job recorder sends are unchanged (`test_batches_without_frames_are_unchanged`). Already covered on main and re-run: lease and pairing issuance, duplicate `batch_id`, database partial failure, anonymizer (`test_tasks_2_2_to_3_3.py`, `test_security.py`).
+
+Open: schedule `drain-can-traces` (every few minutes, owner database role) with the Task 5.2 jobs; the daemon does not send `can_frames` yet.

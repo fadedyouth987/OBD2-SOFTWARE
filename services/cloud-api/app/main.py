@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 
+from app.api.gzip_body import GzipRequestMiddleware
 from app.api.v1 import (
     accreditation,
     admin,
@@ -52,6 +53,8 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=[REQUEST_ID_HEADER],
 )
+# Edge sync batches may arrive gzip-compressed (Task 2.2).
+app.add_middleware(GzipRequestMiddleware, paths={"/api/v1/sessions/sync"})
 # Outermost, so the request ID covers CORS responses and errors too.
 app.add_middleware(RequestIdMiddleware)
 

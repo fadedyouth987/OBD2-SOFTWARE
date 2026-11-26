@@ -43,7 +43,7 @@ def _client() -> Any:
 
 
 def object_key(kind: str, tenant_id: UUID, object_id: UUID, ext: str) -> str:
-    if kind not in {"schematics", "dbc", "accreditation"}:
+    if kind not in {"schematics", "dbc", "accreditation", "can_traces"}:
         raise ValueError(f"unknown object kind {kind!r}")
     return f"{kind}/{tenant_id}/{object_id}.{ext.lstrip('.')}"
 
