@@ -1,10 +1,15 @@
 global:
   scrape_interval: 15s
 
+# Alerts and their runbooks (Task 5.2, A-CEO-5).
+rule_files:
+  - alerts.yml
+
 scrape_configs:
   - job_name: obd2-cloud-api
+    metrics_path: /metrics
     static_configs:
       - targets: ["localhost:8000"]
-  - job_name: obd2-edge-daemon
-    static_configs:
-      - targets: ["localhost:8765"]
+# Edge daemons run on workshop computers and are not scraped from the cloud.
+# Their health shows up as obd2_daemons_seen (by version) on the API, and a
+# local copy of their counters is in `edge-daemon diagnostics` support bundles.

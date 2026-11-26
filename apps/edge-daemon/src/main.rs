@@ -4,6 +4,7 @@
 //! edge-daemon            serve on 127.0.0.1:8765 and [::1]:8765
 //! edge-daemon pair       print a 6-digit pairing code (single use, 2 minutes)
 //! edge-daemon version    print daemon, protocol and safety-policy versions
+//! edge-daemon diagnostics [file]   write a redacted support bundle (Task 5.2)
 //! ```
 //!
 //! Environment: `EDGE_PORT` (default 8765), `EDGE_ALLOWED_ORIGINS` (comma
@@ -11,7 +12,8 @@
 //! `EDGE_DATA_DIR` (pairing codes, audit log, lease; default per user),
 //! `EDGE_DEVICE_ID` (must match the lease `rcid` claim when set),
 //! `EDGE_LEASE_MIN_VERSION` (leases with a lower `lease_ver` are revoked),
-//! `RUST_LOG` (default `info`). An offline lease is read from
+//! `RUST_LOG` (default `info`). Logs also go to `<data dir>/logs/edge-daemon.log`,
+//! rotated at 10 MB with five old files kept (`EDGE_LOG_FILE=off` to disable). An offline lease is read from
 //! `<data dir>/lease.jwt` when present, and an immobilizer lease from
 //! `<data dir>/immo_lease.jwt` when present; those machine leases serve
 //! code-paired native clients (and browser users only when issued to them).
@@ -23,19 +25,22 @@
 use std::{
     path::PathBuf,
     process::ExitCode,
-    sync::{atomic::Ordering, Arc},
+    sync::{atomic::Ordering, Arc, Mutex},
     time::Duration,
 };
 
 use edge_daemon::{
     auth::unix_now,
+    hal::discovery,
     protocol,
     safety::audit::JsonlAudit,
     server::{
         pairing::PairingStore,
         ws::{Server, ServerConfig, DEFAULT_PORT},
     },
+    telemetry::{logfile, support_bundle},
 };
+use tracing_subscriber::fmt::writer::MakeWriterExt;
 
 fn data_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("EDGE_DATA_DIR") {
@@ -172,16 +177,34 @@ async fn serve(dir: PathBuf) -> ExitCode {
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
     let dir = data_dir();
     if let Err(e) = std::fs::create_dir_all(&dir) {
         eprintln!("cannot create data directory {}: {e}", dir.display());
         return ExitCode::FAILURE;
+    }
+    let filter = || {
+        tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
+    };
+    let file_logging = std::env::var("EDGE_LOG_FILE").map_or(true, |v| v != "off");
+    let log_file = if file_logging {
+        logfile::RotatingFile::open(
+            &logfile::log_dir(&dir),
+            logfile::DEFAULT_MAX_BYTES,
+            logfile::DEFAULT_KEEP,
+        )
+        .map_err(|e| eprintln!("file logging off: {e}"))
+        .ok()
+    } else {
+        None
+    };
+    match log_file {
+        Some(file) => tracing_subscriber::fmt()
+            .with_env_filter(filter())
+            .with_ansi(false)
+            .with_writer(std::io::stderr.and(Mutex::new(file)))
+            .init(),
+        None => tracing_subscriber::fmt().with_env_filter(filter()).init(),
     }
     match std::env::args().nth(1).as_deref() {
         None | Some("serve") => serve(dir).await,
@@ -195,8 +218,24 @@ async fn main() -> ExitCode {
             );
             ExitCode::SUCCESS
         }
+        Some("diagnostics") => {
+            let out = std::env::args().nth(2).map(PathBuf::from);
+            match support_bundle::write(&dir, out, &discovery::discover(), unix_now()) {
+                Ok(path) => {
+                    println!("Support bundle written to {}", path.display());
+                    println!("VIN serials, tokens and keys are removed. Check it before sending.");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("could not write the support bundle: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Some(other) => {
-            eprintln!("unknown command {other:?}; use: edge-daemon [serve|pair|version]");
+            eprintln!(
+                "unknown command {other:?}; use: edge-daemon [serve|pair|version|diagnostics]"
+            );
             ExitCode::FAILURE
         }
     }

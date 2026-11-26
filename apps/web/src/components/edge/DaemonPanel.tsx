@@ -118,7 +118,7 @@ export function DaemonPanel({ compact = false }: { compact?: boolean }) {
         </Banner>
         {failure.kind === "unreachable" && mode === "daemon" && !compact ? (
           <details className="rounded-lg border border-line bg-raised p-3 text-sm">
-            <summary className="cursor-pointer font-semibold">How do I install and start the edge daemon?</summary>
+            <summary className="min-h-[44px] cursor-pointer py-3 leading-5 font-semibold">How do I install and start the edge daemon?</summary>
             <ol className="mt-2 list-decimal space-y-1 pl-5 text-muted">
               <li>Install the RootCause edge daemon on the computer that the adapter plugs into.</li>
               <li>
@@ -153,7 +153,7 @@ export function DaemonPanel({ compact = false }: { compact?: boolean }) {
               aria-checked={mode === m}
               onClick={() => mode !== m && setMode(m)}
               className={cx(
-                "min-h-[36px] rounded-md px-3 font-semibold",
+                "min-h-[44px] rounded-md px-3 font-semibold",
                 mode === m ? "bg-raised text-text" : "text-muted hover:text-text",
               )}
             >

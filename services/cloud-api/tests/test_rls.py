@@ -417,3 +417,38 @@ def test_immo_tables_are_tenant_isolated_and_audit_is_append_only(db):
             deleted = False
             s.rollback()
     assert deleted is False or count(app, a, ImmoAuditEntry) == 1
+
+
+def test_case_search_returns_five_when_five_eligible_rows_exist(db):
+    """A-ENG-7: a DTC-filtered HNSW search must not come back short."""
+    from app.api.v1.sessions import find_similar_cases
+    from app.services.embeddings import embed_canonical_text
+
+    owner, app = db
+    tid = new_tenant(app, "Case search")
+    with tenant_session(tid, app) as s:
+        # Many non-matching cases crowd the nearest neighbours; five match P0301.
+        for i in range(60):
+            s.add(
+                ResolvedCase(
+                    dtcs=["P0420"],
+                    canonical_summary=f"noise {i}",
+                    fix_description="cat",
+                    embedding=embed_canonical_text(f"noise {i}"),
+                    embedding_model="test",
+                )
+            )
+        for i in range(5):
+            s.add(
+                ResolvedCase(
+                    dtcs=["P0301", "P0171"],
+                    canonical_summary=f"misfire {i}",
+                    fix_description="coil",
+                    embedding=embed_canonical_text(f"misfire {i}"),
+                    embedding_model="test",
+                )
+            )
+    found = find_similar_cases(tid, ["p0301"], "N46", engine=app)
+    assert len(found) == 5
+    assert all("P0301" in c["dtcs"] for c in found)
+    assert find_similar_cases(tid, [], engine=app) == []

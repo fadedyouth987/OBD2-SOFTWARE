@@ -32,7 +32,7 @@ from app.db.models import (
 )
 from app.db.session import tenant_session
 from app.db.vin import model_year, normalize_vin, resolve_secret, vin_hmac
-from app.observability.metrics import inc
+from app.observability.metrics import daemon_seen, inc
 from app.services.anonymizer import anonymize_case, scrub_text, scrub_value
 from app.services.embeddings import EMBEDDING_MODEL, embed_canonical_text
 from app.services.identity import user_profile
@@ -272,6 +272,7 @@ def start_job(req: JobStart, principal: RequirePrincipal) -> dict[str, Any]:
         store.flush()
         store.refresh(row)
         inc("jobs_started")
+        daemon_seen(f"{principal.tenant_id}:{req.adapter_id or ''}", req.daemon_version)
         return _detail(store, row, principal)
 
 

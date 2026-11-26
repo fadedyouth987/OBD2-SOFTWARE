@@ -8,6 +8,7 @@ import { useAuth } from "@/context/auth";
 import { TIER_LABEL } from "@/lib/entitlements";
 import { formatDateTime } from "@/lib/format";
 import { can } from "@/lib/permissions";
+import { AccountUnavailable } from "@/components/shell/AccountUnavailable";
 
 const ROLE: Record<string, string> = { OWNER: "Owner", LEAD_TECH: "Lead technician", TECH: "Technician" };
 
@@ -15,7 +16,7 @@ export default function WorkshopPage() {
   const { me, switchWorkspace } = useAuth();
   const [switching, setSwitching] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  if (!me) return null;
+  if (!me) return <AccountUnavailable title="Workshop" />;
   const e = me.entitlements;
 
   return (
@@ -42,7 +43,7 @@ export default function WorkshopPage() {
                   <span className="mt-1 block text-xs text-muted">
                     Needed for security-related work such as key programming.{" "}
                     {can(me, "SUBMIT_WORKSHOP_ACCREDITATION") ? (
-                      <a className="underline" href="#accreditation">
+                      <a className="inline-flex min-h-[44px] items-center underline" href="#accreditation">
                         Submit it below
                       </a>
                     ) : (

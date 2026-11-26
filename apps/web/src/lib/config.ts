@@ -1,6 +1,6 @@
 // Runtime configuration. NEXT_PUBLIC_* values are inlined at build time.
 
-export const APP_NAME = "RootCause OBD";
+export const APP_NAME = "RootCause Diagnostics";
 
 /** This web app's version, sent to the edge daemon as HelloRequest.client_version. */
 export const APP_VERSION = "0.2.0";

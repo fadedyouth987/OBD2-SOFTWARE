@@ -94,6 +94,10 @@ interface EdgeValue {
   /** Rolling history; read inside render after `pidTick` changes. */
   pidHistory: React.RefObject<Map<number, PidSeries>>;
   pidTick: number;
+  /** When this browser last received each PID (Date.now() ms), for freshness checks. */
+  pidSeenAt: Map<number, number>;
+  /** When this browser last received any live sample, or null if none since connecting. */
+  lastSampleAt: number | null;
   diag: (req: DiagRequest) => Promise<DiagCommandResponse>;
   requestSafetyToken: (req: DiagRequest & { ack: string; serviceId?: number }) => Promise<SafetyConfirmResponse>;
   ready: boolean;
@@ -127,6 +131,9 @@ export function EdgeProvider({ children }: { children: React.ReactNode }) {
   const [alerts, setAlerts] = useState<HeuristicAlert[]>([]);
   const [pids, setPids] = useState<Map<number, PidSample>>(new Map());
   const [pidTick, setPidTick] = useState(0);
+  const [pidSeenAt, setPidSeenAt] = useState<Map<number, number>>(new Map());
+  const [lastSampleAt, setLastSampleAt] = useState<number | null>(null);
+  const seenRef = useRef<Map<number, number>>(new Map());
   const pidHistory = useRef<Map<number, PidSeries>>(new Map());
   const latestRef = useRef<Map<number, PidSample>>(new Map());
   const dirtyRef = useRef(false);
@@ -179,6 +186,7 @@ export function EdgeProvider({ children }: { children: React.ReactNode }) {
         const now = Date.now();
         for (const s of m.samples) {
           latestRef.current.set(s.pid, s);
+          seenRef.current.set(s.pid, now);
           let series = pidHistory.current.get(s.pid);
           if (!series) {
             series = { pid: s.pid, name: s.name, unit: s.unit, points: [] };
@@ -214,6 +222,8 @@ export function EdgeProvider({ children }: { children: React.ReactNode }) {
       if (!dirtyRef.current) return;
       dirtyRef.current = false;
       setPids(new Map(latestRef.current));
+      setPidSeenAt(new Map(seenRef.current));
+      setLastSampleAt(Math.max(...seenRef.current.values()));
       setPidTick((n) => n + 1);
     }, 250);
     return () => clearInterval(timer);
@@ -223,8 +233,11 @@ export function EdgeProvider({ children }: { children: React.ReactNode }) {
     setLink(null);
     setAlerts([]);
     latestRef.current = new Map();
+    seenRef.current = new Map();
     pidHistory.current = new Map();
     setPids(new Map());
+    setPidSeenAt(new Map());
+    setLastSampleAt(null);
   }, []);
 
   const refreshAdapters = useCallback(async () => {
@@ -424,11 +437,13 @@ export function EdgeProvider({ children }: { children: React.ReactNode }) {
       pids,
       pidHistory,
       pidTick,
+      pidSeenAt,
+      lastSampleAt,
       diag,
       requestSafetyToken,
       ready,
     }),
-    [snapshot, mode, setMode, client, adapters, adaptersError, refreshAdapters, link, linkError, connectAdapter, disconnectAdapter, lease, refreshLease, installLease, syncLease, leaseSync, alerts, pids, pidTick, diag, requestSafetyToken, ready],
+    [snapshot, mode, setMode, client, adapters, adaptersError, refreshAdapters, link, linkError, connectAdapter, disconnectAdapter, lease, refreshLease, installLease, syncLease, leaseSync, alerts, pids, pidTick, pidSeenAt, lastSampleAt, diag, requestSafetyToken, ready],
   );
   return <EdgeContext.Provider value={value}>{children}</EdgeContext.Provider>;
 }

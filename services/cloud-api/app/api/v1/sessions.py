@@ -8,6 +8,9 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import Text, literal, text
+from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import RequirePrincipal
@@ -19,9 +22,9 @@ from app.db.models import (
     TelemetrySample,
 )
 from app.db.session import tenant_session
-from app.observability.metrics import inc
+from app.observability.metrics import count, inc, observe
 from app.services.anonymizer import anonymize_audit_entry, anonymize_case, anonymize_telemetry_row
-from app.services.embeddings import EMBEDDING_MODEL, embed_canonical_text
+from app.services.embeddings import EMBEDDING_MODEL, cosine_similarity, embed_canonical_text
 
 router = APIRouter(prefix="/api/v1", tags=["sessions"])
 
@@ -99,6 +102,64 @@ def list_published_cases(tenant_id: UUID, dtcs: list[str] | None = None) -> list
     return [c for c in items if any(str(code).upper() in wanted for code in c.get("dtcs", []))]
 
 
+CASE_MATCH_LIMIT = 5
+# Second-pass ceiling when the indexed search comes back short (A-ENG-7).
+_WIDEN_CANDIDATES = 500
+# Nearest neighbours fetched from the index before re-ranking.
+_POOL_FACTOR = 8
+
+
+def case_query_text(engine_family: str, dtcs: list[str]) -> str:
+    """The text a case is embedded from at publish time, minus what a diagnosis can't know."""
+    return " ".join(["", engine_family or "", " ".join(dtcs), ""])
+
+
+def find_similar_cases(
+    tenant_id: UUID,
+    dtcs: list[str],
+    engine_family: str = "",
+    limit: int = CASE_MATCH_LIMIT,
+    engine: Engine | None = None,
+) -> list[dict[str, Any]]:
+    """The resolved cases closest to this diagnosis, found server-side (A-ENG-7).
+
+    Eligible cases share at least one DTC. A filtered HNSW search can return
+    fewer rows than exist, so iterative index scans are switched on (pgvector
+    0.8+; a harmless placeholder setting on older versions) and, if the result
+    is still short, a second exact pass reads every eligible row. Candidates
+    are then ranked by codes in common, same engine family, embedding
+    similarity and recency, so a growing corpus can't push the closest case out.
+    """
+    wanted = sorted({d.strip().upper() for d in dtcs if d and d.strip()})
+    if not wanted:
+        return []
+    query_vec = embed_canonical_text(case_query_text(engine_family, wanted))
+    family = (engine_family or "").strip().lower()
+    with tenant_session(tenant_id, engine) as store:
+        store.execute(text("SELECT set_config('hnsw.iterative_scan', 'relaxed_order', true)"))
+        eligible = store.query(ResolvedCase).filter(
+            ResolvedCase.embedding.isnot(None),
+            ResolvedCase.dtcs.op("&&")(literal(wanted, PG_ARRAY(Text))),
+        )
+        pool = limit * _POOL_FACTOR
+        candidates = (
+            eligible.order_by(ResolvedCase.embedding.cosine_distance(query_vec)).limit(pool).all()
+        )
+        if len(candidates) < pool:
+            candidates = eligible.limit(_WIDEN_CANDIDATES).all()
+
+        def rank(row: ResolvedCase) -> tuple:
+            shared = len(wanted_set & {str(d).upper() for d in row.dtcs or []})
+            same_family = bool(family) and (row.engine_family or "").strip().lower() == family
+            similarity = cosine_similarity(list(row.embedding), query_vec)
+            created = row.created_at.timestamp() if row.created_at else 0.0
+            return (-shared, not same_family, -similarity, -created)
+
+        wanted_set = set(wanted)
+        candidates.sort(key=rank)
+        return [_case_to_dict(r) for r in candidates[:limit]]
+
+
 def _case_to_dict(row: ResolvedCase) -> dict[str, Any]:
     return {
         "case_id": str(row.id),
@@ -136,6 +197,7 @@ def sync_session_batch(req: SyncBatchRequest, principal: RequirePrincipal) -> di
         with tenant_session(principal.tenant_id) as store:
             if store.get(SyncBatch, (principal.tenant_id, req.batch_id)) is not None:
                 inc("sessions_sync_deduped")
+                count("obd2_sync_batches_total", outcome="duplicate")
                 return {
                     "status": "duplicate_ignored",
                     "batch_id": req.batch_id,
@@ -217,6 +279,10 @@ def sync_session_batch(req: SyncBatchRequest, principal: RequirePrincipal) -> di
         raise HTTPException(status_code=409, detail="session sync conflict") from exc
 
     inc("sessions_sync_accepted")
+    count("obd2_sync_batches_total", outcome="accepted")
+    lag = datetime.now(UTC).timestamp() - req.watermark_us / 1_000_000
+    if 0 <= lag < 30 * 24 * 3600:  # ignore clocks that are obviously wrong
+        observe("obd2_sync_lag_seconds", lag)
     return {
         "status": "accepted",
         "batch_id": req.batch_id,

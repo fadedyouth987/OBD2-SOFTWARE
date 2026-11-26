@@ -17,7 +17,7 @@ function Evidence({ data }: { data: Record<string, unknown> }) {
   if (!entries.length) return null;
   return (
     <details className="mt-1 text-xs text-muted">
-      <summary className="cursor-pointer">Evidence</summary>
+      <summary className="min-h-[44px] cursor-pointer py-3 leading-5">Evidence</summary>
       <pre className="mt-1 max-h-48 overflow-auto rounded bg-bg p-2 font-mono text-[11px]">{JSON.stringify(data, null, 2)}</pre>
     </details>
   );
@@ -80,7 +80,15 @@ export function AlertsCard() {
   const order = { RED: 0, AMBER: 1, INFO: 2 } as const;
   const sorted = (list: JobAlert[]) => [...list].sort((a, b) => order[a.severity] - order[b.severity]);
 
-  const auditStatus = audit.length ? null : connected && sameVehicle ? (waited ? "none" : "running") : "not_run";
+  const auditStatus = audit.length
+    ? null
+    : connected && sameVehicle
+      ? waited
+        ? "none"
+        : "running"
+      : connected
+        ? "other_vehicle"
+        : "not_run";
 
   return (
     <Card title="Tamper audit & live checks" subtitle="VIN and odometer cross-checked across modules; live fuel-trim and cold-start rules.">
@@ -95,6 +103,11 @@ export function AlertsCard() {
           ) : auditStatus === "none" ? (
             <p className="mt-2 text-sm text-muted">
               <Badge tone="info">Info</Badge> No audit result from the daemon for this connection, so nothing is verified.
+            </p>
+          ) : auditStatus === "other_vehicle" ? (
+            <p className="mt-2 text-sm text-muted">
+              <Badge>Not run</Badge> The connected adapter isn&apos;t the one this job was started on, so the audit
+              isn&apos;t run for this job. Nothing is reported as passed until it runs.
             </p>
           ) : auditStatus === "not_run" ? (
             <p className="mt-2 text-sm text-muted">

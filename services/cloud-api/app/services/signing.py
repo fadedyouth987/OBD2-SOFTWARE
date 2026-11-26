@@ -20,7 +20,9 @@ import os
 import time
 from typing import Any
 
-PINNED_KID = "cloud-2026-11"
+# The key ID put on every token. Change it (with CLOUD_SIGNING_PRIVATE_KEY_HEX) when
+# rotating keys; see docs/runbooks/signing-key-rotation.md.
+PINNED_KID = os.environ.get("CLOUD_SIGNING_KID", "cloud-2026-11").strip() or "cloud-2026-11"
 DEFAULT_LEASE_TTL_S = 72 * 3600  # Community / read-only offline lease
 PAID_LEASE_TTL_S = 12 * 3600  # Paid features: shorter so cancel/downgrade bites sooner
 DEFAULT_PAIRING_TTL_S = 120  # 2-minute browser pairing token (<= 300s MAX_PAIRING_SECS)

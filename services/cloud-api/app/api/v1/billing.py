@@ -14,6 +14,7 @@ from app.api.deps import Principal, RequirePrincipal
 from app.config import get_settings
 from app.db.models import SubscriptionTier, Tenant
 from app.db.session import tenant_session
+from app.observability.metrics import count
 from app.services.billing import (
     ACTIONABLE_EVENTS,
     TRIAL_DAYS,
@@ -240,10 +241,12 @@ async def stripe_webhook(request: Request) -> dict[str, Any]:
     try:
         event = stripe.Webhook.construct_event(payload, signature, secret)
     except ValueError as exc:
+        count("obd2_stripe_webhook_failures_total", reason="bad_payload")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payload"
         ) from exc
     except stripe.SignatureVerificationError as exc:
+        count("obd2_stripe_webhook_failures_total", reason="bad_signature")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid Stripe signature"
         ) from exc
@@ -263,6 +266,7 @@ async def stripe_webhook(request: Request) -> dict[str, Any]:
     try:
         tenant_id = resolve_event_tenant_id(event_dict)
     except Exception as exc:
+        count("obd2_stripe_webhook_failures_total", reason="tenant_lookup")
         log.exception("tenant lookup failed for Stripe event %s", event_id)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -270,6 +274,7 @@ async def stripe_webhook(request: Request) -> dict[str, Any]:
         ) from exc
 
     if tenant_id is None:
+        count("obd2_stripe_webhook_failures_total", reason="unknown_customer")
         # Actionable events must be applied; returning 2xx would drop the retry.
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -280,9 +285,11 @@ async def stripe_webhook(request: Request) -> dict[str, Any]:
         with tenant_session(UUID(str(tenant_id))) as session:
             result = apply_stripe_event(session, event_dict)
     except BillingApplyError as exc:
+        count("obd2_stripe_webhook_failures_total", reason="apply")
         log.exception("Stripe event %s apply failed: %s", event_id, exc)
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     except Exception as exc:
+        count("obd2_stripe_webhook_failures_total", reason="apply")
         log.exception("Stripe event %s apply failed", event_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

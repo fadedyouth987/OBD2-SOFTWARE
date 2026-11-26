@@ -2,15 +2,11 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Badge, Banner, Button, cx } from "@/components/ui";
-import { SAFETY_POLICY } from "@/lib/edge-protocol";
+import { liveChecks, type LiveReadings } from "@/lib/safety-checks";
+
+export type { LiveReadings };
 
 const HOLD_MS = 1500;
-
-export interface LiveReadings {
-  speedKmh: number | null;
-  rpm: number | null;
-  batteryV: number | null;
-}
 
 export interface SafetyConfirmProps {
   open: boolean;
@@ -30,34 +26,6 @@ export interface SafetyConfirmProps {
   confirmLabel?: string;
   onCancel: () => void;
   onConfirm: () => void;
-}
-
-type Check = { label: string; state: "ok" | "fail" | "unknown"; value: string };
-
-function liveChecks(tier: "A" | "B", live: LiveReadings): Check[] {
-  const req = SAFETY_POLICY.tiers[tier];
-  const checks: Check[] = [
-    {
-      label: `Vehicle stationary (${req.max_speed_kmh} km/h)`,
-      state: live.speedKmh === null ? "unknown" : live.speedKmh <= req.max_speed_kmh ? "ok" : "fail",
-      value: live.speedKmh === null ? "no reading" : `${live.speedKmh.toFixed(0)} km/h`,
-    },
-  ];
-  if (req.max_rpm !== null) {
-    checks.push({
-      label: "Engine off (0 rpm)",
-      state: live.rpm === null ? "unknown" : live.rpm <= req.max_rpm ? "ok" : "fail",
-      value: live.rpm === null ? "no reading" : `${live.rpm.toFixed(0)} rpm`,
-    });
-  }
-  if (req.min_battery_v !== null) {
-    checks.push({
-      label: `Battery at least ${req.min_battery_v} V`,
-      state: live.batteryV === null ? "unknown" : live.batteryV >= req.min_battery_v ? "ok" : "fail",
-      value: live.batteryV === null ? "no reading" : `${live.batteryV.toFixed(1)} V`,
-    });
-  }
-  return checks;
 }
 
 /**
@@ -80,8 +48,12 @@ export function SafetyConfirmModal(props: SafetyConfirmProps) {
   const checklist = props.checklist ?? [];
   const checks = liveChecks(props.tier, props.live);
   const liveFail = checks.some((c) => c.state === "fail");
+  const liveUnknown = checks.some((c) => c.state === "unknown");
   const allTicked = checklist.every((_, i) => ticked[i]);
-  const canHold = allTicked && !liveFail && !busy;
+  const canHold = allTicked && !liveFail && !liveUnknown && !busy;
+  // Read every animation frame, so a check that changes mid-hold stops the hold.
+  const canHoldRef = useRef(canHold);
+  canHoldRef.current = canHold;
 
   useEffect(() => {
     if (!open) return;
@@ -106,6 +78,12 @@ export function SafetyConfirmModal(props: SafetyConfirmProps) {
   const startHold = useCallback(() => {
     if (!canHold || raf.current) return;
     const step = (ts: number) => {
+      if (!canHoldRef.current) {
+        raf.current = null;
+        started.current = null;
+        setProgress(0);
+        return;
+      }
       if (started.current === null) started.current = ts;
       const pct = Math.min(100, ((ts - started.current) / HOLD_MS) * 100);
       setProgress(pct);
@@ -122,6 +100,11 @@ export function SafetyConfirmModal(props: SafetyConfirmProps) {
   }, [canHold, props]);
 
   useEffect(() => stopHold, [stopHold]);
+
+  // A disabled button gets no pointer or key events, so its release can't stop the hold.
+  useEffect(() => {
+    if (!canHold) stopHold();
+  }, [canHold, stopHold]);
 
   useEffect(() => {
     if (!open) return;
@@ -200,14 +183,17 @@ export function SafetyConfirmModal(props: SafetyConfirmProps) {
                 <span className="tabular text-xs text-muted">
                   {c.value}
                   <span className="sr-only">
-                    {c.state === "ok" ? " (met)" : c.state === "fail" ? " (not met)" : " (unknown, the daemon will check)"}
+                    {c.state === "ok" ? " (met)" : c.state === "fail" ? " (not met)" : " (unknown, confirming is blocked)"}
                   </span>
                 </span>
               </li>
             ))}
           </ul>
-          {checks.some((c) => c.state === "unknown") ? (
-            <p className="mt-1 text-xs text-faint">No live reading yet; the daemon reads it before it issues a token.</p>
+          {liveUnknown ? (
+            <p className="mt-1 text-xs text-warn">
+              Waiting for a fresh reading. Confirming unlocks when every check is met, because the daemon refuses
+              anything it can&apos;t verify.
+            </p>
           ) : null}
         </div>
 
@@ -217,10 +203,10 @@ export function SafetyConfirmModal(props: SafetyConfirmProps) {
             <ul className="mt-1 space-y-1">
               {checklist.map((item, i) => (
                 <li key={item}>
-                  <label className="flex min-h-[40px] cursor-pointer items-center gap-2 rounded-md px-1 text-sm hover:bg-raised">
+                  <label className="flex min-h-[44px] cursor-pointer items-center gap-2 rounded-md px-1 text-sm hover:bg-raised">
                     <input
                       type="checkbox"
-                      className="h-4 w-4"
+                      className="h-5 w-5"
                       checked={!!ticked[i]}
                       onChange={(e) => setTicked((t) => t.map((v, j) => (j === i ? e.target.checked : v)))}
                     />
@@ -259,6 +245,7 @@ export function SafetyConfirmModal(props: SafetyConfirmProps) {
             onPointerUp={stopHold}
             onPointerCancel={stopHold}
             onPointerLeave={stopHold}
+            onBlur={stopHold}
             onKeyDown={(e) => {
               if ((e.key === " " || e.key === "Enter") && !e.repeat) {
                 e.preventDefault();

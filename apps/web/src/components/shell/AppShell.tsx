@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { BrandLockup } from "@/components/brand/Logo";
 import { Badge, Banner, Button, cx } from "@/components/ui";
 import { Menu, MenuItem } from "@/components/shell/Menu";
 import { useTheme } from "@/components/shell/theme";
@@ -106,7 +107,7 @@ function VehicleChip() {
   const { active } = useActiveJob();
   if (!active) {
     return (
-      <Link href="/jobs/new" className="hidden min-h-[40px] items-center rounded-lg border border-dashed border-line px-2.5 text-xs text-muted hover:text-text md:inline-flex">
+      <Link href="/jobs/new" className="hidden min-h-[44px] items-center rounded-lg border border-dashed border-line px-2.5 text-xs text-muted hover:text-text md:inline-flex">
         No vehicle · Start a job
       </Link>
     );
@@ -114,7 +115,7 @@ function VehicleChip() {
   return (
     <Link
       href={`/jobs/${active.id}`}
-      className="hidden min-h-[40px] max-w-[240px] flex-col justify-center rounded-lg border border-line bg-raised px-2.5 text-xs leading-tight hover:border-muted md:flex"
+      className="hidden min-h-[44px] max-w-[240px] flex-col justify-center rounded-lg border border-line bg-raised px-2.5 text-xs leading-tight hover:border-muted md:flex"
       title="Open the active job"
     >
       <span className="truncate font-semibold">{active.vehicle_label || "Unnamed vehicle"}</span>
@@ -157,7 +158,7 @@ function DeviceChip() {
   return (
     <Link
       href="/devices"
-      className="flex min-h-[40px] max-w-[220px] items-center gap-2 rounded-lg border border-line bg-raised px-2.5 text-xs hover:border-muted"
+      className="flex min-h-[44px] max-w-[220px] items-center gap-2 rounded-lg border border-line bg-raised px-2.5 text-xs hover:border-muted"
     >
       <span aria-hidden className={cx("h-2.5 w-2.5 shrink-0 rounded-full", tone)} />
       <span className="flex min-w-0 flex-col leading-tight">
@@ -178,7 +179,7 @@ function LeaseChip() {
   return (
     <Link
       href="/devices#lease"
-      className="hidden min-h-[40px] flex-col justify-center rounded-lg border border-line bg-raised px-2.5 text-xs leading-tight hover:border-muted lg:flex"
+      className="hidden min-h-[44px] flex-col justify-center rounded-lg border border-line bg-raised px-2.5 text-xs leading-tight hover:border-muted lg:flex"
       title={exp ? `Offline lease ends ${formatDateTime(exp)}` : "Built-in Community lease"}
     >
       <span className="font-semibold">Lease: {TIER_LABEL[lease.lease_tier]}</span>
@@ -212,7 +213,7 @@ function UsageChip() {
   return (
     <Link
       href="/workshop/billing"
-      className="hidden min-h-[40px] flex-col justify-center rounded-lg border border-line bg-raised px-2.5 text-xs leading-tight hover:border-muted xl:flex"
+      className="hidden min-h-[44px] flex-col justify-center rounded-lg border border-line bg-raised px-2.5 text-xs leading-tight hover:border-muted xl:flex"
       title="Plan and usage"
     >
       <span className="font-semibold">{TIER_LABEL[me.entitlements.tier]} plan</span>
@@ -306,7 +307,7 @@ function MobileNav() {
         aria-label="Open menu"
         aria-expanded={open}
         onClick={() => setOpen(true)}
-        className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg border border-line bg-raised lg:hidden"
+        className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-line bg-raised lg:hidden"
       >
         ☰
       </button>
@@ -315,7 +316,7 @@ function MobileNav() {
           <div className="absolute inset-0 bg-black/60" onClick={() => setOpen(false)} />
           <div ref={panel} className="absolute inset-y-0 left-0 w-72 border-r border-line bg-panel p-4">
             <div className="mb-4 flex items-center justify-between">
-              <span className="text-sm font-extrabold">{APP_NAME}</span>
+              <BrandLockup />
               <Button variant="ghost" size="sm" onClick={() => setOpen(false)} aria-label="Close menu">
                 ✕
               </Button>
@@ -359,7 +360,7 @@ function GlobalBanners() {
         </Banner>
       ) : null}
       {me && me.entitlements.billing_status === "past_due" ? (
-        <Banner tone="danger" title="Payment overdue" action={<Link className="text-sm font-semibold underline" href="/workshop/billing">Fix billing</Link>}>
+        <Banner tone="danger" title="Payment overdue" action={<Link className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center text-sm font-semibold underline" href="/workshop/billing">Fix billing</Link>}>
           {grace
             ? `Paid features stay on until ${formatDateTime(grace)}, then the workshop drops to Community.`
             : "Paid features are paused until billing is fixed."}
@@ -376,9 +377,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         Skip to content
       </a>
       <aside className="no-print hidden border-r border-line bg-panel p-4 lg:block">
-        <Link href="/home" className="mb-6 flex items-center gap-2 px-1">
-          <span aria-hidden className="h-6 w-1.5 rounded bg-accent" />
-          <span className="text-sm font-extrabold tracking-tight">{APP_NAME}</span>
+        <Link href="/home" className="mb-6 flex min-h-[44px] items-center px-1" aria-label={`${APP_NAME} home`}>
+          <BrandLockup />
         </Link>
         <NavLinks />
       </aside>

@@ -8,6 +8,7 @@ import { useEdge } from "@/context/edge";
 import { api, ApiError, type JobList } from "@/lib/api";
 import { TIER_LABEL } from "@/lib/entitlements";
 import { formatDateTime, relative } from "@/lib/format";
+import { AccountUnavailable } from "@/components/shell/AccountUnavailable";
 
 function Step({ done, title, children, href, cta }: { done: boolean; title: string; children: React.ReactNode; href?: string; cta?: string }) {
   return (
@@ -46,7 +47,7 @@ export default function HomePage() {
       .catch((e) => setError(e instanceof ApiError ? e : new ApiError(0, String(e))));
   }, [token]);
 
-  if (!me) return null;
+  if (!me) return <AccountUnavailable title="Home" />;
   const name = me.user.display_name?.split(" ")[0];
   const daemonOk = edge.ready && edge.mode === "daemon";
   const leaseOk = !!edge.lease && me.entitlements.features.every((f) => edge.lease!.features.includes(f));
@@ -89,7 +90,7 @@ export default function HomePage() {
             </Card>
           ) : null}
 
-          <Card title="Open jobs" actions={<Link href="/jobs" className="text-sm font-semibold text-accent-ink underline">All jobs</Link>}>
+          <Card title="Open jobs" actions={<Link href="/jobs" className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center text-sm font-semibold text-accent-ink underline">All jobs</Link>}>
             {error ? (
               <Banner tone="danger">{error.offline ? "You're offline; jobs will load when you're back." : error.message}</Banner>
             ) : !open ? (
@@ -122,7 +123,7 @@ export default function HomePage() {
         </div>
 
         <div className="space-y-4">
-          <Card title="Vehicle link" actions={<Link href="/devices" className="text-sm font-semibold text-accent-ink underline">Devices</Link>}>
+          <Card title="Vehicle link" actions={<Link href="/devices" className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center text-sm font-semibold text-accent-ink underline">Devices</Link>}>
             {connected ? (
               <p className="text-sm">
                 <Badge tone="ok">Connected</Badge> {edge.link?.adapter?.display_name ?? edge.link?.adapterId}
@@ -136,7 +137,7 @@ export default function HomePage() {
               <p className="text-sm text-muted">{edge.mode === "browser-sim" ? "Browser demo is off." : "Daemon not connected."}</p>
             )}
           </Card>
-          <Card title="This month" actions={<Link href="/workshop/billing" className="text-sm font-semibold text-accent-ink underline">Plan</Link>}>
+          <Card title="This month" actions={<Link href="/workshop/billing" className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center text-sm font-semibold text-accent-ink underline">Plan</Link>}>
             <div className="space-y-3">
               <Meter label="AI diagnoses & questions" used={me.usage.ai_diagnoses_used} limit={me.entitlements.ai_diagnoses} />
               <Meter label="Schematic pages" used={me.usage.schematic_pages_used} limit={me.entitlements.schematic_pages} />

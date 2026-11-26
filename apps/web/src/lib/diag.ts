@@ -121,6 +121,10 @@ export function nrcText(code: number, name?: string): string {
 
 export const hexId = (n: number): string => `0x${n.toString(16).toUpperCase().padStart(3, "0")}`;
 
+/** A CAN identifier as shown in CAN Studio: 3 hex digits for 11-bit, 8 for 29-bit extended (A-DES-7). */
+export const canIdText = (id: number, extended: boolean): string =>
+  extended ? `0x${(id >>> 0).toString(16).toUpperCase().padStart(8, "0")}` : hexId(id);
+
 /** Parses "0x7E0" from the vehicle registry; null when not a CAN id. */
 export function parseRegistryId(text: string): number | null {
   const m = /^0x([0-9a-f]+)$/i.exec(text.trim());

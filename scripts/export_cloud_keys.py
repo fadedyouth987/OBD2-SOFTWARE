@@ -3,6 +3,11 @@
 
 Usage:
   python3 scripts/export_cloud_keys.py --kid cloud-2026-11 --pubkey-hex <64-hex-chars>
+  python3 scripts/export_cloud_keys.py --key cloud-2027-05=<hex> --key cloud-2026-11=<hex>
+
+Pass --key more than once during a signing-key rotation, newest first, so daemons
+trust both the new and the old key until every lease signed by the old one has
+expired (docs/runbooks/signing-key-rotation.md).
 
 Safe pinning:
   CLOUD_KEYS is empty by default, which is the secure COMMUNITY-only mode.
@@ -27,11 +32,7 @@ pub struct CloudKey {{
 }}
 
 pub const CLOUD_KEYS: &[CloudKey] = &[
-    CloudKey {{
-        kid: "{kid}",
-        public_key: [{byte_list}],
-    }},
-];
+{entries}];
 
 #[derive(Clone, Debug, Default)]
 pub struct KeyRing {{
@@ -68,17 +69,39 @@ impl KeyRing {{
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--kid", default="cloud-2026-11")
-    parser.add_argument("--pubkey-hex", required=True, help="32-byte Ed25519 public key in hex (64 chars)")
+    parser.add_argument("--pubkey-hex", help="32-byte Ed25519 public key in hex (64 chars)")
+    parser.add_argument(
+        "--key",
+        action="append",
+        default=[],
+        metavar="KID=HEX",
+        help="A key to pin; repeat during rotation, newest first",
+    )
     parser.add_argument("--out", default="apps/edge-daemon/src/auth/cloud_keys.rs")
     args = parser.parse_args()
 
-    raw = bytes.fromhex(args.pubkey_hex.strip())
-    if len(raw) != 32:
-        raise SystemExit(f"Expected 32-byte Ed25519 public key, got {len(raw)} bytes")
+    pairs: list[tuple[str, str]] = []
+    for item in args.key:
+        kid, sep, hexkey = item.partition("=")
+        if not sep or not kid or not hexkey:
+            raise SystemExit(f"--key must look like KID=HEX, got {item!r}")
+        pairs.append((kid.strip(), hexkey.strip()))
+    if args.pubkey_hex:
+        pairs.append((args.kid, args.pubkey_hex.strip()))
+    if not pairs:
+        raise SystemExit("Give --pubkey-hex or at least one --key KID=HEX")
+    if len({kid for kid, _ in pairs}) != len(pairs):
+        raise SystemExit("Each kid can be pinned once")
 
-    byte_list = ", ".join(f"0x{b:02x}" for b in raw)
-    Path(args.out).write_text(TEMPLATE.format(kid=args.kid, byte_list=byte_list), encoding="utf-8")
-    print(f"Pinned {args.kid} -> {args.out}")
+    entries = []
+    for kid, hexkey in pairs:
+        raw = bytes.fromhex(hexkey)
+        if len(raw) != 32:
+            raise SystemExit(f"{kid}: expected a 32-byte Ed25519 public key, got {len(raw)} bytes")
+        byte_list = ", ".join(f"0x{b:02x}" for b in raw)
+        entries.append(f'    CloudKey {{\n        kid: "{kid}",\n        public_key: [{byte_list}],\n    }},\n')
+    Path(args.out).write_text(TEMPLATE.format(entries="".join(entries)), encoding="utf-8")
+    print(f"Pinned {', '.join(kid for kid, _ in pairs)} -> {args.out}")
     print(
         "WARNING: this key will be trusted on the vehicle. Use a production "
         "public key only; keep CLOUD_KEYS empty for the safe COMMUNITY default."

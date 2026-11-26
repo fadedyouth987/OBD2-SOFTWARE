@@ -21,7 +21,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile, 
 from app.api.deps import RequirePrincipal
 from app.db.models import WiringSchematic
 from app.db.session import tenant_session
-from app.observability.metrics import inc
+from app.observability.metrics import count, inc
 from app.services import object_store
 from app.services.billing import (
     charge_schematic_pages,
@@ -35,7 +35,7 @@ from app.services.permissions import Permission, require_own_or
 router = APIRouter(prefix="/api/v1/schematics", tags=["schematics"])
 
 MAX_BYTES = 25 * 1024 * 1024
-MAX_PAGES = 300
+MAX_PAGES = 200  # A-ENG-8: same cap as the ingest worker
 
 _TYPES = {
     "application/pdf": "pdf",
@@ -130,8 +130,13 @@ async def upload_schematic(
     content_type = sniff_type(data)
     if content_type is None:
         raise HTTPException(status_code=415, detail="Upload a PDF, PNG or JPEG.")
-    pages = count_pages(data, content_type)
+    try:
+        pages = count_pages(data, content_type)
+    except HTTPException:
+        count("obd2_schematic_ingest_failures_total", reason="unreadable")
+        raise
     if pages > MAX_PAGES:
+        count("obd2_schematic_ingest_failures_total", reason="too_many_pages")
         raise HTTPException(
             status_code=422,
             detail=f"That PDF has {pages} pages; split it into {MAX_PAGES} or fewer.",
@@ -143,6 +148,7 @@ async def upload_schematic(
     try:
         object_store.put(key, data, content_type)
     except object_store.StorageError as exc:
+        count("obd2_schematic_ingest_failures_total", reason="storage")
         raise HTTPException(
             status_code=503, detail="File storage is unavailable. Try again shortly."
         ) from exc
@@ -183,6 +189,7 @@ async def upload_schematic(
         session.refresh(row)
         out = _row_json(row)
     inc("schematic_uploaded")
+    count("obd2_schematic_uploads_total")
     return {"schematic": out, "pages_used": used, "pages_limit": limit}
 
 

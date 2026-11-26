@@ -71,7 +71,7 @@ export function DbcCard({
           <input
             type="file"
             accept=".dbc,text/plain"
-            className="mt-1 block w-full text-sm file:mr-3 file:min-h-[40px] file:rounded-lg file:border file:border-line file:bg-raised file:px-3 file:text-text"
+            className="mt-1 block w-full text-sm file:mr-3 file:min-h-[44px] file:rounded-lg file:border file:border-line file:bg-raised file:px-3 file:text-text"
             onChange={async (e) => {
               const f = e.target.files?.[0];
               setError(null);

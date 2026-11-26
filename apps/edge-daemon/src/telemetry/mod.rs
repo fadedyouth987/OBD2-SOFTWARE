@@ -1,5 +1,8 @@
 //! Edge daemon observability & Prometheus metrics (Task 5.2, A-CEO-5).
 
+pub mod logfile;
+pub mod support_bundle;
+
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Lightweight lock-free counters exposed by the edge daemon.

@@ -88,11 +88,11 @@ function Header() {
           </Link>{" "}
           / Job
         </p>
-        <h1 className="mt-1 flex flex-wrap items-center gap-2 text-xl font-extrabold tracking-tight">
-          {job.vehicle_label || "Unnamed vehicle"}
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          <h1 className="text-xl font-extrabold tracking-tight">{job.vehicle_label || "Unnamed vehicle"}</h1>
           {job.status === "OPEN" ? <Badge tone="info">Open</Badge> : <Badge tone="ok">Closed</Badge>}
           {job.adapter_kind === "BROWSER_DEMO" ? <Badge tone="warn">Demo data</Badge> : null}
-        </h1>
+        </div>
         <p className="mt-1 text-sm text-muted">
           <span className="font-mono">{job.vin_redacted ?? "VIN not read"}</span>
           {job.odometer_km !== null ? ` · ${job.odometer_km.toLocaleString("en-AU")} km` : ""}

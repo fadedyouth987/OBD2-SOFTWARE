@@ -182,7 +182,7 @@ export default function ServicePage() {
   return (
     <div className="space-y-4">
       {access === "plan_locked" ? (
-        <Banner tone="info" title="Service functions need Active diagnostics" action={<Link href="/workshop/billing" className="text-sm font-semibold underline">See plans</Link>}>
+        <Banner tone="info" title="Service functions need Active diagnostics" action={<Link href="/workshop/billing" className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center text-sm font-semibold underline">See plans</Link>}>
           You can browse them on Community; running one needs Pro or higher.
         </Banner>
       ) : open && connected ? (
@@ -196,7 +196,7 @@ export default function ServicePage() {
           title="No verified procedures for this vehicle"
           action={
             list.licensed_catalogue ? (
-              <Link href={`/jobs/${job?.id ?? ""}`} className="text-sm font-semibold underline">
+              <Link href={`/jobs/${job?.id ?? ""}`} className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center text-sm font-semibold underline">
                 Check make, model and year
               </Link>
             ) : undefined

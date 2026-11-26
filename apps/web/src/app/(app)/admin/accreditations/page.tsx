@@ -146,7 +146,7 @@ function Review({ item, onDone }: { item: AdminAccreditation; onDone: (msg: stri
             )}
           </div>
           <details>
-            <summary className="cursor-pointer text-xs font-semibold text-muted">History ({item.events.length})</summary>
+            <summary className="min-h-[44px] cursor-pointer py-3 leading-5 text-xs font-semibold text-muted">History ({item.events.length})</summary>
             <ul className="mt-1 space-y-0.5 text-xs">
               {item.events.map((ev, i) => (
                 <li key={i}>

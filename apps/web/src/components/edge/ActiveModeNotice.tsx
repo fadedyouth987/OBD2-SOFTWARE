@@ -23,14 +23,14 @@ export function ActiveModeNotice({ what }: { what: string }) {
 
   if (access === "plan_locked") {
     return (
-      <Banner tone="info" title={`${what} needs Active diagnostics`} action={<Link href="/workshop/billing" className="text-sm font-semibold underline">See plans</Link>}>
+      <Banner tone="info" title={`${what} needs Active diagnostics`} action={<Link href="/workshop/billing" className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center text-sm font-semibold underline">See plans</Link>}>
         Your plan is read-only. Pro and higher can clear codes and run service functions, each with a safety confirmation.
       </Banner>
     );
   }
   if (access === "lease_missing" || access === "daemon_needed") {
     return (
-      <Banner tone="warn" title={`${what} needs a fresh lease on this computer`} action={<Link href="/devices#lease" className="text-sm font-semibold underline">Refresh lease</Link>}>
+      <Banner tone="warn" title={`${what} needs a fresh lease on this computer`} action={<Link href="/devices#lease" className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center text-sm font-semibold underline">Refresh lease</Link>}>
         Your plan includes Active diagnostics, but the daemon&apos;s lease doesn&apos;t yet.
       </Banner>
     );

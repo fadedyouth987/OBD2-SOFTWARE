@@ -9,7 +9,7 @@ import { useJob } from "@/context/job";
 import { useEdge } from "@/context/edge";
 import { candidateIds, classifyBits, ingest, rateHz, type BitClass, type FrameIn, type IdStats } from "@/lib/can-analysis";
 import { decodeSignal, signalBits } from "@/lib/dbc";
-import { hexId } from "@/lib/diag";
+import { canIdText, hexId } from "@/lib/diag";
 import { FEATURE_INFO, featureAccess } from "@/lib/entitlements";
 import { formatReading } from "@/lib/format";
 
@@ -22,10 +22,6 @@ const BIT_STYLE: Record<BitClass, string> = {
   unused: "bg-transparent text-transparent",
 };
 const BIT_LABEL: Record<BitClass, string> = { static: "never changed", noise: "changed in baseline", candidate: "changed only during the action", unused: "beyond frame length" };
-
-function idText(id: number, extended: boolean) {
-  return extended ? `0x${id.toString(16).toUpperCase().padStart(8, "0")}` : hexId(id);
-}
 
 export default function CanStudioPage() {
   const { me } = useAuth();
@@ -100,7 +96,7 @@ export default function CanStudioPage() {
 
   const leaseProblem =
     access === "lease_missing" ? (
-      <Banner tone="warn" title="The daemon's lease doesn't include CAN Studio yet" action={<Link className="text-sm font-semibold underline" href="/devices#lease">Refresh lease</Link>}>
+      <Banner tone="warn" title="The daemon's lease doesn't include CAN Studio yet" action={<Link className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center text-sm font-semibold underline" href="/devices#lease">Refresh lease</Link>}>
         The daemon only streams raw frames with a lease that includes it. Refresh the lease, then reconnect the vehicle.
       </Banner>
     ) : null;
@@ -173,7 +169,7 @@ export default function CanStudioPage() {
                     >
                       <td className="py-1 pr-2">
                         <button type="button" className="font-mono text-xs underline-offset-2 hover:underline" onClick={() => setSelected(r.id)} aria-pressed={selected === r.id}>
-                          {idText(r.id, r.extended)}
+                          {canIdText(r.id, r.extended)}
                         </button>
                       </td>
                       <td className="py-1 pr-2 text-xs text-muted">{dbc?.dbc.messages.get(r.id)?.name ?? ""}</td>
@@ -256,7 +252,7 @@ export default function CanStudioPage() {
       </div>
 
       {sel ? (
-        <Card title={`${idText(sel.id, sel.extended)}${selMsg ? ` · ${selMsg.name}` : ""}`} subtitle={`${sel.dlc} bytes · ${rateHz(sel).toFixed(1)} Hz · ${sel.count.toLocaleString("en-AU")} frames`} actions={<Button size="sm" variant="ghost" onClick={() => setSelected(null)}>Close</Button>}>
+        <Card title={`${canIdText(sel.id, sel.extended)}${selMsg ? ` · ${selMsg.name}` : ""}`} subtitle={`${sel.dlc} bytes · ${rateHz(sel).toFixed(1)} Hz · ${sel.count.toLocaleString("en-AU")} frames`} actions={<Button size="sm" variant="ghost" onClick={() => setSelected(null)}>Close</Button>}>
           <div className="grid gap-4 lg:grid-cols-2">
             <div>
               <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">Bits (byte 0 at top, bit 7 left)</h3>

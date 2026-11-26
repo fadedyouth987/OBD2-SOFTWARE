@@ -34,7 +34,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       aria-busy={busy || undefined}
       className={cx(
         "inline-flex items-center justify-center gap-2 rounded-lg border font-semibold transition disabled:cursor-not-allowed disabled:opacity-45",
-        size === "sm" ? "min-h-[36px] px-3 text-xs" : "min-h-[44px] px-4 text-sm",
+        size === "sm" ? "min-h-[44px] min-w-[44px] px-3 text-xs" : "min-h-[44px] px-4 text-sm",
         BUTTON_TONE[variant],
         className,
       )}
@@ -62,7 +62,7 @@ export function ButtonLink({
       href={href}
       className={cx(
         "inline-flex items-center justify-center gap-2 rounded-lg border font-semibold transition",
-        size === "sm" ? "min-h-[36px] px-3 text-xs" : "min-h-[44px] px-4 text-sm",
+        size === "sm" ? "min-h-[44px] min-w-[44px] px-3 text-xs" : "min-h-[44px] px-4 text-sm",
         BUTTON_TONE[variant],
         className,
       )}
@@ -303,7 +303,7 @@ export function Select({
       <select
         id={fid}
         className={cx(
-          hideLabel ? "min-h-[36px]" : "mt-1 min-h-[44px]",
+          hideLabel ? "min-h-[44px]" : "mt-1 min-h-[44px]",
           "w-full rounded-lg border border-line bg-bg px-3 text-sm text-text",
         )}
         {...rest}

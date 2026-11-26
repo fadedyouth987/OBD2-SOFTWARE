@@ -181,7 +181,7 @@ function BillingInner() {
                 role="radio"
                 aria-checked={interval === i}
                 onClick={() => setInterval_(i)}
-                className={`min-h-[36px] rounded-md px-3 text-sm font-semibold ${interval === i ? "bg-raised text-text" : "text-muted"}`}
+                className={`min-h-[44px] rounded-md px-3 text-sm font-semibold ${interval === i ? "bg-raised text-text" : "text-muted"}`}
               >
                 {i === "month" ? "Monthly" : "Annual"}
               </button>
