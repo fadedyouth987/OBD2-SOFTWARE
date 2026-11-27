@@ -7,6 +7,8 @@
   last_error recorded) and ``python -m app.cli drain-can-traces`` uploads it
   later. Once uploaded the body is dropped and the row stays as the session's
   trace index (key, frame count, time range).
+- Downgrade refuses while any trace is pending, and drops the key-to-session
+  index for uploaded objects.
 - Tenant RLS, forced. The app role can read, insert and mark uploads; it
   cannot delete. The cross-tenant drain runs as the owner role.
 
@@ -49,8 +51,9 @@ def upgrade() -> None:
         )
         """
     )
+    # Matches the drain's ORDER BY attempts, id over pending rows.
     op.execute(
-        "CREATE INDEX can_trace_outbox_pending ON can_trace_outbox (created_at) "
+        "CREATE INDEX can_trace_outbox_pending ON can_trace_outbox (attempts, id) "
         "WHERE uploaded_at IS NULL"
     )
     op.execute("CREATE INDEX can_trace_outbox_session ON can_trace_outbox (tenant_id, session_id)")
@@ -65,5 +68,17 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Pending rows hold the only copy of traces S3 has not received yet.
+    pending = (
+        op.get_bind()
+        .exec_driver_sql("SELECT count(*) FROM can_trace_outbox WHERE uploaded_at IS NULL")
+        .scalar_one()
+    )
+    if pending:
+        raise RuntimeError(
+            f"{pending} CAN trace(s) are not in S3 yet; run `python -m app.cli drain-can-traces` "
+            "until it reports 0 before downgrading (downgrading also drops the index from "
+            "S3 keys to sessions)"
+        )
     op.execute(f"REVOKE ALL ON TABLE can_trace_outbox FROM {APP_ROLE}")
     op.execute("DROP TABLE IF EXISTS can_trace_outbox")

@@ -45,6 +45,9 @@ allowed_origins = [
     ).split(",")
     if o.strip()
 ]
+# Edge sync batches may arrive gzip-compressed (Task 2.2). Added before CORS so
+# it runs inside it: browsers can read its refusals.
+app.add_middleware(GzipRequestMiddleware, paths={"/api/v1/sessions/sync"})
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -53,8 +56,6 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=[REQUEST_ID_HEADER],
 )
-# Edge sync batches may arrive gzip-compressed (Task 2.2).
-app.add_middleware(GzipRequestMiddleware, paths={"/api/v1/sessions/sync"})
 # Outermost, so the request ID covers CORS responses and errors too.
 app.add_middleware(RequestIdMiddleware)
 

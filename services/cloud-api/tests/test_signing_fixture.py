@@ -33,4 +33,6 @@ def test_fixture_tokens_carry_the_production_shape():
     assert _claims(lease)["aud"] == "edge-daemon" and _claims(pairing)["aud"] == "edge-ws"
     assert _claims(pairing)["origin"] == fx.ORIGIN
     # The fixture key is not the key the rest of the suite signs with.
-    assert data["public_key_hex"] != bytes.fromhex("cd" * 32).hex()
+    from app.services import signing
+
+    assert data["public_key_hex"] != signing.public_key_raw().hex()

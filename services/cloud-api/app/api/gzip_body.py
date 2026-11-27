@@ -2,31 +2,65 @@
 
 A pure ASGI middleware: for the listed paths, a body sent with
 ``Content-Encoding: gzip`` is inflated before FastAPI parses it. Plain JSON
-passes through untouched, so existing callers are unaffected. Limits stop a
-gzip bomb: at most ``MAX_COMPRESSED`` bytes are read and at most ``MAX_INFLATED``
-produced (413 past either); corrupt or truncated gzip is a 400, any other
-encoding a 415.
+passes through untouched, so existing callers are unaffected.
+
+A small gzip body can expand a thousandfold, so inflating is only done for a
+caller whose session token verifies (a cheap signature check, before a single
+body byte is read); the route still runs its full authorization. Inflating runs
+in a worker thread, never on the event loop. Limits: at most ``MAX_COMPRESSED``
+bytes read and ``MAX_INFLATED`` produced (413 past either); corrupt, truncated
+or trailing data is a 400 (one gzip member only); any other encoding a 415.
+Register it inside CORS so browsers can read these refusals.
 """
 
 from __future__ import annotations
 
-import json
 import zlib
-from collections.abc import Awaitable, Callable, Iterable
-from typing import Any
+from collections.abc import Iterable
+
+from anyio import to_thread
+from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from app.services.signing import SigningKeyError, verify_session_jwt
 
 MAX_COMPRESSED = 8 * 1024 * 1024
 MAX_INFLATED = 32 * 1024 * 1024
 
-Scope = dict[str, Any]
-Message = dict[str, Any]
-Receive = Callable[[], Awaitable[Message]]
-Send = Callable[[Message], Awaitable[None]]
-App = Callable[[Scope, Receive, Send], Awaitable[None]]
+
+class _BadBody(Exception):
+    def __init__(self, status: int, detail: str) -> None:
+        self.status, self.detail = status, detail
+
+
+def _inflate(raw: bytes) -> bytes:
+    inflater = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    try:
+        body = inflater.decompress(raw, MAX_INFLATED + 1)
+    except zlib.error as exc:
+        raise _BadBody(400, "body is not valid gzip") from exc
+    if len(body) > MAX_INFLATED or inflater.unconsumed_tail:
+        raise _BadBody(413, f"body over {MAX_INFLATED // 2**20} MiB once inflated")
+    if not inflater.eof:
+        raise _BadBody(400, "gzip body is truncated")
+    if inflater.unused_data:
+        raise _BadBody(400, "data after the gzip stream (send one gzip member)")
+    return body
+
+
+def _session_ok(headers: dict[bytes, bytes]) -> bool:
+    scheme, _, token = headers.get(b"authorization", b"").decode("latin-1").partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return False
+    try:
+        verify_session_jwt(token.strip())
+    except (SigningKeyError, ValueError, KeyError):
+        return False
+    return True
 
 
 class GzipRequestMiddleware:
-    def __init__(self, app: App, paths: Iterable[str]) -> None:
+    def __init__(self, app: ASGIApp, paths: Iterable[str]) -> None:
         self.app = app
         self.paths = frozenset(paths)
 
@@ -39,8 +73,15 @@ class GzipRequestMiddleware:
         if encoding == "identity":
             await self.app(scope, receive, send)
             return
+
+        async def refuse(status: int, detail: str) -> None:
+            await JSONResponse({"detail": detail}, status_code=status)(scope, receive, send)
+
         if encoding != "gzip":
-            await _error(send, 415, "Content-Encoding must be gzip or identity")
+            await refuse(415, "Content-Encoding must be gzip or identity")
+            return
+        if not _session_ok(headers):
+            await refuse(401, "Not authenticated")
             return
 
         raw = bytearray()
@@ -52,20 +93,14 @@ class GzipRequestMiddleware:
             raw += message.get("body", b"")
             more = message.get("more_body", False)
             if len(raw) > MAX_COMPRESSED:
-                await _error(send, 413, f"compressed body over {MAX_COMPRESSED // 2**20} MiB")
+                await refuse(413, f"compressed body over {MAX_COMPRESSED // 2**20} MiB")
                 return
-        inflater = zlib.decompressobj(16 + zlib.MAX_WBITS)
         try:
-            body = inflater.decompress(bytes(raw), MAX_INFLATED + 1)
-        except zlib.error:
-            await _error(send, 400, "body is not valid gzip")
+            body = await to_thread.run_sync(_inflate, bytes(raw))
+        except _BadBody as exc:
+            await refuse(exc.status, exc.detail)
             return
-        if len(body) > MAX_INFLATED or inflater.unconsumed_tail:
-            await _error(send, 413, f"body over {MAX_INFLATED // 2**20} MiB once inflated")
-            return
-        if not inflater.eof:
-            await _error(send, 400, "gzip body is truncated")
-            return
+        del raw
 
         rewritten = [
             (k, v) for k, v in scope["headers"] if k not in (b"content-encoding", b"content-length")
@@ -80,18 +115,3 @@ class GzipRequestMiddleware:
             return await receive()
 
         await self.app({**scope, "headers": rewritten}, inflated_receive, send)
-
-
-async def _error(send: Send, status: int, detail: str) -> None:
-    payload = json.dumps({"detail": detail}).encode()
-    await send(
-        {
-            "type": "http.response.start",
-            "status": status,
-            "headers": [
-                (b"content-type", b"application/json"),
-                (b"content-length", str(len(payload)).encode()),
-            ],
-        }
-    )
-    await send({"type": "http.response.body", "body": payload})

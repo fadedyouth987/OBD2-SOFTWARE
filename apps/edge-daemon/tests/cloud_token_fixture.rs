@@ -57,12 +57,18 @@ fn cloud_lease_verifies_with_pinned_key() {
     let want = &f["expected"]["lease"];
     assert_eq!(lease.tenant_id.as_deref(), Some(s(want, &["tenant_id"])));
     assert_eq!(lease.user_id.as_deref(), Some(s(want, &["user_id"])));
-    assert_eq!(lease.tier, LeaseTier::Workshop);
-    assert_eq!(
-        lease.features,
-        vec![Feature::UdsActive, Feature::CanRePro, Feature::J2534]
+    // Tier, features and AASRA flag come from what signing.py was asked to issue.
+    let tier: LeaseTier = serde_json::from_value(want["tier"].clone()).expect("tier");
+    let features: Vec<Feature> =
+        serde_json::from_value(want["features"].clone()).expect("known features");
+    assert_eq!(lease.tier, tier);
+    assert_eq!(lease.features, features);
+    assert!(
+        !features.is_empty(),
+        "the fixture lease carries paid features"
     );
-    assert!(lease.aasra_verified && !lease.immo);
+    assert_eq!(Some(lease.aasra_verified), want["aasra_verified"].as_bool());
+    assert!(!lease.immo);
     assert_eq!(lease.rcid.as_deref(), Some(s(want, &["rcid"])));
     assert_eq!(lease.lease_ver, want["lease_ver"].as_i64().unwrap());
     assert_eq!(lease.expires_at, want["exp"].as_u64());
