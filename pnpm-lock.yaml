@@ -13,6 +13,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@obd2/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@obd2/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas
@@ -68,6 +71,15 @@ importers:
       tailwindcss:
         specifier: ^4
         version: 4.3.5
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^5.1.1
+        version: 5.1.1(@types/node@22.20.5)(jsdom@26.1.0)(vite@8.3.8(@types/node@22.20.5)(jiti@2.7.0))
+
+  packages/core:
+    devDependencies:
       typescript:
         specifier: ^5
         version: 5.9.3

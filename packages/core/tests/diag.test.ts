@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { dtcText, nrcText, parseObdDtcs, parseRegistryId, parseUdsDtcs, parseVin, udsStatusWords } from "@/lib/diag";
-import { describeDtc } from "@/lib/dtc-library";
+import { dtcText, nrcText, parseObdDtcs, parseRegistryId, parseUdsDtcs, parseVin, udsStatusWords } from "../src/diag";
+import { describeDtc } from "../src/dtc-library";
 
 describe("dtcText", () => {
   it("decodes SAE J2012 two-byte codes", () => {

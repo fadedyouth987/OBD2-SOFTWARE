@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeBus, redactVin } from "@/lib/vin";
+import { normalizeBus, redactVin } from "../src/vin";
 
 describe("redactVin", () => {
   it("keeps WMI+VDS and masks the serial of a 17-character VIN", () => {

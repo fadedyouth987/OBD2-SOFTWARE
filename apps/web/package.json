@@ -12,6 +12,7 @@
     "e2e": "playwright test"
   },
   "dependencies": {
+    "@obd2/core": "workspace:*",
     "@obd2/schemas": "workspace:*",
     "next": "15.5.29",
     "react": "19.1.0",

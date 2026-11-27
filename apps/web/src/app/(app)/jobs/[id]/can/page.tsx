@@ -9,7 +9,7 @@ import { useJob } from "@/context/job";
 import { useEdge } from "@/context/edge";
 import { candidateIds, classifyBits, ingest, rateHz, type BitClass, type FrameIn, type IdStats } from "@/lib/can-analysis";
 import { decodeSignal, signalBits } from "@/lib/dbc";
-import { canIdText, hexId } from "@/lib/diag";
+import { canIdText, hexId } from "@obd2/core/diag";
 import { FEATURE_INFO, featureAccess } from "@/lib/entitlements";
 import { formatReading } from "@/lib/format";
 

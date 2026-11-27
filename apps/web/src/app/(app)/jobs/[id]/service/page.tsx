@@ -10,7 +10,7 @@ import { useAuth } from "@/context/auth";
 import { useEdge } from "@/context/edge";
 import { useJob } from "@/context/job";
 import { api, ApiError, type ServiceFunction, type ServiceFunctionList } from "@/lib/api";
-import { hexId, nrcText } from "@/lib/diag";
+import { hexId, nrcText } from "@obd2/core/diag";
 import { EdgeRequestError } from "@/lib/edge-client";
 import { featureAccess } from "@/lib/entitlements";
 

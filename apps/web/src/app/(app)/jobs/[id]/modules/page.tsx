@@ -8,7 +8,7 @@ import { useAuth } from "@/context/auth";
 import { useEdge } from "@/context/edge";
 import { useJob } from "@/context/job";
 import { api, type VehiclePlatform } from "@/lib/api";
-import { hexId } from "@/lib/diag";
+import { hexId } from "@obd2/core/diag";
 import { readIdent, type IdentResult } from "@/lib/ident";
 import type { ModuleResult, ScanTarget } from "@/lib/scan";
 

@@ -1,6 +1,6 @@
 // Live CAN aggregation and bit-change analysis (baseline vs action).
 
-import { bytesOf } from "@/lib/diag";
+import { bytesOf } from "@obd2/core/diag";
 
 export interface IdStats {
   id: number;

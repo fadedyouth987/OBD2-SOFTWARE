@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canIdText } from "@/lib/diag";
+import { canIdText } from "../src/diag";
 
 describe("canIdText (A-DES-7)", () => {
   it("shows 11-bit IDs with 3 hex digits", () => {

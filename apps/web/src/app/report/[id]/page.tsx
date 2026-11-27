@@ -7,7 +7,7 @@ import { Banner, Button, Spinner } from "@/components/ui";
 import { useAuth } from "@/context/auth";
 import { api, ApiError, type JobReport } from "@/lib/api";
 import { APP_NAME } from "@/lib/config";
-import { describeDtc } from "@/lib/dtc-library";
+import { describeDtc } from "@obd2/core/dtc-library";
 import { formatDateTime, formatNumber, formatReading } from "@/lib/format";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

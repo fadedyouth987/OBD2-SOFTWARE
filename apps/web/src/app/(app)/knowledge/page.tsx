@@ -5,7 +5,7 @@ import { Badge, Banner, Button, Card, EmptyState, Field, Mono, PageHeader, Skele
 import { SchematicsCard } from "@/components/files/SchematicsCard";
 import { useAuth } from "@/context/auth";
 import { api, ApiError, type ResolvedCase, type VehiclePlatform } from "@/lib/api";
-import { describeDtc } from "@/lib/dtc-library";
+import { describeDtc } from "@obd2/core/dtc-library";
 
 const DTC_RE = /^[PCBU][0-3][0-9A-F]{3}$/;
 const PAGE = 15;

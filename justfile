@@ -61,6 +61,7 @@ test:
     cargo test --workspace --locked
     cd services/cloud-api && uv run pytest -q
     cd services/ai-worker && uv run pytest -q
+    cd packages/core && pnpm typecheck && pnpm test
     cd apps/web && pnpm typecheck
     cd apps/web && pnpm test
 
