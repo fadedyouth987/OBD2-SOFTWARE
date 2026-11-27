@@ -32,15 +32,9 @@
                           Arguments="service" Account="NT SERVICE\RootCauseEdgeDaemon"
                           Start="auto" Type="ownProcess" ErrorControl="normal" />
           <ServiceControl Id="EdgeDaemonCtrl" Name="RootCauseEdgeDaemon" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
-          <!-- Virtual accounts need an unrestricted service SID; a failure exit counts as a failure. -->
-          <ServiceConfig ServiceName="RootCauseEdgeDaemon" ServiceSid="unrestricted" FailureActionsWhen="failedToStopOrReturnedError"
-                         OnInstall="yes" OnReinstall="yes" />
-          <!-- Like the Linux unit's Restart=on-failure: restart after a crash or a failed start. -->
-          <ServiceConfigFailureActions ServiceName="RootCauseEdgeDaemon" OnInstall="yes" OnReinstall="yes" ResetPeriod="86400">
-            <Failure Action="restartService" Delay="5000" />
-            <Failure Action="restartService" Delay="15000" />
-            <Failure Action="restartService" Delay="60000" />
-          </ServiceConfigFailureActions>
+          <!-- Service SID type and restart-on-failure are set by the sc.exe custom actions below:
+               WiX warns (WIX1149) that the MsiServiceConfig tables "don't work as expected", and a
+               fresh install failed with 1603 right after InstallServices when they were used. -->
           <!-- Read by the service manager each time the service starts. Production origin only. -->
           <RegistryValue Root="HKLM" Key="SYSTEM\CurrentControlSet\Services\RootCauseEdgeDaemon" Name="Environment" Type="multiString">
             <MultiStringValue Value="EDGE_ALLOWED_ORIGINS=https://app.rootcauseobd.com.au" />
@@ -89,9 +83,21 @@
                   ExeCommand="&quot;[System64Folder]net.exe&quot; localgroup &quot;RootCause Technicians&quot; /add /comment:&quot;May create RootCause edge daemon pairing codes&quot;" />
     <CustomAction Id="GrantTechniciansPairing" Directory="DATAFOLDER" Execute="deferred" Impersonate="no" Return="check"
                   ExeCommand="&quot;[System64Folder]icacls.exe&quot; &quot;[PAIRINGFOLDER].&quot; /grant &quot;RootCause Technicians:(OI)(CI)M&quot;" />
+    <!-- After the service exists and before it starts. Virtual accounts need an unrestricted
+         service SID (the data folder ACLs name it). Like the Linux unit's Restart=on-failure:
+         restart after a crash or a failed start (failureflag 1), counters reset daily. -->
+    <CustomAction Id="ServiceSidType" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="no" Return="check"
+                  ExeCommand="&quot;[System64Folder]sc.exe&quot; sidtype RootCauseEdgeDaemon unrestricted" />
+    <CustomAction Id="ServiceFailureActions" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="no" Return="check"
+                  ExeCommand="&quot;[System64Folder]sc.exe&quot; failure RootCauseEdgeDaemon reset= 86400 actions= restart/5000/restart/15000/restart/60000" />
+    <CustomAction Id="ServiceFailureFlag" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="no" Return="check"
+                  ExeCommand="&quot;[System64Folder]sc.exe&quot; failureflag RootCauseEdgeDaemon 1" />
     <InstallExecuteSequence>
       <Custom Action="CreateTechniciansGroup" After="CreateFolders" Condition="NOT REMOVE" />
       <Custom Action="GrantTechniciansPairing" After="CreateTechniciansGroup" Condition="NOT REMOVE" />
+      <Custom Action="ServiceSidType" After="InstallServices" Condition="NOT REMOVE" />
+      <Custom Action="ServiceFailureActions" After="ServiceSidType" Condition="NOT REMOVE" />
+      <Custom Action="ServiceFailureFlag" After="ServiceFailureActions" Condition="NOT REMOVE" />
     </InstallExecuteSequence>
 
     <Feature Id="Main" Title="Edge daemon and J2534 bridge" Level="1">
