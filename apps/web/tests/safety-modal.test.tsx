@@ -69,7 +69,8 @@ describe("SafetyConfirmModal (A-DES-3)", () => {
     const p = props({ live: { ...OK, speedKmh: null } });
     const { rerender } = render(<SafetyConfirmModal {...p} />);
     expect((holdButton() as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText(/waiting for a fresh reading/i)).toBeTruthy();
+    expect(screen.getByText("PRECONDITION_UNKNOWN")).toBeTruthy();
+    expect(screen.getByText(/road speed can.t be read/i)).toBeTruthy();
     rerender(<SafetyConfirmModal {...p} live={{ ...OK, speedAgeMs: 5000 }} />);
     expect((holdButton() as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(/stale/i)).toBeTruthy();

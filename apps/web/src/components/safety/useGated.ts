@@ -105,7 +105,8 @@ export function useGatedRunner(job: Job | null) {
           });
         } catch (e) {
           const err = e instanceof EdgeRequestError ? e : null;
-          const message = err ? `${err.message} ${err.hint}` : String(e);
+          // Plain words first, then the daemon's code for support and the audit trail.
+          const message = err ? `${err.message} (${err.code}) ${err.hint}` : String(e);
           results.push({ step, ok: false, response: null, grant, message });
           audit.push({
             seq: Date.now() * 10 + audit.length,

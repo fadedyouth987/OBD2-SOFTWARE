@@ -10,6 +10,7 @@
 //! tester-side implementations in Task 1.2, so each checks the other.
 
 pub mod ecu;
+pub mod faults;
 pub mod isotp_peer;
 pub mod kline_peer;
 pub mod profiles;

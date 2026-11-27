@@ -130,7 +130,8 @@ Deviations from the Task 1.1 target paths, on purpose:
 | 2.3 Billing & AU MVIS/AASRA gateways | Implemented | `services/cloud-api/app/api/v1/{billing,gateways}.py` with Stripe HMAC verification & event idempotency. |
 | 3.1–3.2 Neo4j tenant repo & PDF pipeline | Implemented | `services/ai-worker/app/{graph,vision,tasks}/` with A-ENG-6 tenant filter & A-ENG-8 50 MB/200-page limits. |
 | 3.3 KG-guided RAG localizer | Implemented | `services/cloud-api/app/services/{embeddings,ai_diagnostic_agent}.py`, `api/v1/diagnose.py` (A-CEO-1 fallback, A-DES-4 bands). |
-| 4.1–4.3 Next.js Autel-style frontend + `DESIGN.md` | Implemented | `DESIGN.md`, `edge-client.ts`, `SafetyConfirmModal.tsx` (1.5s hold), `BitFlipMatrix.tsx` (29-bit), `WiringTopologyViewer.tsx`, `/live`, `/can-studio`, `/copilot/[sessionId]`. |
+| 4.1 Edge client, pairing, live dashboard | Done, gate verified | Verification Gate run against the real daemon on 2026-11-27; see "Task 4.1 gate verification" below. |
+| 4.2–4.3 CAN studio, copilot + `DESIGN.md` | Implemented | `DESIGN.md`, `edge-client.ts`, `SafetyConfirmModal.tsx` (1.5s hold), `BitFlipMatrix.tsx` (29-bit), `WiringTopologyViewer.tsx`, `/live`, `/can-studio`, `/copilot/[sessionId]`. |
 | 5.1–5.2 Packaging, CI, telemetry, runbooks | Implemented | `apps/edge-daemon/src/telemetry/`, `packaging/{linux,windows}/`, `scripts/export_cloud_keys.py`, `.github/workflows/ci.yml`, `infra/monitoring/prometheus.yml`, `docs/runbooks/incident-response.md`. |
 
 Remaining verification requiring local host/hardware: `cargo test --workspace`, `pnpm --filter web build`, live Postgres/Neo4j integration tests, and physical `A-ENG-10` vehicle captures.
@@ -175,3 +176,25 @@ Open:
 - The daemon does not send `can_frames` yet. When it does, a batch rebuilt after a lost ack must keep its `batch_id`; a new id stores the same frames (and telemetry, as before this change) twice.
 - CAN trace objects are never deleted: no tier retention, and deleting a tenant or session drops the outbox rows but leaves the S3 objects. Add a lifecycle or delete path with the retention work.
 - The web recorder's audit `seq` (`Date.now()*10 + audit.length`) can collide across tabs; a collision is now a 409 instead of a lost record, but the client should use a per-session counter.
+
+## Task 4.1 gate verification (2026-11-27)
+
+The existing Playwright suite drove the browser demo car, so the gate ("pairs with daemon on `VirtualBusAdapter`") had never run. `apps/web/e2e/daemon-gate.spec.ts` now runs it against the real debug daemon, in CI with the rest of `pnpm e2e`. The cloud API is stood in, but the pairing and lease tokens it hands the browser are real: `services/cloud-api/tests/edge_e2e_tokens.py` issues them with the production `signing.py` functions and a throwaway key that the run pins in the daemon (`EDGE_DEV_CLOUD_KEYS`, debug builds only).
+
+| Gate or contract item | Before | Now |
+| --- | --- | --- |
+| Pairs with the daemon, live PIDs render, no console errors | Only the in-browser demo was tested | The browser fetches a cloud pairing JWT and sends `HelloRequest` first, installs the plan's lease, connects the virtual Falcon in Active mode, and the live page streams; no page or console errors (the run found the stand-in missing `/api/v1/team`) |
+| Oscilloscope: RPM, MAF, STFT/LTFT B1/B2, ECT, IAT | SVG line charts, default RPM, speed, ECT, STFT B1; the daemon polled six PIDs and never sent MAF or the bank 2 trims | Canvas 2D oscilloscope (`components/charts/Oscilloscope.tsx`), one lane per PID with its own scale, the contract set by default. The daemon asks the ECU which PIDs it supports, then polls RPM, speed, MAF and the short-term trims every cycle and ECT, IAT and the long-term trims every fifth; PIDs the car doesn't report show as not supported (Rule 6) |
+| Heuristic alert banner | Live alerts appeared only on the job overview | Also a banner per alert on the live page, severity in words and colour |
+| Modal blocks until confirmed | Component test only | With the checklist ticked, letting go after 0.6 s sends nothing (the daemon's audit log is unchanged); a full hold gets a token, clears the codes, and the log shows `token_issued` and `allowed` |
+| Unknown speed shows `PRECONDITION_UNKNOWN` | The modal said "waiting for a fresh reading" without the code | The modal names `PRECONDITION_UNKNOWN` and the reading it lacks, and the hold stays locked. Gate run on the Falcon with its speed PID removed (`EDGE_SIM_FAULTS=no-road-speed`, debug builds only); a client that skips the modal gets `PRECONDITION_UNKNOWN` from the daemon itself, logged as `token_refused`. The daemon no longer seeds a virtual vehicle's speed at connect unless the vehicle reports speed. Daemon refusals in the app now show the code after the plain words |
+| Killed daemon shows "not running" | Unit test only | The daemon is killed mid-session; Devices shows "The edge daemon is not running", the start command and Retry now |
+| `ConnectionStatus`: "browser blocked local connection" | Shown as "not running" | Its own state with the fix: a `SecurityError` when the socket is created (mixed content, CSP) or Chrome's local network access permission set to Block (`tests/edge-client.test.ts`) |
+
+Open:
+
+- The contract names a Zustand store in `apps/web/src/store/diagnostic-store.ts`; the app keeps that state in a React context (`context/edge.tsx`). Same behaviour, different library: needs a decision before Task 4.2.
+- A privacy extension or shield that kills the socket without a `SecurityError` still looks like "not running": the browser reports both the same way.
+- K-line vehicles (the pre-03/2007 E90) can't be connected over the local WebSocket, so they have no live view.
+- Reloading the page drops the adapter connection; the technician reconnects on Devices.
+- Not yet run against real adapters (A-ENG-10).

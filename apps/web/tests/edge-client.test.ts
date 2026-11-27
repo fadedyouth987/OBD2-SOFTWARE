@@ -83,6 +83,37 @@ describe("EdgeClient failure handling", () => {
     expect(s.retryInMs).toBe(1000);
   });
 
+  it("says the browser blocked the connection when the socket can't even be created", async () => {
+    const refused: TransportFactory = (h) => {
+      setTimeout(() => h.onClose(false, true), 0);
+      return { send: () => undefined, close: () => undefined };
+    };
+    const c = make(refused, async () => ({ token: "jwt", method: "cloud" }));
+    c.start();
+    const s = await waitFor(c, (x) => x.phase === "failed");
+    expect(s.failure?.kind).toBe("blocked");
+    expect(s.failure?.message).toMatch(/browser blocked/);
+    expect(s.failure?.hint).toMatch(/local network access/);
+  });
+
+  it("tells a denied local-network permission apart from a daemon that isn't running", async () => {
+    const closed: TransportFactory = (h) => {
+      setTimeout(() => h.onClose(false), 0);
+      return { send: () => undefined, close: () => undefined };
+    };
+    const opts = { mode: "daemon" as const, transport: closed, clientVersion: "0.2.0", onSnapshot: () => undefined };
+    const cred = async () => ({ token: "jwt", method: "cloud" as const });
+    const denied = new EdgeClient({ ...opts, credential: cred, localAccessBlocked: async () => true });
+    const allowed = new EdgeClient({ ...opts, credential: cred, localAccessBlocked: async () => false });
+    clients.push(denied, allowed);
+    denied.start();
+    allowed.start();
+    expect((await waitFor(denied, (x) => x.phase === "failed")).failure?.kind).toBe("blocked");
+    const s = await waitFor(allowed, (x) => x.phase === "waiting");
+    expect(s.failure?.kind).toBe("unreachable");
+    expect(s.failure?.message).toMatch(/not running/);
+  });
+
   it("sends the credential and version in HelloRequest, and times out a silent handshake", async () => {
     const sent: string[] = [];
     const silent: TransportFactory = (h) => {
