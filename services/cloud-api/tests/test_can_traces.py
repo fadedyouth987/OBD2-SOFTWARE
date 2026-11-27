@@ -15,7 +15,8 @@ from sqlalchemy import create_engine, text
 
 from app.services import can_traces, object_store
 from app.services.can_traces import CanFrameIn, candump_log, mask_vins
-from tests.test_security import _auth, _dev_session, _postgres_up
+from tests.db_ready import NEEDS_012, migrated_to_012
+from tests.test_security import _auth, _dev_session
 
 T0_US = 1_790_000_000_000_000
 VIN = "WBAVB11060PT00001"
@@ -30,9 +31,7 @@ def _s3_up() -> bool:
         return False
 
 
-needs_infra = pytest.mark.skipif(
-    not (_postgres_up() and _s3_up()), reason="needs Postgres and S3 (just infra-up)"
-)
+needs_infra = pytest.mark.skipif(not (migrated_to_012() and _s3_up()), reason=NEEDS_012 + " and S3")
 
 
 @pytest.fixture(scope="module")
@@ -352,7 +351,7 @@ def test_drain_cli_exit_codes(client, owner, monkeypatch, capsys):
 # --- validation ---
 
 
-@pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
+@pytest.mark.skipif(not migrated_to_012(), reason=NEEDS_012)
 @pytest.mark.parametrize(
     "frame",
     [
@@ -382,7 +381,7 @@ def test_invalid_frames_refuse_the_whole_batch(client, owner, frame):
     assert client.get(f"/api/v1/sessions/{edge_session}", headers=headers).status_code == 404
 
 
-@pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
+@pytest.mark.skipif(not migrated_to_012(), reason=NEEDS_012)
 def test_watermark_overflow_is_refused_not_a_500(client, owner):
     headers = _auth(_dev_session(client)["access_token"])
     batch = _batch(f"sess-can-wm-{uuid.uuid4().hex[:10]}", [])
@@ -390,7 +389,7 @@ def test_watermark_overflow_is_refused_not_a_500(client, owner):
     assert client.post("/api/v1/sessions/sync", json=batch, headers=headers).status_code == 422
 
 
-@pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
+@pytest.mark.skipif(not migrated_to_012(), reason=NEEDS_012)
 def test_batches_without_frames_are_unchanged(client, owner):
     """The web app's job recorder sends no frames; nothing about its batches changes."""
     headers = _auth(_dev_session(client)["access_token"])

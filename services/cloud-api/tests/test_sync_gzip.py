@@ -11,7 +11,8 @@ import uuid
 import pytest
 
 from app.api.gzip_body import MAX_COMPRESSED, MAX_INFLATED
-from tests.test_security import _auth, _dev_session, _postgres_up
+from tests.db_ready import NEEDS_012, migrated_to_012
+from tests.test_security import _auth, _dev_session
 
 URL = "/api/v1/sessions/sync"
 ORIGIN = "http://localhost:3000"  # in the default EDGE_ALLOWED_ORIGINS
@@ -28,8 +29,8 @@ def client():
 
 @pytest.fixture(scope="module")
 def auth(client) -> dict[str, str]:
-    if not _postgres_up():
-        pytest.skip("needs Postgres")
+    if not migrated_to_012():
+        pytest.skip(NEEDS_012)
     return _auth(_dev_session(client)["access_token"])
 
 

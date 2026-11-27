@@ -14,7 +14,8 @@ import uuid
 import pytest
 from sqlalchemy import create_engine, text
 
-from tests.test_security import _auth, _dev_session, _postgres_up
+from tests.db_ready import NEEDS_012, migrated_to_012
+from tests.test_security import _auth, _dev_session
 
 
 def _audit_seqs(edge_session: str) -> list[int]:
@@ -33,7 +34,7 @@ def _audit_seqs(edge_session: str) -> list[int]:
         engine.dispose()
 
 
-@pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
+@pytest.mark.skipif(not migrated_to_012(), reason=NEEDS_012)
 def test_resent_audit_records_in_a_new_batch_are_stored_once(client):
     headers = _auth(_dev_session(client)["access_token"])
     edge_session = f"sess-resend-{uuid.uuid4().hex[:10]}"
@@ -73,7 +74,7 @@ def _post(client, headers, edge_session: str, entries: list[dict], telemetry: bo
     )
 
 
-@pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
+@pytest.mark.skipif(not migrated_to_012(), reason=NEEDS_012)
 @pytest.mark.parametrize(
     "entry",
     [
@@ -94,7 +95,7 @@ def test_audit_entries_need_an_integer_seq(client, entry):
     assert client.get(f"/api/v1/sessions/{edge_session}", headers=headers).status_code == 404
 
 
-@pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
+@pytest.mark.skipif(not migrated_to_012(), reason=NEEDS_012)
 def test_a_different_record_on_a_used_seq_is_a_conflict_not_a_silent_drop(client):
     """Only an exact replay is skipped. A different gated-command record that reuses
     a seq is refused loudly and the whole batch is kept out, so nothing is lost."""
@@ -121,7 +122,7 @@ def test_a_different_record_on_a_used_seq_is_a_conflict_not_a_silent_drop(client
     assert _audit_seqs(other) == []
 
 
-@pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
+@pytest.mark.skipif(not migrated_to_012(), reason=NEEDS_012)
 def test_replay_without_at_still_counts_as_the_same_record(client):
     """`at` defaults to the server clock when absent, so it can't decide sameness."""
     headers = _auth(_dev_session(client)["access_token"])
