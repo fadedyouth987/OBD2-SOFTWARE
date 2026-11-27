@@ -281,25 +281,6 @@ impl Server {
 }
 
 /// Lease files are readable only by the daemon's user where the OS supports it.
-fn write_private(path: &std::path::Path, data: &str) -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(path)?;
-        f.write_all(data.as_bytes())
-    }
-    #[cfg(not(unix))]
-    {
-        std::fs::write(path, data)
-    }
-}
-
 /// User ids come from cloud-signed pairing tokens; they also name lease files,
 /// so only plain id characters are accepted.
 fn valid_user_id(user: &str) -> bool {
@@ -521,6 +502,15 @@ fn authenticate(
     let now = unix_now();
     let token = hello.client_token.as_str();
     let user = if looks_like_code(token) {
+        if let Some(secs) = cfg.pairing.locked_for(now) {
+            return Err(err(
+                rid,
+                ErrorCode::Unauthenticated,
+                &format!(
+                    "too many wrong pairing codes; every code was cancelled. Run `edge-daemon pair` again in {secs} s"
+                ),
+            ));
+        }
         if !cfg.pairing.consume(token, now) {
             return Err(err(
                 rid,
@@ -999,13 +989,7 @@ impl Session {
         let Some(dir) = self.cfg.data_dir.as_ref() else {
             return Ok(());
         };
-        let path = dir.join(name);
-        let parent = path.parent().unwrap_or(dir);
-        let file = path.file_name().and_then(|n| n.to_str()).unwrap_or("lease");
-        let tmp = parent.join(format!(".{file}.tmp"));
-        std::fs::create_dir_all(parent)
-            .and_then(|()| write_private(&tmp, token))
-            .and_then(|()| std::fs::rename(&tmp, &path))
+        crate::fsutil::write_atomic(&dir.join(name), token.as_bytes(), 0o600)
             .map_err(|e| format!("could not save {name}: {e}"))
     }
 

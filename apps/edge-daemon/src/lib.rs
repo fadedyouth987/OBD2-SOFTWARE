@@ -2,6 +2,7 @@
 
 pub mod analytics;
 pub mod auth;
+pub mod fsutil;
 pub mod hal;
 pub mod immo;
 pub mod protocol;

@@ -1,8 +1,14 @@
 //! Local pairing codes (Task 1.4): `edge-daemon pair` prints a 6-digit code
 //! the technician types into the app (or a native client sends in Hello).
-//! Single use, valid 2 minutes. Only SHA-256 hashes are stored, in a file
-//! readable by the user running the daemon (0600 on Unix), so the `pair`
-//! command and the running daemon share codes without any network listener.
+//! Single use, valid 2 minutes. Only SHA-256 hashes are stored, in
+//! `<data dir>/pairing/pairing.json` ([`pairing_path`]), so the `pair` command
+//! and the running daemon share codes without any network listener. The file
+//! is 0600 on Unix, or 0660 when its folder is setgid: the installed service
+//! shares only that `pairing/` folder with technicians (Task 5.1), never the
+//! rest of its data (leases, audit log).
+//!
+//! Guessing is cut off: after [`MAX_MISSES`] wrong codes every outstanding code
+//! is cancelled and none is accepted for [`LOCKOUT`].
 
 use std::{
     path::{Path, PathBuf},
@@ -13,6 +19,21 @@ use std::{
 use sha2::{Digest, Sha256};
 
 pub const CODE_TTL: Duration = Duration::from_secs(120);
+/// Wrong codes (from any connection) before every outstanding code is cancelled.
+pub const MAX_MISSES: u32 = 5;
+/// How long no code is accepted after [`MAX_MISSES`] wrong ones.
+pub const LOCKOUT: Duration = Duration::from_secs(30);
+
+/// Where the pairing codes for the data directory `dir` live.
+pub fn pairing_path(dir: &Path) -> PathBuf {
+    dir.join("pairing").join("pairing.json")
+}
+
+#[derive(Default)]
+struct Guard {
+    misses: u32,
+    locked_until: u64,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct Entry {
@@ -24,6 +45,7 @@ struct Entry {
 pub struct PairingStore {
     path: Option<PathBuf>,
     memory: Mutex<Vec<Entry>>,
+    guard: Mutex<Guard>,
 }
 
 fn hash(code: &str) -> String {
@@ -56,6 +78,7 @@ impl PairingStore {
         Self {
             path: None,
             memory: Mutex::new(Vec::new()),
+            guard: Mutex::default(),
         }
     }
 
@@ -64,6 +87,7 @@ impl PairingStore {
         Self {
             path: Some(path.into()),
             memory: Mutex::new(Vec::new()),
+            guard: Mutex::default(),
         }
     }
 
@@ -83,19 +107,11 @@ impl PairingStore {
                 *self.memory.lock().expect("pairing lock") = entries.to_vec();
                 Ok(())
             }
-            Some(p) => {
-                if let Some(dir) = p.parent() {
-                    std::fs::create_dir_all(dir)?;
-                }
-                let tmp = p.with_extension("tmp");
-                std::fs::write(&tmp, serde_json::to_vec(entries).expect("serializes"))?;
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(file_mode(p)))?;
-                }
-                std::fs::rename(tmp, p)
-            }
+            Some(p) => crate::fsutil::write_atomic(
+                p,
+                &serde_json::to_vec(entries).expect("serializes"),
+                file_mode(p),
+            ),
         }
     }
 
@@ -115,11 +131,41 @@ impl PairingStore {
         Ok(code)
     }
 
+    /// Seconds left while codes are refused after too many wrong ones.
+    pub fn locked_for(&self, now: u64) -> Option<u64> {
+        let until = self.guard.lock().expect("pairing guard").locked_until;
+        (until > now).then(|| until - now)
+    }
+
     /// Consumes `code` if it is outstanding and unexpired. Single use.
+    /// Refuses every code while locked out after [`MAX_MISSES`] wrong ones.
     pub fn consume(&self, code: &str, now: u64) -> bool {
-        if !looks_like_code(code) {
+        if !looks_like_code(code) || self.locked_for(now).is_some() {
             return false;
         }
+        let ok = self.take(code, now);
+        let mut g = self.guard.lock().expect("pairing guard");
+        if ok {
+            g.misses = 0;
+            return true;
+        }
+        g.misses += 1;
+        if g.misses >= MAX_MISSES {
+            g.misses = 0;
+            g.locked_until = now + LOCKOUT.as_secs();
+            drop(g);
+            tracing::warn!(
+                "{MAX_MISSES} wrong pairing codes: every outstanding code cancelled, none accepted for {} s",
+                LOCKOUT.as_secs()
+            );
+            if let Err(e) = self.save(&[]) {
+                tracing::error!("could not cancel outstanding pairing codes: {e}");
+            }
+        }
+        false
+    }
+
+    fn take(&self, code: &str, now: u64) -> bool {
         let wanted = hash(code);
         let entries = self.load();
         let live: Vec<Entry> = entries
@@ -142,9 +188,14 @@ impl PairingStore {
     }
 }
 
-/// Owner-only, except in a shared install directory (setgid, as the Linux
-/// package makes `/var/lib/obd2-edge`): there the daemon's user and the
+/// Owner-only, except in a shared pairing folder (setgid, as the Linux package
+/// makes `/var/lib/obd2-edge/pairing`): there the daemon's user and the
 /// technicians in its group must both read the file, so the group may too.
+#[cfg(not(unix))]
+fn file_mode(_path: &Path) -> u32 {
+    0o600
+}
+
 #[cfg(unix)]
 fn file_mode(path: &Path) -> u32 {
     use std::os::unix::fs::PermissionsExt;
@@ -180,7 +231,7 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn group_readable_only_in_a_setgid_install_dir() {
+    fn group_readable_only_in_a_setgid_pairing_dir() {
         use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("edge-pairing-shared-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -188,10 +239,49 @@ mod tests {
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o2770)).unwrap();
         let path = dir.join("pairing.json");
         PairingStore::at(&path).issue(5_000).unwrap();
+        assert_eq!(
+            std::fs::read_dir(&dir).unwrap().count(),
+            1,
+            "no temp files left"
+        );
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         std::fs::remove_dir_all(&dir).unwrap();
         // The daemon's user and technicians in its group share the file; nobody else.
         assert_eq!(mode, 0o660);
+    }
+
+    #[test]
+    fn five_wrong_codes_cancel_every_code_and_lock_out_for_30_s() {
+        let store = PairingStore::in_memory();
+        let good = store.issue(1_000).unwrap();
+        let wrong = if good == "000000" { "111111" } else { "000000" };
+        for _ in 0..MAX_MISSES - 1 {
+            assert!(!store.consume(wrong, 1_001));
+        }
+        assert!(store.locked_for(1_001).is_none(), "not yet locked");
+        assert!(!store.consume(wrong, 1_001)); // the fifth miss
+        assert_eq!(store.locked_for(1_001), Some(LOCKOUT.as_secs()));
+        // The right code is refused while locked, and stays cancelled after.
+        assert!(!store.consume(&good, 1_010));
+        assert!(!store.consume(&good, 1_001 + LOCKOUT.as_secs()));
+        // A new code works once the lockout ends; a hit resets the count.
+        let fresh = store.issue(1_040).unwrap();
+        assert!(store.consume(&fresh, 1_041));
+        assert!(store.locked_for(1_041).is_none());
+    }
+
+    #[test]
+    fn a_hit_resets_the_miss_count() {
+        let store = PairingStore::in_memory();
+        for i in 0..3u64 {
+            let code = store.issue(1_000 + i).unwrap();
+            let wrong = if code == "000000" { "111111" } else { "000000" };
+            for _ in 0..MAX_MISSES - 1 {
+                assert!(!store.consume(wrong, 1_000 + i));
+            }
+            assert!(store.consume(&code, 1_000 + i), "round {i}");
+        }
+        assert!(store.locked_for(1_010).is_none());
     }
 
     #[test]

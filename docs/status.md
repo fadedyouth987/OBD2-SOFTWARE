@@ -132,8 +132,8 @@ Deviations from the Task 1.1 target paths, on purpose:
 | 3.3 KG-guided RAG localizer | Implemented | `services/cloud-api/app/services/{embeddings,ai_diagnostic_agent}.py`, `api/v1/diagnose.py` (A-CEO-1 fallback, A-DES-4 bands). |
 | 4.1 Edge client, pairing, live dashboard | Done, gate verified | Verification Gate run against the real daemon on 2026-11-27; see "Task 4.1 gate verification" below. |
 | 4.2–4.3 CAN studio, copilot + `DESIGN.md` | Implemented | `DESIGN.md`, `edge-client.ts`, `SafetyConfirmModal.tsx` (1.5s hold), `BitFlipMatrix.tsx` (29-bit), `WiringTopologyViewer.tsx`, `/live`, `/can-studio`, `/copilot/[sessionId]`. |
-| 5.1 Native installers and CI | Done, gate verified in CI (signing waits on certificates) | `package.yml` and `quickstart.yml` green on `c93c1e4` (2026-11-27): release builds, install, post-install smoke test and uninstall on Linux and Windows. See "Task 5.1 gate verification" below. |
-| 5.2 Telemetry, runbooks | Implemented | `apps/edge-daemon/src/telemetry/`, `packaging/{linux,windows}/`, `scripts/export_cloud_keys.py`, `.github/workflows/ci.yml`, `infra/monitoring/prometheus.yml`, `docs/runbooks/incident-response.md`. |
+| 5.1 Native installers and CI | Gate verified in CI; A-ENG-10 bench run and signing certificates open | `package.yml` and `quickstart.yml` green (release builds, install, post-install tests, upgrade, uninstall on Linux and Windows). See "Task 5.1 gate verification" below. |
+| 5.2 Telemetry, runbooks | Implemented | `apps/edge-daemon/src/telemetry/`, `infra/monitoring/prometheus.yml`, `infra/monitoring/alerts.yml`, `docs/runbooks/`. Gate needs a staging drill (see below). |
 
 Remaining verification requiring local host/hardware: `cargo test --workspace`, `pnpm --filter web build`, live Postgres/Neo4j integration tests, and physical `A-ENG-10` vehicle captures.
 
@@ -199,7 +199,6 @@ Open:
 - The contract names a Zustand store in `apps/web/src/store/diagnostic-store.ts`; the app keeps that state in a React context (`context/edge.tsx`). Same behaviour, different library: needs a decision before Task 4.2.
 - A privacy extension or shield that kills the socket without a `SecurityError` still looks like "not running": the browser reports both the same way.
 - K-line vehicles (the pre-03/2007 E90) can't be connected over the local WebSocket, so they have no live view.
-- Reloading the page drops the adapter connection; the technician reconnects on Devices.
 - Not yet run against real adapters (A-ENG-10).
 - None of the virtual vehicles raises a RED or AMBER audit alert over the WebSocket (the Falcon session reports VIN and odometer consistent, unlike the Task 1.3 fixture run), so live-banner rendering for those severities is covered by type checks, not by the gate.
 
@@ -210,15 +209,32 @@ The row above was marked from the files existing. Checked against the contract, 
 | Gate or contract item | Now |
 | --- | --- |
 | Release builds for `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc` | `.github/workflows/package.yml` on every push and PR, plus the 32-bit J2534 bridge |
-| Linux installer | `packaging/linux/install.sh`: systemd unit running as the `obd2-edge` user in `dialout`, data in a setgid `/var/lib/obd2-edge` (2770), production origin in `/etc/obd2-edge/edge-daemon.env`, udev rules, `uninstall.sh` (D5) |
-| Windows installer | MSI installs the `RootCauseEdgeDaemon` service (`edge-daemon service`, LocalService), its origin and data folder in the service's Environment, `C:\ProgramData\RootCauseOBD`, and `edge-daemon` on PATH |
+| Linux installer | `packaging/linux/install.sh`: systemd unit running as the `obd2-edge` user in `dialout`, service-only data in `/var/lib/obd2-edge` (0710, UMask 0077) with only `pairing/` (2770) shared with the `obd2-edge` group, production origin in `/etc/obd2-edge/edge-daemon.env` (kept on upgrade), udev rules, `uninstall.sh` (keeps data unless `--purge`) (D5) |
+| Windows installer | MSI installs the `RootCauseEdgeDaemon` service (`edge-daemon service`) under its own virtual account `NT SERVICE\RootCauseEdgeDaemon`, restarted by the service manager after a failure, reporting Running only once the port is bound. Data in `C:\ProgramData\RootCauseOBD` for SYSTEM, Administrators and the service only; its `pairing\` subfolder is writable by the local group "RootCause Technicians" (created at install). Origin and data folder in the service's Environment; `edge-daemon` on PATH |
 | Production `EDGE_ALLOWED_ORIGINS` | `https://app.rootcauseobd.com.au` only in both installers (D3) |
-| Post-install smoke test | `scripts/smoke-installed-daemon.mjs`, run against the installed service on both runners: listens on loopback only, refuses a non-loopback address, refuses a client that skips Hello and a wrong code, accepts a code a technician made with `edge-daemon pair`, started with the production origin only. Also checked: Windows service restarts on request, uninstall stops it and frees the port |
-| Pairing in a shared install | `pairing.json` is group-readable only in a setgid directory, so the service and technicians in its group share it; `edge-daemon pair` no longer opens the service's log file (`pairing::tests::group_readable_only_in_a_setgid_install_dir`) |
-| Code signing | Authenticode (exe, MSI) and a detached GPG signature (Linux archive) run when `WINDOWS_CERT_PFX`/`WINDOWS_CERT_PASSWORD` and `LINUX_SIGNING_KEY`/`LINUX_SIGNING_KEY_PASSPHRASE` are set; until then the workflow warns that artifacts are unsigned (D4) |
+| Post-install smoke test | `scripts/smoke-installed-daemon.mjs`, run against the installed service on both runners: listens on loopback only, refuses a non-loopback address, refuses a client that skips Hello and a wrong code, accepts a code a technician made with `edge-daemon pair`, refuses WebSocket handshakes from `localhost:3000`, `127.0.0.1:3000` and another site while accepting the production origin, and started with exactly that origin. Also in CI: a technician (Linux: `obd2-edge` member with no profile environment; Windows: a standard user in "RootCause Technicians") pairs, a non-member can't, and neither can read or write the rest of the data folder; upgrade keeps the edited origin file; uninstall keeps data, `--purge` removes it; the Windows service restarts on request |
+| Pairing in a shared install | Codes live in `<data dir>/pairing/pairing.json`, group-readable only in a setgid folder; `edge-daemon pair` finds the installed service's folder even without `EDGE_DATA_DIR`, says which folder it used, never opens the service's log file (`tests/cli_pair.rs`), and writes through unpredictable `O_EXCL` temp files (`fsutil`). After 5 wrong codes every outstanding code is cancelled and none is accepted for 30 s (`pairing::tests`) |
+| Code signing | `sign-linux` and `sign-windows` jobs run only for `v*` tags, in the protected `release` environment, and fail if its secrets (`LINUX_SIGNING_KEY`/`LINUX_SIGNING_KEY_PASSPHRASE`, `WINDOWS_CERT_PFX`/`WINDOWS_CERT_PASSWORD`) are missing. Build jobs hold no secrets and have read-only repository access; the GPG passphrase goes through a pipe and the PFX into the job's certificate store, never onto a command line. Not yet run: no tag, no certificates (D4) |
 | CI across Rust, Python, TypeScript | `quickstart.yml` (contract names `ci.yml`): `cargo test`, pytest against Postgres and Neo4j, `next build`, Playwright including the Task 4.1 daemon gate, schema and token fixture tests |
+
+gstack `/review` (6 specialists, red team, adversarial pass) found the first installers shared the whole data folder: on Linux every `obd2-edge` member, and on Windows every local user, could rewrite the audit log, read or swap other technicians' leases and lower `lease.min_ver` to bring revoked leases back. Fixed as above (D1), with `lease.min_ver` now only ever raised. Also fixed: pairing-code guessing (D2), signing secrets reaching every build step on every branch (D3), the Windows service's shared LocalService account, missing restart, Running before the port was bound and unlogged bind failures, SIGTERM skipping the daemon's shutdown path on Linux, a release daemon falling back to the development origin when `EDGE_ALLOWED_ORIGINS` is missing (it now trusts the production origin only), and CI cost (concurrency, caching, `push` limited to `main` and tags) (D4).
 
 Open:
 
-- Signing certificates: the secrets above are not set, so release artifacts are unsigned.
-- Windows: every local user can modify `C:\ProgramData\RootCauseOBD` (to create pairing codes), so any local user can read the daemon's leases; Linux limits this to the `obd2-edge` group.
+- A-ENG-10: the hardware-in-the-loop release checklist is not signed off (needs the bench), so Task 5.1's amendments are not all met.
+- Signing: create the `release` environment (required reviewers) and add its four secrets; the signing jobs have not run yet.
+- Before pinning a production cloud key: a code-paired session gets the machine lease and any machine immobilizer lease (`leases_for`), and neither installer sets `EDGE_DEVICE_ID`, so device-bound leases are not checked against the machine.
+- Windows: MSI repair or upgrade rewrites the allowed origins (Linux keeps a local edit); CI builds share version 0.1.0, so installing a newer CI build beside an older one leaves two products; the J2534 bridge loads vendor DLLs as the service account, which still holds SeImpersonate.
+- Linux: the package assumes a `dialout` group (Arch uses `uucp`).
+- Stopping or upgrading the service ends a live session without returning control to the ECU first; another local user can bind port 8765 while the service is stopped.
+
+## Whole-site debug pass (2026-11-28)
+
+Every route was loaded against the real local stack (Postgres, API, daemon, web in dev mode) signed out, signed in, and walked in-app with the virtual Falcon connected (scan, identify, live data, service functions, copilot, close-out, report), recording console errors, page errors and failed requests. No page crashed and no API call failed. Fixed:
+
+- Reloading a page (or a daemon restart) dropped the vehicle connection. The tab now remembers its adapter and reconnects it read-only (SILENT) when the daemon session comes back; an explicit disconnect or an unplugged adapter clears it (`e2e/session-flow.spec.ts`).
+- The Modules page showed 11 VIN characters while the job header showed 9: `lib/ident.ts` and key programming had their own masks. All use `lib/vin.ts` now (positions 10-17 hidden, as the cloud anonymizer does).
+- Linux's built-in serial ports (`/dev/ttyS*`) were listed as OBD dongles. Discovery skips them; USB and Bluetooth serial ports stay (`discovery::tests::builtin_linux_uarts_are_not_adapters`).
+- Unknown addresses showed Next.js's bare 404; they now get the app's own page with a way home (`e2e/states.spec.ts`).
+
+Checked and not a bug: the virtual Falcon's audit reports VIN and odometer consistent because the simulated car is untampered by default (the Task 1.3 test injects the rollback). Noted: the simulator's Falcon VIN decodes to model year 1998 and has an invalid check digit, which a 2002-2005 BA wouldn't.

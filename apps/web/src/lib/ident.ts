@@ -3,6 +3,7 @@
 
 import { bytesOf } from "@/lib/diag";
 import { EdgeRequestError } from "@/lib/edge-client";
+import { redactVin } from "@/lib/vin";
 import type { DiagFn, ScanTarget } from "@/lib/scan";
 
 export interface IdentField {
@@ -39,9 +40,6 @@ export function identText(bytes: number[]): string {
   return bytes.map((b) => b.toString(16).toUpperCase().padStart(2, "0")).join(" ");
 }
 
-function redactVin(v: string): string {
-  return /^[A-HJ-NPR-Z0-9]{17}$/.test(v) ? `${v.slice(0, 11)}••••••` : v;
-}
 
 export async function readIdent(diag: DiagFn, t: ScanTarget): Promise<IdentResult> {
   const fields: IdentField[] = [];

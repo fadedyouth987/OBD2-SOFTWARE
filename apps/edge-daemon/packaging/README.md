@@ -13,14 +13,19 @@ edge-daemon pair                          # as the technician
 ```
 
 The service runs as the `obd2-edge` user (in `dialout` for serial adapters), keeps its
-data in `/var/lib/obd2-edge`, and trusts only the origin in `/etc/obd2-edge/edge-daemon.env`.
+data in `/var/lib/obd2-edge` (readable by the service only), and trusts only the origin
+in `/etc/obd2-edge/edge-daemon.env`. Members of the `obd2-edge` group may write only
+`/var/lib/obd2-edge/pairing`, which is what `edge-daemon pair` needs.
 `sudo ./uninstall.sh` removes it; `--purge` also deletes leases, codes and the audit log.
 
 ## Windows (MSI)
 
 Install `edge-daemon-<version>-x86_64-pc-windows-msvc.msi`. It installs the
-`RootCauseEdgeDaemon` service (LocalService, starts with Windows), the 32-bit J2534
-bridge, and data in `C:\ProgramData\RootCauseOBD`. In a new terminal, `edge-daemon pair`
-prints a pairing code.
+`RootCauseEdgeDaemon` service (its own account `NT SERVICE\RootCauseEdgeDaemon`, starts
+with Windows, restarts after a failure), the 32-bit J2534 bridge, and data in
+`C:\ProgramData\RootCauseOBD`, readable by the service and administrators only.
+Add each technician to the local group "RootCause Technicians"
+(`net localgroup "RootCause Technicians" <user> /add`); members can then run
+`edge-daemon pair` in a new terminal.
 
 Both listen on 127.0.0.1 and [::1] only, port 8765.

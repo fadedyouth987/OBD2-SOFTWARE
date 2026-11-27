@@ -37,3 +37,11 @@ test("live data without a vehicle shows how to connect", async ({ page, context 
   await expect(page.getByText("No live data")).toBeVisible();
   await expect(page.getByRole("link", { name: "Connect a device" })).toBeVisible();
 });
+
+test("an unknown address gets the app's not-found page with a way back", async ({ page, context }) => {
+  await useStandIns(context);
+  const res = await page.goto("/no-such-page");
+  expect(res?.status()).toBe(404);
+  await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Go to home" })).toBeVisible();
+});

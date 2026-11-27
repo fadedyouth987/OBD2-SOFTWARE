@@ -27,3 +27,15 @@ test("vehicle session flow with the demo car", async ({ page, context }) => {
   await expect(page.getByText("Root cause analysis")).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test("a reload keeps the vehicle connected, read-only; disconnecting sticks", async ({ page, context }) => {
+  await useStandIns(context);
+  await connectDemoCar(page);
+  await page.reload();
+  await expect(page.locator('header a[href="/devices"]')).toContainText("Browser demo car", { timeout: 15_000 });
+  await expect(page.getByText("Silent (read-only)").first()).toBeVisible();
+  await page.getByRole("button", { name: "Disconnect" }).first().click();
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Connect", exact: true }).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('header a[href="/devices"]')).not.toContainText("Browser demo car");
+});

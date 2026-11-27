@@ -19,6 +19,14 @@ if [ ! -f /etc/obd2-edge/edge-daemon.env ]; then
 fi
 install -m 0644 "$here/obd2-edge.profile.sh" /etc/profile.d/obd2-edge.sh
 
+# Service-only data folder; only pairing/ is shared with the obd2-edge group.
+install -d -m 0710 -o obd2-edge -g obd2-edge /var/lib/obd2-edge
+install -d -m 2770 -o obd2-edge -g obd2-edge /var/lib/obd2-edge/pairing
+# An earlier package shared the whole folder: take the group's access back.
+find /var/lib/obd2-edge -mindepth 1 -maxdepth 1 ! -name pairing -exec chmod -R go-rwx {} +
+find /var/lib/obd2-edge -mindepth 1 -maxdepth 1 ! -name pairing -exec chown -R obd2-edge:obd2-edge {} +
+rm -f /var/lib/obd2-edge/pairing.json /var/lib/obd2-edge/pairing.tmp
+
 install -m 0644 "$here/99-automotive-vci.rules" /etc/udev/rules.d/99-automotive-vci.rules
 udevadm control --reload-rules 2>/dev/null || true
 udevadm trigger --subsystem-match=tty 2>/dev/null || true

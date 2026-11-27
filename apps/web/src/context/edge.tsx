@@ -29,6 +29,36 @@ import type {
 } from "@/types/edge-protocol";
 
 const MODE_KEY = "rootcause.edgeMode";
+/**
+ * The adapter this tab last connected (sessionStorage: per tab, survives a
+ * reload). A new daemon session (reload, daemon restart) reconnects it, always
+ * read-only (SILENT): Active mode is only ever a deliberate choice.
+ */
+export const LINK_KEY = "rootcause.adapterLink";
+
+interface SavedLink {
+  adapterId: string;
+  protocol: BusProtocol;
+}
+
+function savedLink(): SavedLink | null {
+  try {
+    const raw = window.sessionStorage.getItem(LINK_KEY);
+    const v = raw ? (JSON.parse(raw) as Partial<SavedLink>) : null;
+    return v && typeof v.adapterId === "string" && typeof v.protocol === "string" ? (v as SavedLink) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveLink(v: SavedLink | null): void {
+  try {
+    if (v) window.sessionStorage.setItem(LINK_KEY, JSON.stringify(v));
+    else window.sessionStorage.removeItem(LINK_KEY);
+  } catch {
+    // Storage blocked: the tab just won't reconnect by itself.
+  }
+}
 /** Live data kept in memory for charts: two minutes per PID. */
 export const PID_WINDOW_MS = 120_000;
 
@@ -78,7 +108,7 @@ interface EdgeValue {
   client: EdgeClient | null;
   adapters: AdapterInfo[] | null;
   adaptersError: string | null;
-  refreshAdapters: () => Promise<void>;
+  refreshAdapters: () => Promise<AdapterInfo[] | null>;
   link: LinkState | null;
   linkError: EdgeRequestError | null;
   connectAdapter: (adapterId: string, opts?: { protocol?: BusProtocol; safetyMode?: SafetyMode }) => Promise<void>;
@@ -210,7 +240,10 @@ export function EdgeProvider({ children }: { children: React.ReactNode }) {
         if (m.type !== "AdapterStatus") return;
         setLink((prev) => {
           if (!prev || prev.adapterId !== m.adapter_id) return prev;
-          if (m.state === "DISCONNECTED") return null;
+          if (m.state === "DISCONNECTED") {
+            saveLink(null); // unplugged: don't reconnect it on the next load
+            return null;
+          }
           return { ...prev, state: m.state, batteryV: m.battery_v ?? prev.batteryV };
         });
       }),
@@ -242,14 +275,17 @@ export function EdgeProvider({ children }: { children: React.ReactNode }) {
     setLastSampleAt(null);
   }, []);
 
-  const refreshAdapters = useCallback(async () => {
-    if (!client) return;
+  const refreshAdapters = useCallback(async (): Promise<AdapterInfo[] | null> => {
+    if (!client) return null;
     try {
       const res = await client.request({ type: "AdapterListRequest" });
+      adaptersRef.current = res.adapters;
       setAdapters(res.adapters);
       setAdaptersError(null);
+      return res.adapters;
     } catch (e) {
       setAdaptersError(e instanceof EdgeRequestError ? `${e.message} ${e.hint}` : String(e));
+      return null;
     }
   }, [client]);
 
@@ -271,7 +307,12 @@ export function EdgeProvider({ children }: { children: React.ReactNode }) {
       if (snapshot.phase !== "waiting") setLease(null);
       return;
     }
-    void refreshAdapters();
+    void refreshAdapters().then((list) => {
+      // Reconnect the adapter this tab had before a reload or a daemon restart.
+      const saved = savedLink();
+      if (!saved || !list?.some((a) => a.adapter_id === saved.adapterId)) return;
+      connectAdapter(saved.adapterId, { protocol: saved.protocol, safetyMode: "SILENT" }).catch(() => saveLink(null));
+    });
     void refreshLease();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, snapshot.generation]);
@@ -301,6 +342,7 @@ export function EdgeProvider({ children }: { children: React.ReactNode }) {
           );
         }
         setLink({ adapter, adapterId, state: "CONNECTED", batteryV: res.battery_v, safetyMode, protocol, since: Date.now() });
+        saveLink({ adapterId, protocol });
       } catch (e) {
         setLink(null);
         const err =
@@ -317,6 +359,7 @@ export function EdgeProvider({ children }: { children: React.ReactNode }) {
     try {
       await client.request({ type: "DisconnectRequest", adapter_id: link.adapterId });
     } finally {
+      saveLink(null);
       resetVehicleState();
     }
   }, [client, link, resetVehicleState]);

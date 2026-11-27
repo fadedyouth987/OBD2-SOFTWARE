@@ -1,5 +1,6 @@
 "use client";
 
+import { redactVin } from "@/lib/vin";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { SafetyConfirmModal } from "@/components/safety/SafetyConfirmModal";
@@ -460,7 +461,7 @@ export default function KeyProgrammingPage() {
         <SafetyConfirmModal
           open
           action="Learn a new key"
-          target={`Immobilizer ${hexId(session.ecu_tx)} · VIN ${vin.slice(0, 11)}••••••`}
+          target={`Immobilizer ${hexId(session.ecu_tx)} · VIN ${redactVin(vin)}`}
           consequence="Puts the immobilizer into key-learn using the OEM token. Keep every key for this vehicle with you; a failed or interrupted learn can leave keys unusable until it's repeated."
           tier="A"
           checklist={["Battery maintainer connected", "All existing keys for this vehicle are present", "Vehicle stationary, ignition on, engine off"]}

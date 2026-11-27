@@ -14,11 +14,12 @@ SupplementaryGroups=dialout
 EnvironmentFile=/etc/obd2-edge/edge-daemon.env
 Environment=EDGE_PORT=8765
 Environment=EDGE_DATA_DIR=/var/lib/obd2-edge
-# Shared with technicians in the obd2-edge group so `edge-daemon pair` works;
-# setgid keeps new files in the group, and the daemon writes them 0660.
+# Service-only data (leases, audit log, logs): the obd2-edge group may only
+# pass through (0710) to pairing/, which install.sh makes 2770 so technicians
+# in the group can run `edge-daemon pair`. Everything the daemon writes is 0600.
 StateDirectory=obd2-edge
-StateDirectoryMode=2770
-UMask=0007
+StateDirectoryMode=0710
+UMask=0077
 ExecStart=/usr/local/bin/edge-daemon serve
 Restart=on-failure
 RestartSec=3
