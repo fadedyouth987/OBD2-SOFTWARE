@@ -132,7 +132,8 @@ Deviations from the Task 1.1 target paths, on purpose:
 | 3.3 KG-guided RAG localizer | Implemented | `services/cloud-api/app/services/{embeddings,ai_diagnostic_agent}.py`, `api/v1/diagnose.py` (A-CEO-1 fallback, A-DES-4 bands). |
 | 4.1 Edge client, pairing, live dashboard | Done, gate verified | Verification Gate run against the real daemon on 2026-11-27; see "Task 4.1 gate verification" below. |
 | 4.2–4.3 CAN studio, copilot + `DESIGN.md` | Implemented | `DESIGN.md`, `edge-client.ts`, `SafetyConfirmModal.tsx` (1.5s hold), `BitFlipMatrix.tsx` (29-bit), `WiringTopologyViewer.tsx`, `/live`, `/can-studio`, `/copilot/[sessionId]`. |
-| 5.1–5.2 Packaging, CI, telemetry, runbooks | Implemented | `apps/edge-daemon/src/telemetry/`, `packaging/{linux,windows}/`, `scripts/export_cloud_keys.py`, `.github/workflows/ci.yml`, `infra/monitoring/prometheus.yml`, `docs/runbooks/incident-response.md`. |
+| 5.1 Native installers and CI | Gate running in CI | See "Task 5.1 gate verification" below. |
+| 5.2 Telemetry, runbooks | Implemented | `apps/edge-daemon/src/telemetry/`, `packaging/{linux,windows}/`, `scripts/export_cloud_keys.py`, `.github/workflows/ci.yml`, `infra/monitoring/prometheus.yml`, `docs/runbooks/incident-response.md`. |
 
 Remaining verification requiring local host/hardware: `cargo test --workspace`, `pnpm --filter web build`, live Postgres/Neo4j integration tests, and physical `A-ENG-10` vehicle captures.
 
@@ -201,3 +202,23 @@ Open:
 - Reloading the page drops the adapter connection; the technician reconnects on Devices.
 - Not yet run against real adapters (A-ENG-10).
 - None of the virtual vehicles raises a RED or AMBER audit alert over the WebSocket (the Falcon session reports VIN and odometer consistent, unlike the Task 1.3 fixture run), so live-banner rendering for those severities is covered by type checks, not by the gate.
+
+## Task 5.1 gate verification (2026-11-27)
+
+The row above was marked from the files existing. Checked against the contract, the installers could not have worked: the daemon had no Windows service entry point (the service manager stops such a process after about 30 s), the MSI set no allowed origin, and the Linux unit ran as root with `ProtectSystem=strict` and no writable data directory, trusting the development origin in production. Nothing built release binaries or tested an installed service.
+
+| Gate or contract item | Now |
+| --- | --- |
+| Release builds for `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc` | `.github/workflows/package.yml` on every push and PR, plus the 32-bit J2534 bridge |
+| Linux installer | `packaging/linux/install.sh`: systemd unit running as the `obd2-edge` user in `dialout`, data in a setgid `/var/lib/obd2-edge` (2770), production origin in `/etc/obd2-edge/edge-daemon.env`, udev rules, `uninstall.sh` (D5) |
+| Windows installer | MSI installs the `RootCauseEdgeDaemon` service (`edge-daemon service`, LocalService), its origin and data folder in the service's Environment, `C:\ProgramData\RootCauseOBD`, and `edge-daemon` on PATH |
+| Production `EDGE_ALLOWED_ORIGINS` | `https://app.rootcauseobd.com.au` only in both installers (D3) |
+| Post-install smoke test | `scripts/smoke-installed-daemon.mjs`, run against the installed service on both runners: listens on loopback only, refuses a non-loopback address, refuses a client that skips Hello and a wrong code, accepts a code a technician made with `edge-daemon pair`, started with the production origin only. Also checked: Windows service restarts on request, uninstall stops it and frees the port |
+| Pairing in a shared install | `pairing.json` is group-readable only in a setgid directory, so the service and technicians in its group share it; `edge-daemon pair` no longer opens the service's log file (`pairing::tests::group_readable_only_in_a_setgid_install_dir`) |
+| Code signing | Authenticode (exe, MSI) and a detached GPG signature (Linux archive) run when `WINDOWS_CERT_PFX`/`WINDOWS_CERT_PASSWORD` and `LINUX_SIGNING_KEY`/`LINUX_SIGNING_KEY_PASSPHRASE` are set; until then the workflow warns that artifacts are unsigned (D4) |
+| CI across Rust, Python, TypeScript | `quickstart.yml` (contract names `ci.yml`): `cargo test`, pytest against Postgres and Neo4j, `next build`, Playwright including the Task 4.1 daemon gate, schema and token fixture tests |
+
+Open:
+
+- Signing certificates: the secrets above are not set, so release artifacts are unsigned.
+- Windows: every local user can modify `C:\ProgramData\RootCauseOBD` (to create pairing codes), so any local user can read the daemon's leases; Linux limits this to the `obd2-edge` group.

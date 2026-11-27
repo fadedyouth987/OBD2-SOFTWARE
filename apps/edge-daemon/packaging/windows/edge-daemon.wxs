@@ -1,20 +1,71 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- WiX v4 MSI installer manifest for RootCause OBD Edge Daemon + 32-bit J2534 Bridge (Task 5.1) -->
+<!--
+  WiX v4 MSI for the RootCause OBD edge daemon and the 32-bit J2534 bridge (Task 5.1).
+  Built by .github/workflows/package.yml:
+
+    wix build edge-daemon.wxs -arch x64 -d Version=0.1.0 \
+      -d DaemonExe=target\x86_64-pc-windows-msvc\release\edge-daemon.exe \
+      -d BridgeExe=target\i686-pc-windows-msvc\release\j2534-bridge.exe -o edge-daemon.msi
+
+  The daemon runs as the RootCauseEdgeDaemon service (`edge-daemon service`) under
+  LocalService and listens on loopback only. Its allowed web origin and data folder
+  are in the service's own Environment value, which Windows reads at each start.
+-->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Package Name="RootCause OBD Edge Daemon" Manufacturer="RootCause OBD Australia" Version="0.1.0" UpgradeCode="7E9E6E2A-4B54-4B77-A4B3-1F492C7B0011">
+  <Package Name="RootCause OBD Edge Daemon" Manufacturer="RootCause OBD Australia" Version="$(var.Version)"
+           UpgradeCode="7E9E6E2A-4B54-4B77-A4B3-1F492C7B0011" Scope="perMachine" InstallerVersion="500">
     <MajorUpgrade DowngradeErrorMessage="A newer version of RootCause OBD Edge Daemon is already installed." />
     <MediaTemplate EmbedCab="yes" />
+
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="RootCauseOBD">
         <Component Id="EdgeDaemonBin" Guid="2B61F58C-1E23-41C1-98E2-370F4F320021">
-          <File Id="EdgeDaemonExe" Source="target\release\edge-daemon.exe" KeyPath="yes" />
-          <ServiceInstall Id="EdgeDaemonSvc" Name="RootCauseEdgeDaemon" DisplayName="RootCause OBD Edge Daemon" Start="auto" Type="ownProcess" ErrorControl="normal" />
+          <File Id="EdgeDaemonExe" Name="edge-daemon.exe" Source="$(var.DaemonExe)" KeyPath="yes" />
+          <ServiceInstall Id="EdgeDaemonSvc" Name="RootCauseEdgeDaemon" DisplayName="RootCause OBD Edge Daemon"
+                          Description="Local service between the vehicle adapter and the RootCause web app (loopback only)."
+                          Arguments="service" Account="NT AUTHORITY\LocalService"
+                          Start="auto" Type="ownProcess" ErrorControl="normal" />
           <ServiceControl Id="EdgeDaemonCtrl" Name="RootCauseEdgeDaemon" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+          <!-- Read by the service manager each time the service starts. Production origin only. -->
+          <RegistryValue Root="HKLM" Key="SYSTEM\CurrentControlSet\Services\RootCauseEdgeDaemon" Name="Environment" Type="multiString">
+            <MultiStringValue Value="EDGE_ALLOWED_ORIGINS=https://app.rootcauseobd.com.au" />
+            <MultiStringValue Value="EDGE_PORT=8765" />
+            <MultiStringValue Value="EDGE_DATA_DIR=[DATAFOLDER]" />
+          </RegistryValue>
         </Component>
         <Component Id="J2534BridgeBin" Guid="9A11E44D-3F22-48AA-B321-889C4D120032">
-          <File Id="J2534BridgeExe" Source="target\i686-pc-windows-msvc\release\j2534-bridge.exe" KeyPath="yes" />
+          <File Id="J2534BridgeExe" Name="j2534-bridge.exe" Source="$(var.BridgeExe)" KeyPath="yes" />
+        </Component>
+        <!-- `edge-daemon pair` from any new terminal, against the service's data folder. -->
+        <Component Id="CliEnvironment" Guid="5C0E8B6A-0F3D-4E21-9B7A-6D2C1A4E8F10">
+          <Environment Id="PathEntry" Name="PATH" Value="[INSTALLFOLDER]" Part="last" Action="set" System="yes" Permanent="no" />
+          <Environment Id="DataDirEntry" Name="EDGE_DATA_DIR" Value="[DATAFOLDER]" Action="set" System="yes" Permanent="no" />
+          <RegistryValue Root="HKLM" Key="SOFTWARE\RootCauseOBD\EdgeDaemon" Name="CliEnvironment" Type="integer" Value="1" KeyPath="yes" />
         </Component>
       </Directory>
     </StandardDirectory>
+
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="DATAFOLDER" Name="RootCauseOBD">
+        <!--
+          Leases, pairing codes, the audit log and logs. Full control for SYSTEM,
+          Administrators and the service (LocalService); local users may create
+          pairing codes (`edge-daemon pair`), so they can modify.
+        -->
+        <Component Id="DataFolder" Guid="D3A0E4B1-6C2F-4B7E-8A19-2F5D7C9E0B44">
+          <CreateFolder>
+            <PermissionEx Sddl="D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;LS)(A;OICI;0x1301bf;;;BU)" />
+          </CreateFolder>
+          <RegistryValue Root="HKLM" Key="SOFTWARE\RootCauseOBD\EdgeDaemon" Name="DataFolder" Type="string" Value="[DATAFOLDER]" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="Edge daemon and J2534 bridge" Level="1">
+      <ComponentRef Id="EdgeDaemonBin" />
+      <ComponentRef Id="J2534BridgeBin" />
+      <ComponentRef Id="CliEnvironment" />
+      <ComponentRef Id="DataFolder" />
+    </Feature>
   </Package>
 </Wix>

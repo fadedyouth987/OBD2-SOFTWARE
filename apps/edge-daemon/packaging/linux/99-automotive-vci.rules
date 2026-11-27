@@ -1,10 +1,10 @@
 # udev rules for OBD2 / RootCause VCI adapters (Task 5.1)
 # Install to /etc/udev/rules.d/99-automotive-vci.rules and run: sudo udevadm control --reload-rules
 
-# Silicon Labs CP2102N (RC-Dongle USB-C bench port & OBDLink EX)
+# Silicon Labs CP2102N (RC-Dongle USB-C bench port)
 SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", MODE="0660", GROUP="dialout", SYMLINK+="obd-vci-%n"
 
-# FTDI FT232R / K+DCAN / vLinker FS USB
+# FTDI: FT232R (K+DCAN cables, vLinker FS USB) and FT231X (OBDLink EX, STN chips)
 SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", MODE="0660", GROUP="dialout", SYMLINK+="obd-kline-%n"
 SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6015", MODE="0660", GROUP="dialout", SYMLINK+="obd-stn-%n"
 

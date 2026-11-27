@@ -46,6 +46,10 @@ regress = "0.12"
 # so Rust enforces the same bounds as the Zod validators.
 jsonschema = { version = "0.61", default-features = false }
 
+# Runs under the Windows service manager (`edge-daemon service`, Task 5.1).
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.8"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 socketcan = { version = "4", default-features = false, features = ["tokio"] }
 
