@@ -199,7 +199,6 @@ Open:
 - The contract names a Zustand store in `apps/web/src/store/diagnostic-store.ts`; the app keeps that state in a React context (`context/edge.tsx`). Same behaviour, different library: needs a decision before Task 4.2.
 - A privacy extension or shield that kills the socket without a `SecurityError` still looks like "not running": the browser reports both the same way.
 - K-line vehicles (the pre-03/2007 E90) can't be connected over the local WebSocket, so they have no live view.
-- Reloading the page drops the adapter connection; the technician reconnects on Devices.
 - Not yet run against real adapters (A-ENG-10).
 - None of the virtual vehicles raises a RED or AMBER audit alert over the WebSocket (the Falcon session reports VIN and odometer consistent, unlike the Task 1.3 fixture run), so live-banner rendering for those severities is covered by type checks, not by the gate.
 
@@ -228,3 +227,14 @@ Open:
 - Windows: MSI repair or upgrade rewrites the allowed origins (Linux keeps a local edit); CI builds share version 0.1.0, so installing a newer CI build beside an older one leaves two products; the J2534 bridge loads vendor DLLs as the service account, which still holds SeImpersonate.
 - Linux: the package assumes a `dialout` group (Arch uses `uucp`).
 - Stopping or upgrading the service ends a live session without returning control to the ECU first; another local user can bind port 8765 while the service is stopped.
+
+## Whole-site debug pass (2026-11-28)
+
+Every route was loaded against the real local stack (Postgres, API, daemon, web in dev mode) signed out, signed in, and walked in-app with the virtual Falcon connected (scan, identify, live data, service functions, copilot, close-out, report), recording console errors, page errors and failed requests. No page crashed and no API call failed. Fixed:
+
+- Reloading a page (or a daemon restart) dropped the vehicle connection. The tab now remembers its adapter and reconnects it read-only (SILENT) when the daemon session comes back; an explicit disconnect or an unplugged adapter clears it (`e2e/session-flow.spec.ts`).
+- The Modules page showed 11 VIN characters while the job header showed 9: `lib/ident.ts` and key programming had their own masks. All use `lib/vin.ts` now (positions 10-17 hidden, as the cloud anonymizer does).
+- Linux's built-in serial ports (`/dev/ttyS*`) were listed as OBD dongles. Discovery skips them; USB and Bluetooth serial ports stay (`discovery::tests::builtin_linux_uarts_are_not_adapters`).
+- Unknown addresses showed Next.js's bare 404; they now get the app's own page with a way home (`e2e/states.spec.ts`).
+
+Checked and not a bug: the virtual Falcon's audit reports VIN and odometer consistent because the simulated car is untampered by default (the Task 1.3 test injects the rollback). Noted: the simulator's Falcon VIN decodes to model year 1998 and has an invalid check digit, which a 2002-2005 BA wouldn't.

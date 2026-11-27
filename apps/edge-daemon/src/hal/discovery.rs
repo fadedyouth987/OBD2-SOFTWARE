@@ -57,12 +57,29 @@ pub fn socketcan_interfaces(net_root: &Path) -> Vec<String> {
     names
 }
 
+/// A motherboard UART on Linux (`/dev/ttyS*`), not a vehicle adapter: Linux
+/// lists several on almost every PC whether or not anything is wired to them.
+/// USB and Bluetooth serial ports (where OBD dongles appear) are never skipped.
+pub fn is_builtin_uart(port_name: &str, usb_or_bluetooth: bool) -> bool {
+    !usb_or_bluetooth
+        && port_name
+            .strip_prefix("/dev/ttyS")
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
 fn serial_adapters() -> Vec<DiscoveredAdapter> {
     let Ok(ports) = serialport::available_ports() else {
         return Vec::new();
     };
     ports
         .into_iter()
+        .filter(|port| {
+            let usb_or_bt = matches!(
+                port.port_type,
+                serialport::SerialPortType::UsbPort(_) | serialport::SerialPortType::BluetoothPort
+            );
+            !is_builtin_uart(&port.port_name, usb_or_bt)
+        })
         .map(|port| {
             let (kind, label) = match &port.port_type {
                 serialport::SerialPortType::UsbPort(usb) => (
@@ -76,6 +93,9 @@ fn serial_adapters() -> Vec<DiscoveredAdapter> {
                         .clone()
                         .unwrap_or_else(|| format!("USB serial {:04X}:{:04X}", usb.vid, usb.pid)),
                 ),
+                serialport::SerialPortType::BluetoothPort => {
+                    (AdapterKind::StnElm, "Bluetooth OBD dongle".to_owned())
+                }
                 _ => (AdapterKind::StnElm, "Serial port".to_owned()),
             };
             let base = Path::new(&port.port_name)
@@ -123,6 +143,19 @@ pub fn discover() -> Vec<DiscoveredAdapter> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builtin_linux_uarts_are_not_adapters() {
+        assert!(is_builtin_uart("/dev/ttyS0", false));
+        assert!(is_builtin_uart("/dev/ttyS31", false));
+        // USB and Bluetooth dongles, Windows COM ports and other names stay.
+        assert!(!is_builtin_uart("/dev/ttyS0", true));
+        assert!(!is_builtin_uart("/dev/ttyUSB0", false));
+        assert!(!is_builtin_uart("/dev/ttyACM0", false));
+        assert!(!is_builtin_uart("/dev/rfcomm0", false));
+        assert!(!is_builtin_uart("COM3", false));
+        assert!(!is_builtin_uart("/dev/ttySerial", false));
+    }
 
     #[test]
     fn usb_classification() {
