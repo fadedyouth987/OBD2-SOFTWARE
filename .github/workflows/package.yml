@@ -1,0 +1,174 @@
+# Task 5.1 gate: release builds for x86_64-unknown-linux-gnu and
+# x86_64-pc-windows-msvc, the installers, and a post-install smoke test of the
+# installed service (loopback-only listen, unpaired connections refused, a
+# technician's pairing code accepted, production origin only).
+#
+# Signing runs only when its secrets exist; until then artifacts are unsigned:
+#   Linux:   LINUX_SIGNING_KEY (ASCII-armored GPG private key), LINUX_SIGNING_KEY_PASSPHRASE
+#   Windows: WINDOWS_CERT_PFX (base64 PFX, Authenticode), WINDOWS_CERT_PASSWORD
+name: package
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      TARGET: x86_64-unknown-linux-gnu
+      LINUX_SIGNING_KEY: ${{ secrets.LINUX_SIGNING_KEY }}
+      LINUX_SIGNING_KEY_PASSPHRASE: ${{ secrets.LINUX_SIGNING_KEY_PASSPHRASE }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - name: Release build
+        run: cargo build -p edge-daemon --release --locked --target "$TARGET"
+      - name: Package
+        run: |
+          set -euo pipefail
+          VER=$(grep -m1 '^version' apps/edge-daemon/Cargo.toml | cut -d'"' -f2)
+          NAME="edge-daemon-$VER-$TARGET"
+          mkdir -p "dist/$NAME"
+          cp "target/$TARGET/release/edge-daemon" apps/edge-daemon/packaging/linux/* "dist/$NAME/"
+          tar -C dist -czf "dist/$NAME.tar.gz" "$NAME"
+          (cd dist && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256")
+          echo "NAME=$NAME" >> "$GITHUB_ENV"
+      - name: Detached signature
+        if: env.LINUX_SIGNING_KEY != ''
+        run: |
+          set -euo pipefail
+          echo "$LINUX_SIGNING_KEY" | gpg --batch --import
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$LINUX_SIGNING_KEY_PASSPHRASE" \
+            --armor --detach-sign "dist/$NAME.tar.gz"
+      - name: Unsigned notice
+        if: env.LINUX_SIGNING_KEY == ''
+        run: echo "::warning::LINUX_SIGNING_KEY is not set; the Linux archive is unsigned."
+      - name: Install as a system service
+        run: |
+          set -euo pipefail
+          sudo "dist/$NAME/install.sh"
+          systemctl is-active obd2-edge-daemon.service
+          test "$(stat -c '%a %U:%G' /var/lib/obd2-edge)" = "2770 obd2-edge:obd2-edge"
+      - name: A technician pairs (login shell, obd2-edge group)
+        run: |
+          set -euo pipefail
+          sudo useradd -m -s /bin/bash -G obd2-edge tech
+          CODE=$(sudo -iu tech edge-daemon pair | sed -n 's/^Pairing code: //p')
+          test -n "$CODE"
+          echo "CODE=$CODE" >> "$GITHUB_ENV"
+      - name: Post-install smoke test
+        run: |
+          sudo "$(command -v node)" scripts/smoke-installed-daemon.mjs \
+            --pair-code "$CODE" --log /var/lib/obd2-edge/logs/edge-daemon.log
+      - name: Service logs
+        if: failure()
+        run: sudo journalctl -u obd2-edge-daemon.service --no-pager | tail -n 100
+      - name: Uninstall stops the daemon
+        run: |
+          set -euo pipefail
+          sudo "dist/$NAME/uninstall.sh" --purge
+          if systemctl is-active --quiet obd2-edge-daemon.service; then echo "service still active"; exit 1; fi
+          if (exec 3<>/dev/tcp/127.0.0.1/8765) 2>/dev/null; then echo "port 8765 still listening"; exit 1; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: edge-daemon-linux
+          path: dist/*.tar.gz*
+
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 40
+    env:
+      WINDOWS_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
+      WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust toolchain with the Windows targets
+        run: |
+          rustup toolchain install
+          rustup target add x86_64-pc-windows-msvc i686-pc-windows-msvc
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - name: Release builds (daemon x64, J2534 bridge 32-bit)
+        run: |
+          cargo build -p edge-daemon --release --locked --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo build -p j2534-bridge --release --locked --target i686-pc-windows-msvc
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Signing tool
+        if: env.WINDOWS_CERT_PFX != ''
+        run: |
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx", [Convert]::FromBase64String($env:WINDOWS_CERT_PFX))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1
+          "SIGNTOOL=$($signtool.FullName)" >> $env:GITHUB_ENV
+      - name: Sign executables (Authenticode)
+        if: env.WINDOWS_CERT_PFX != ''
+        run: |
+          & $env:SIGNTOOL sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f "$env:RUNNER_TEMP\cert.pfx" /p $env:WINDOWS_CERT_PASSWORD `
+            target\x86_64-pc-windows-msvc\release\edge-daemon.exe target\i686-pc-windows-msvc\release\j2534-bridge.exe
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Build MSI (WiX v4)
+        run: |
+          dotnet tool install --global wix --version 4.0.5
+          $ver = (Select-String -Path apps\edge-daemon\Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $msi = "dist\edge-daemon-$ver-x86_64-pc-windows-msvc.msi"
+          wix build apps\edge-daemon\packaging\windows\edge-daemon.wxs -arch x64 -d Version=$ver `
+            -d DaemonExe=target\x86_64-pc-windows-msvc\release\edge-daemon.exe `
+            -d BridgeExe=target\i686-pc-windows-msvc\release\j2534-bridge.exe -o $msi
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          "MSI=$msi" >> $env:GITHUB_ENV
+      - name: Sign MSI (Authenticode)
+        if: env.WINDOWS_CERT_PFX != ''
+        run: |
+          & $env:SIGNTOOL sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f "$env:RUNNER_TEMP\cert.pfx" /p $env:WINDOWS_CERT_PASSWORD $env:MSI
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Unsigned notice
+        if: env.WINDOWS_CERT_PFX == ''
+        run: echo "::warning::WINDOWS_CERT_PFX is not set; the MSI and executables are unsigned."
+      - name: Install the MSI
+        run: |
+          $p = Start-Process msiexec -ArgumentList '/i', (Resolve-Path $env:MSI), '/qn', '/l*v', "$env:RUNNER_TEMP\install.log" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\install.log" -Tail 80; exit $p.ExitCode }
+          $svc = Get-Service RootCauseEdgeDaemon
+          $svc.WaitForStatus('Running', '00:00:30')
+          (Get-CimInstance Win32_Service -Filter "Name='RootCauseEdgeDaemon'").StartName
+      - name: Pair, then post-install smoke test
+        run: |
+          $env:EDGE_DATA_DIR = 'C:\ProgramData\RootCauseOBD'
+          $out = & 'C:\Program Files\RootCauseOBD\edge-daemon.exe' pair
+          $code = ($out | Select-String 'Pairing code: (\d{6})').Matches[0].Groups[1].Value
+          node scripts/smoke-installed-daemon.mjs --pair-code $code --log C:\ProgramData\RootCauseOBD\logs\edge-daemon.log
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: The service stops and starts on request
+        run: |
+          Restart-Service RootCauseEdgeDaemon
+          (Get-Service RootCauseEdgeDaemon).WaitForStatus('Running', '00:00:30')
+          node scripts/smoke-installed-daemon.mjs
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Service logs
+        if: failure()
+        run: |
+          Get-Content C:\ProgramData\RootCauseOBD\logs\edge-daemon.log -Tail 100 -ErrorAction SilentlyContinue
+          Get-WinEvent -LogName System -MaxEvents 30 | Where-Object ProviderName -eq 'Service Control Manager' | Format-List TimeCreated, Message
+      - name: Uninstall stops the daemon
+        run: |
+          $p = Start-Process msiexec -ArgumentList '/x', (Resolve-Path $env:MSI), '/qn' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { exit $p.ExitCode }
+          if (Get-Service RootCauseEdgeDaemon -ErrorAction SilentlyContinue) { throw "service still installed" }
+          if (Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue) { throw "port 8765 still listening" }
+      - name: Checksums
+        run: Get-ChildItem dist\*.msi | ForEach-Object { "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLower())  $($_.Name)" | Out-File "$_.sha256" -Encoding ascii }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: edge-daemon-windows
+          path: dist/*

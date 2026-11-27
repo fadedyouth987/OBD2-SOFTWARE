@@ -126,12 +126,14 @@ Deviations from the Task 1.1 target paths, on purpose:
 
 | Task | Status | Notes |
 | --- | --- | --- |
-| 2.2 Control plane, signing, anonymizer, sync | Implemented | `services/cloud-api/app/api/v1/{auth,sessions,dbc}.py`, `services/{signing,anonymizer}.py` (`py_compile` verified). |
+| 2.2 Control plane, signing, anonymizer, sync | Done, gate verified | `services/cloud-api/app/api/v1/{auth,sessions,dbc}.py`, `services/{signing,anonymizer,can_traces}.py`. Verification Gate run on 2026-11-26; see "Task 2.2 gate verification" below. |
 | 2.3 Billing & AU MVIS/AASRA gateways | Implemented | `services/cloud-api/app/api/v1/{billing,gateways}.py` with Stripe HMAC verification & event idempotency. |
 | 3.1–3.2 Neo4j tenant repo & PDF pipeline | Implemented | `services/ai-worker/app/{graph,vision,tasks}/` with A-ENG-6 tenant filter & A-ENG-8 50 MB/200-page limits. |
 | 3.3 KG-guided RAG localizer | Implemented | `services/cloud-api/app/services/{embeddings,ai_diagnostic_agent}.py`, `api/v1/diagnose.py` (A-CEO-1 fallback, A-DES-4 bands). |
-| 4.1–4.3 Next.js Autel-style frontend + `DESIGN.md` | Implemented | `DESIGN.md`, `edge-client.ts`, `SafetyConfirmModal.tsx` (1.5s hold), `BitFlipMatrix.tsx` (29-bit), `WiringTopologyViewer.tsx`, `/live`, `/can-studio`, `/copilot/[sessionId]`. |
-| 5.1–5.2 Packaging, CI, telemetry, runbooks | Implemented | `apps/edge-daemon/src/telemetry/`, `packaging/{linux,windows}/`, `scripts/export_cloud_keys.py`, `.github/workflows/ci.yml`, `infra/monitoring/prometheus.yml`, `docs/runbooks/incident-response.md`. |
+| 4.1 Edge client, pairing, live dashboard | Done, gate verified | Verification Gate run against the real daemon on 2026-11-27; see "Task 4.1 gate verification" below. |
+| 4.2–4.3 CAN studio, copilot + `DESIGN.md` | Implemented | `DESIGN.md`, `edge-client.ts`, `SafetyConfirmModal.tsx` (1.5s hold), `BitFlipMatrix.tsx` (29-bit), `WiringTopologyViewer.tsx`, `/live`, `/can-studio`, `/copilot/[sessionId]`. |
+| 5.1 Native installers and CI | Done, gate verified in CI (signing waits on certificates) | `package.yml` and `quickstart.yml` green on `c93c1e4` (2026-11-27): release builds, install, post-install smoke test and uninstall on Linux and Windows. See "Task 5.1 gate verification" below. |
+| 5.2 Telemetry, runbooks | Implemented | `apps/edge-daemon/src/telemetry/`, `packaging/{linux,windows}/`, `scripts/export_cloud_keys.py`, `.github/workflows/ci.yml`, `infra/monitoring/prometheus.yml`, `docs/runbooks/incident-response.md`. |
 
 Remaining verification requiring local host/hardware: `cargo test --workspace`, `pnpm --filter web build`, live Postgres/Neo4j integration tests, and physical `A-ENG-10` vehicle captures.
 
@@ -153,3 +155,70 @@ Every amendment in [`reviews/2026-11-19-autoplan-review.md`](reviews/2026-11-19-
 Already in place and confirmed: A-CEO-3, A-CEO-4, A-CEO-6, A-DX-1 to A-DX-5, A-ENG-1 to A-ENG-5, A-ENG-9, A-DES-5.
 
 Still needs people or hardware: the A-ENG-10 bench run, a staging drill that fires each alert (the rules are checked by tests, not yet fired against a live Prometheus), and pinning a production signing key.
+
+## Task 2.2 gate verification (2026-11-26)
+
+The Task 2.2 row above was marked from `py_compile` only. Its Verification Gate was run against real Postgres and SeaweedFS; three contract items were missing and one sync bug was found. All are fixed and tested.
+
+| Gate or contract item | Before | Now |
+| --- | --- | --- |
+| Lease and pairing tokens from `signing.py` verify in the Rust daemon with the pinned key (shared fixture); other keys or wrong `aud` rejected | No shared fixture: the Rust tests signed their own tokens | `packages/schemas/fixtures/signing/cloud_tokens.json`, issued by the real `signing.py` functions with a test-only key and a pinned clock (`services/cloud-api/tests/signing_fixture.py`), verified by `apps/edge-daemon/tests/cloud_token_fixture.rs`: lease (tier, features, `rcid`, `lease_ver`, expiry), pairing (origin-bound), immobilizer lease. Rejected: another key under the right `kid`, unknown `kid`, expired, pairing and session tokens as leases, a lease as a pairing token or immobilizer lease, an immobilizer lease as a diagnostic lease, anything with no pinned keys. `tests/test_signing_fixture.py` fails if the fixture drifts from `signing.py` |
+| Raw CAN traces to S3 ap-southeast-2 | Not implemented: sync took telemetry and audit rows only | Optional `can_frames` on `POST /api/v1/sessions/sync`, in the edge's own `CanFrame` wire shape (`is_extended`, `dlc`, `data_hex` up to 8 bytes; unknown fields refused), stored as a gzipped candump log (`can_traces/<tenant>/<id>.log.gz`) through a transactional outbox (`can_trace_outbox`, migration 012). `tests/test_can_traces.py::test_gate_sync_stores_raw_can_trace_in_s3_with_vin_masked` checks the object byte for byte |
+| Anonymizer removes VIN serials (raw traces) | Raw frames would have kept any VIN the car sent | ISO-TP responses to UDS F190 and OBD 09 02 are reassembled (normal and extended addressing) and VIN positions 10-17 are replaced with `*` in the frame bytes before storage (`mask_vins`, `test_vin_serial_is_masked_in_the_frames`). Manufacturer-specific VIN identifiers other than F190 are not masked yet |
+| Compressed batches | Plain JSON only | `Content-Encoding: gzip` on the sync route (`app/api/gzip_body.py`), only for a caller whose session token verifies, inflated in a worker thread: 8 MiB compressed, 32 MiB inflated (413), corrupt, truncated or trailing data 400, other encodings 415; refusals carry CORS headers (`tests/test_sync_gzip.py`) |
+| A-CEO-2 partial failure, S3 | No S3 step to fail | S3 refuses or hangs after commit: the batch is acknowledged with `traces_pending`, the trace stays in the outbox, `python -m app.cli drain-can-traces` uploads it later. The request uploads from memory with a short-timeout client and no transaction or lock held; the drain works row by row, retries least-failed rows first so one bad object cannot block the rest, stops after 3 failures in a row, refuses keys outside the row's tenant prefix, and exits 1 with the true backlog while anything is pending (`test_can_traces.py`). Migration 012 refuses to downgrade while traces are pending |
+| A-CEO-2 re-sent records (bug) | An audit record re-sent in a new batch (the edge lost its ack) raised a unique violation and the route returned 409 on every retry, so that session could never sync again | Audit rows insert in one statement with `ON CONFLICT DO NOTHING`; a skipped row is compared with the stored record: an exact replay is skipped, a different record on a used `seq` (in the database or earlier in the batch) is a 409 that stores nothing from the batch, and an entry without an integer `seq` is a 422 (`tests/test_sync_resend.py`; a review probe showed the first version of this fix dropping such records silently) |
+
+The plain JSON batches the web app's job recorder sends are unchanged (`test_batches_without_frames_are_unchanged`). Already covered on main and re-run: lease and pairing issuance, duplicate `batch_id`, database partial failure, anonymizer (`test_tasks_2_2_to_3_3.py`, `test_security.py`).
+
+Open:
+
+- Schedule `drain-can-traces` (every few minutes, owner database role) with the Task 5.2 jobs.
+- The daemon does not send `can_frames` yet. When it does, a batch rebuilt after a lost ack must keep its `batch_id`; a new id stores the same frames (and telemetry, as before this change) twice.
+- CAN trace objects are never deleted: no tier retention, and deleting a tenant or session drops the outbox rows but leaves the S3 objects. Add a lifecycle or delete path with the retention work.
+- The web recorder's audit `seq` (`Date.now()*10 + audit.length`) can collide across tabs; a collision is now a 409 instead of a lost record, but the client should use a per-session counter.
+
+## Task 4.1 gate verification (2026-11-27)
+
+The existing Playwright suite drove the browser demo car, so the gate ("pairs with daemon on `VirtualBusAdapter`") had never run. `apps/web/e2e/daemon-gate.spec.ts` now runs it against the real debug daemon, in CI with the rest of `pnpm e2e`. The cloud API is stood in, but the pairing and lease tokens it hands the browser are real: `services/cloud-api/tests/edge_e2e_tokens.py` issues them with the production `signing.py` functions and a throwaway key that the run pins in the daemon (`EDGE_DEV_CLOUD_KEYS`, debug builds only).
+
+| Gate or contract item | Before | Now |
+| --- | --- | --- |
+| Pairs with the daemon, live PIDs render, no console errors | Only the in-browser demo was tested | The browser fetches a cloud pairing JWT and sends `HelloRequest` first, installs the plan's lease, connects the virtual Falcon in Active mode, and the live page streams; no page or console errors (the run found the stand-in missing `/api/v1/team`) |
+| Oscilloscope: RPM, MAF, STFT/LTFT B1/B2, ECT, IAT | SVG line charts, default RPM, speed, ECT, STFT B1; the daemon polled six PIDs and never sent MAF or the bank 2 trims | Canvas 2D oscilloscope (`components/charts/Oscilloscope.tsx`), one lane per PID with its own scale, the contract set by default. The daemon asks the ECU which PIDs it supports, then polls RPM, speed, MAF and the short-term trims every cycle and ECT, IAT and the long-term trims every fifth; PIDs the car doesn't report show as not supported (Rule 6) |
+| Heuristic alert banner | Live alerts appeared only on the job overview | Also a banner per alert on the live page, severity in words and colour |
+| Modal blocks until confirmed | Component test only | With the checklist ticked, letting go after 0.6 s sends nothing (the daemon's audit log is unchanged); a full hold gets a token, clears the codes, and the log shows `token_issued` and `allowed` |
+| Unknown speed shows `PRECONDITION_UNKNOWN` | The modal said "waiting for a fresh reading" without the code | The modal names `PRECONDITION_UNKNOWN` and the reading it lacks, and the hold stays locked. Gate run on the Falcon with its speed PID removed (`EDGE_SIM_FAULTS=no-road-speed`, debug builds only); a client that skips the modal gets `PRECONDITION_UNKNOWN` from the daemon itself, logged as `token_refused`. The daemon no longer seeds a virtual vehicle's speed at connect unless the vehicle reports speed. Daemon refusals in the app now show the code after the plain words |
+| Killed daemon shows "not running" | Unit test only | The daemon is killed mid-session; Devices shows "The edge daemon is not running", the start command and Retry now |
+| `ConnectionStatus`: "browser blocked local connection" | Shown as "not running" | Its own state with the fix: a `SecurityError` when the socket is created (mixed content, CSP) or Chrome's local network access permission set to Block (`tests/edge-client.test.ts`) |
+
+gstack `/review` (7 specialists, red team, adversarial pass) found and this change fixed: the daemon seeded speed and RPM from the simulator at connect instead of reading them from the bus, and kept readings across sessions (`end_session` now clears them; only bus reads count); the browser-permission probe also read Chrome's LAN-only permission and had no timeout (now loopback only, 500 ms, and a denied permission keeps retrying); long-term trims, now polled every fifth cycle, dropped 4 of 5 fuel-trim heuristic snapshots (carried forward now); an empty or unreadable supported-PID bitmap is logged instead of silently disabling the stream filter; the INFO "audit consistent" result no longer shows as a live banner; oscilloscope lanes print their min and max; `just e2e` and CI build the daemon before the gate, and a missing daemon fails the gate instead of skipping it. New tests: `ws_gate::streams_the_contract_pids_and_only_supported_ones`, `interlock::end_session_clears_the_live_readings`, `heuristics::long_term_trim_carries_into_later_snapshots`, and permission/SecurityError/stale-probe cases in `tests/edge-client.test.ts`.
+
+Open:
+
+- The contract names a Zustand store in `apps/web/src/store/diagnostic-store.ts`; the app keeps that state in a React context (`context/edge.tsx`). Same behaviour, different library: needs a decision before Task 4.2.
+- A privacy extension or shield that kills the socket without a `SecurityError` still looks like "not running": the browser reports both the same way.
+- K-line vehicles (the pre-03/2007 E90) can't be connected over the local WebSocket, so they have no live view.
+- Reloading the page drops the adapter connection; the technician reconnects on Devices.
+- Not yet run against real adapters (A-ENG-10).
+- None of the virtual vehicles raises a RED or AMBER audit alert over the WebSocket (the Falcon session reports VIN and odometer consistent, unlike the Task 1.3 fixture run), so live-banner rendering for those severities is covered by type checks, not by the gate.
+
+## Task 5.1 gate verification (2026-11-27)
+
+The row above was marked from the files existing. Checked against the contract, the installers could not have worked: the daemon had no Windows service entry point (the service manager stops such a process after about 30 s), the MSI set no allowed origin, and the Linux unit ran as root with `ProtectSystem=strict` and no writable data directory, trusting the development origin in production. Nothing built release binaries or tested an installed service.
+
+| Gate or contract item | Now |
+| --- | --- |
+| Release builds for `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc` | `.github/workflows/package.yml` on every push and PR, plus the 32-bit J2534 bridge |
+| Linux installer | `packaging/linux/install.sh`: systemd unit running as the `obd2-edge` user in `dialout`, data in a setgid `/var/lib/obd2-edge` (2770), production origin in `/etc/obd2-edge/edge-daemon.env`, udev rules, `uninstall.sh` (D5) |
+| Windows installer | MSI installs the `RootCauseEdgeDaemon` service (`edge-daemon service`, LocalService), its origin and data folder in the service's Environment, `C:\ProgramData\RootCauseOBD`, and `edge-daemon` on PATH |
+| Production `EDGE_ALLOWED_ORIGINS` | `https://app.rootcauseobd.com.au` only in both installers (D3) |
+| Post-install smoke test | `scripts/smoke-installed-daemon.mjs`, run against the installed service on both runners: listens on loopback only, refuses a non-loopback address, refuses a client that skips Hello and a wrong code, accepts a code a technician made with `edge-daemon pair`, started with the production origin only. Also checked: Windows service restarts on request, uninstall stops it and frees the port |
+| Pairing in a shared install | `pairing.json` is group-readable only in a setgid directory, so the service and technicians in its group share it; `edge-daemon pair` no longer opens the service's log file (`pairing::tests::group_readable_only_in_a_setgid_install_dir`) |
+| Code signing | Authenticode (exe, MSI) and a detached GPG signature (Linux archive) run when `WINDOWS_CERT_PFX`/`WINDOWS_CERT_PASSWORD` and `LINUX_SIGNING_KEY`/`LINUX_SIGNING_KEY_PASSPHRASE` are set; until then the workflow warns that artifacts are unsigned (D4) |
+| CI across Rust, Python, TypeScript | `quickstart.yml` (contract names `ci.yml`): `cargo test`, pytest against Postgres and Neo4j, `next build`, Playwright including the Task 4.1 daemon gate, schema and token fixture tests |
+
+Open:
+
+- Signing certificates: the secrets above are not set, so release artifacts are unsigned.
+- Windows: every local user can modify `C:\ProgramData\RootCauseOBD` (to create pairing codes), so any local user can read the daemon's leases; Linux limits this to the `obd2-edge` group.

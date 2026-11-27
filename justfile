@@ -12,9 +12,13 @@ bootstrap:
     cargo fetch --locked
     @test -f .env || (cp .env.example .env && echo "Created .env from .env.example")
 
-# Start local infrastructure in the background
+# Start local infrastructure in the background. The long-running services are
+# waited on by name: `up --wait` counts the one-shot s3-init exiting (even with
+# code 0) as a failure on some Compose versions. s3-init then runs on its own,
+# and its exit code is the step's, as in scripts/infra-gate.sh.
 infra-up:
-    docker compose -f infra/docker-compose.yml --env-file .env up -d --wait
+    docker compose -f infra/docker-compose.yml --env-file .env up -d --wait --wait-timeout 300 postgres neo4j redis s3
+    docker compose -f infra/docker-compose.yml --env-file .env up --exit-code-from s3-init s3-init
 
 # Stop local infrastructure (add `-v` to also delete data: just infra-down -v)
 infra-down *args:
@@ -60,8 +64,10 @@ test:
     cd apps/web && pnpm typecheck
     cd apps/web && pnpm test
 
-# Web end-to-end tests for the A-DES gates (builds first; no infrastructure needed)
+# Web end-to-end tests: the A-DES gates and the Task 4.1 gate against the real
+# debug daemon (builds both first; no infrastructure needed)
 e2e:
+    cargo build -p edge-daemon --locked
     cd apps/web && pnpm build && pnpm e2e --trace off
 
 # Lint and format checks across all languages, plus generated-code drift

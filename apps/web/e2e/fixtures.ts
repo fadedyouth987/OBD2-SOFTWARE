@@ -64,6 +64,12 @@ function route(method: string, path: string, mode: ApiMode): unknown {
   if (p === "/api/v1/vehicles") return { platforms: [platform], vehicles: [platform] };
   if (p.startsWith("/api/v1/vehicles/") && p.endsWith("/services")) return { adapter_id: null, source: "none", note: "", modules: platform.modules, functions: [] };
   if (p === "/api/v1/service-functions") return { adapter_id: null, source: "none", note: "", functions: [] };
+  if (p === "/api/v1/team") {
+    return {
+      can_manage: true, seats: { used: 1, pending: 0, limit: 5 }, sites_cap: { used: 1, limit: 2 }, invites: [], sites: [],
+      members: [{ user_id: "u1", email: me.user.email, display_name: me.user.display_name, role: "OWNER", site_id: null, joined_at: now, you: true }],
+    };
+  }
   if (p === "/api/v1/dbc") return { items: [] };
   if (p === "/api/v1/schematics") return { items: [] };
   if (p === "/api/v1/sessions/sync") return { status: "accepted" };
@@ -73,15 +79,25 @@ function route(method: string, path: string, mode: ApiMode): unknown {
 
 const fakeJwt = () => `e30.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 36_000 })).toString("base64url")}.sig`;
 
-export async function useStandIns(context: BrowserContext, opts: { mode?: ApiMode; theme?: "night" | "daylight"; signedIn?: boolean } = {}) {
+/** Real cloud tokens for a real daemon (see daemon-gate.spec.ts). */
+export interface EdgeTokens {
+  pairing: () => string;
+  lease: () => unknown;
+}
+
+export async function useStandIns(
+  context: BrowserContext,
+  opts: { mode?: ApiMode; theme?: "night" | "daylight"; signedIn?: boolean; edgeMode?: "browser-sim" | "daemon"; edge?: EdgeTokens } = {},
+) {
   const mode = opts.mode ?? "ok";
+  const edge = opts.edge;
   await context.addInitScript(
-    ([token, theme, signedIn]) => {
+    ([token, theme, signedIn, edgeMode]) => {
       if (signedIn) localStorage.setItem("rootcause.session", token);
-      localStorage.setItem("rootcause.edgeMode", "browser-sim");
+      localStorage.setItem("rootcause.edgeMode", edgeMode);
       localStorage.setItem("rootcause.theme", theme);
     },
-    [fakeJwt(), opts.theme ?? "night", opts.signedIn ?? true] as const,
+    [fakeJwt(), opts.theme ?? "night", opts.signedIn ?? true, opts.edgeMode ?? "browser-sim"] as const,
   );
   await context.route(/^https?:\/\/(127\.0\.0\.1|localhost):8000\//, async (r) => {
     const url = new URL(r.request().url());
@@ -89,6 +105,12 @@ export async function useStandIns(context: BrowserContext, opts: { mode?: ApiMod
     const isAccount = url.pathname === "/api/v1/auth/me" || url.pathname === "/api/v1/auth/config";
     if (mode === "server_error" && !isAccount) {
       return r.fulfill({ status: 500, contentType: "application/json", body: '{"detail":"Internal Server Error"}' });
+    }
+    if (edge && url.pathname === "/api/v1/auth/edge-pairing") {
+      return r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ token: edge.pairing() }) });
+    }
+    if (edge && url.pathname === "/api/v1/auth/edge-lease") {
+      return r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(edge.lease()) });
     }
     const data = route(r.request().method(), url.pathname + url.search, mode);
     if (data === null) return r.fulfill({ status: 404, contentType: "application/json", body: '{"detail":"Not found"}' });

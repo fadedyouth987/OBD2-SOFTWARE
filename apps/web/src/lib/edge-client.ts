@@ -31,7 +31,7 @@ export type PushType = "AdapterStatus" | "CanFrameBatch" | "ObdPidStream" | "Heu
 
 export type EdgeMode = "daemon" | "browser-sim";
 export type EdgePhase = "idle" | "connecting" | "handshaking" | "ready" | "waiting" | "failed";
-export type EdgeFailureKind = "unreachable" | "auth" | "version" | "origin" | "protocol";
+export type EdgeFailureKind = "unreachable" | "blocked" | "auth" | "version" | "origin" | "protocol";
 export type AuthMethod = "cloud" | "code" | "sim";
 
 export interface EdgeFailure {
@@ -90,7 +90,8 @@ export class EdgeRequestError extends Error {
 export interface TransportHandlers {
   onOpen: () => void;
   onMessage: (text: string) => void;
-  onClose: (wasOpen: boolean) => void;
+  /** `blocked`: the browser refused to open the socket at all (SecurityError). */
+  onClose: (wasOpen: boolean, blocked?: boolean) => void;
 }
 
 export interface Transport {
@@ -106,8 +107,11 @@ export function webSocketTransport(url: string): TransportFactory {
     let ws: WebSocket;
     try {
       ws = new WebSocket(url);
-    } catch {
-      queueMicrotask(() => h.onClose(false));
+    } catch (e) {
+      // Mixed content (an https page and ws://) or a Content-Security-Policy
+      // refusal throws SecurityError here; anything else is treated as down.
+      const blocked = e instanceof DOMException && e.name === "SecurityError";
+      queueMicrotask(() => h.onClose(false, blocked));
       return { send: () => undefined, close: () => undefined };
     }
     ws.onopen = () => {
@@ -139,6 +143,58 @@ export interface EdgeClientOptions {
   credential: () => Promise<Credential | null>;
   onSnapshot: (s: EdgeSnapshot) => void;
   helloTimeoutMs?: number;
+  /**
+   * Whether the browser itself refuses local connections for this site (for
+   * example Chrome's local network access permission set to Block). Asked
+   * only when the socket never opened.
+   */
+  localAccessBlocked?: () => Promise<boolean>;
+}
+
+/** Shown when the browser, not the daemon, stopped the connection. */
+export const BLOCKED_FAILURE: EdgeFailure = {
+  kind: "blocked",
+  code: null,
+  needsCode: false,
+  message: "Your browser blocked this site from connecting to the edge daemon on this computer.",
+  hint:
+    "Allow local network access for this site (the icon at the left of the address bar, then Site settings), or turn off the privacy shield or extension blocking it, then retry.",
+};
+
+/** How long to wait for the browser's permission answer before assuming no block. */
+export const LOCAL_ACCESS_PROBE_MS = 500;
+
+/**
+ * Whether Chrome's permission for this page to reach loopback (127.0.0.1) is
+ * set to Block. Chrome names it `loopback-network`; versions before the split
+ * used one `local-network-access` permission for loopback and LAN. The LAN-only
+ * `local-network` permission is not consulted: the daemon is loopback-only.
+ */
+export async function browserBlocksLocalAccess(): Promise<boolean> {
+  const perms = typeof navigator !== "undefined" ? navigator.permissions : undefined;
+  if (!perms) return false;
+  for (const name of ["loopback-network", "local-network-access"]) {
+    try {
+      const status = await perms.query({ name } as unknown as PermissionDescriptor);
+      return status.state === "denied";
+    } catch {
+      // Not a permission this browser knows: try the older name.
+    }
+  }
+  return false;
+}
+
+/** The probe's answer, or false if it fails or takes longer than `ms`. */
+function probeWithin(probe: () => Promise<boolean>, ms: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), ms);
+    probe()
+      .catch(() => false)
+      .then((v) => {
+        clearTimeout(timer);
+        resolve(v);
+      });
+  });
 }
 
 interface Pending {
@@ -365,9 +421,9 @@ export class EdgeClient {
         if (epoch !== this.epoch) return;
         this.handle(text);
       },
-      onClose: (wasOpen) => {
+      onClose: (wasOpen, blocked) => {
         if (epoch !== this.epoch) return;
-        this.onClosed(wasOpen);
+        this.onClosed(wasOpen, blocked ?? false);
       },
     });
   }
@@ -410,22 +466,49 @@ export class EdgeClient {
     else this.update({ phase: "failed", failure, hello: null, retryInMs: null });
   }
 
-  private onClosed(wasOpen: boolean): void {
+  private notRunning(): void {
+    this.scheduleRetry({
+      kind: "unreachable",
+      code: null,
+      needsCode: false,
+      message: "The edge daemon is not running on this computer (ws://127.0.0.1:8765).",
+      hint: "Start it with `edge-daemon` (or `cargo run -p edge-daemon`); the app reconnects by itself.",
+    });
+  }
+
+  private onClosed(wasOpen: boolean, blocked: boolean): void {
     const was = this.snap.phase;
     this.clearTimers();
     this.transport = null;
     this.rejectAll("The connection to the daemon dropped.");
     if (this.stopped) return;
+    if (!wasOpen && this.snap.mode === "daemon") {
+      // A SecurityError (mixed content, CSP) won't clear without a page change: stop and say how to fix it.
+      if (blocked) {
+        this.update({ phase: "failed", failure: BLOCKED_FAILURE, hello: null, retryInMs: null });
+        return;
+      }
+      // A denied permission can be granted while the page is open, so keep retrying.
+      const probe = this.opts.localAccessBlocked;
+      if (probe) {
+        const epoch = this.epoch;
+        void probeWithin(probe, LOCAL_ACCESS_PROBE_MS).then((denied) => {
+          if (epoch !== this.epoch || this.stopped) return;
+          if (denied) this.scheduleRetry(BLOCKED_FAILURE);
+          else this.notRunning();
+        });
+        return;
+      }
+      this.notRunning();
+      return;
+    }
     if (!wasOpen) {
       this.scheduleRetry({
         kind: "unreachable",
         code: null,
         needsCode: false,
-        message:
-          this.snap.mode === "daemon"
-            ? "The edge daemon isn't running on this computer (ws://127.0.0.1:8765)."
-            : "The browser demo stopped.",
-        hint: "Start it with `edge-daemon` (or `cargo run -p edge-daemon`); the app reconnects by itself.",
+        message: "The browser demo stopped.",
+        hint: "Switch to the browser demo again, or connect the real daemon.",
       });
       return;
     }

@@ -1,18 +1,36 @@
+# RootCause OBD2 edge daemon as a system service (Task 5.1). Installed by install.sh.
+# Listens on loopback only (127.0.0.1 and [::1]); the browser pairs with it.
 [Unit]
-Description=RootCause OBD2 Local Edge Daemon (ws://127.0.0.1:8765)
-After=network.target bluetooth.target
+Description=RootCause OBD2 edge daemon (loopback ws://127.0.0.1:8765)
+After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/edge-daemon
+User=obd2-edge
+Group=obd2-edge
+# Serial adapters (/dev/ttyUSB*, /dev/ttyACM*) belong to dialout.
+SupplementaryGroups=dialout
+# Production web origin (EDGE_ALLOWED_ORIGINS); edit there, not here.
+EnvironmentFile=/etc/obd2-edge/edge-daemon.env
 Environment=EDGE_PORT=8765
-Environment=EDGE_ALLOWED_ORIGINS=http://localhost:3000,https://app.rootcauseobd.com.au
+Environment=EDGE_DATA_DIR=/var/lib/obd2-edge
+# Shared with technicians in the obd2-edge group so `edge-daemon pair` works;
+# setgid keeps new files in the group, and the daemon writes them 0660.
+StateDirectory=obd2-edge
+StateDirectoryMode=2770
+UMask=0007
+ExecStart=/usr/local/bin/edge-daemon serve
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true
 ProtectSystem=strict
+ProtectHome=true
 PrivateTmp=true
-SupplementaryGroups=dialout
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+# Loopback WebSocket, SocketCAN and netlink (interface discovery) only.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_CAN AF_NETLINK
 
 [Install]
 WantedBy=multi-user.target

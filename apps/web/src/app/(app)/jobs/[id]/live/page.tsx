@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LineChart, Sparkline } from "@/components/charts/LineChart";
+import { Sparkline } from "@/components/charts/LineChart";
+import { Oscilloscope } from "@/components/charts/Oscilloscope";
 import { Badge, Banner, Button, Card, EmptyState, Select, Spinner } from "@/components/ui";
 import { useAuth } from "@/context/auth";
 import { PID_WINDOW_MS, useEdge, type PidSeries } from "@/context/edge";
@@ -11,7 +12,11 @@ import { formatNumber, formatReading } from "@/lib/format";
 import { ensureSyncSession, syncBatch, type TelemetryRow } from "@/lib/job-sync";
 import { useNow } from "@/lib/use-now";
 
-const DEFAULT_CHARTS = [0x0c, 0x0d, 0x05, 0x06];
+/** Task 4.1 scope: RPM, MAF, STFT/LTFT B1/B2, ECT, IAT. */
+const DEFAULT_CHARTS = [0x0c, 0x10, 0x06, 0x07, 0x08, 0x09, 0x05, 0x0f];
+const MAX_CHARTS = 8;
+const ALERT_TONE = { RED: "danger", AMBER: "warn", INFO: "info" } as const;
+const ALERT_WORD = { RED: "Critical", AMBER: "Check", INFO: "Info" } as const;
 const WINDOWS = [
   { ms: 30_000, label: "30 s" },
   { ms: 60_000, label: "1 min" },
@@ -110,6 +115,12 @@ export default function LivePage() {
 
   return (
     <div className="space-y-4">
+      {/* INFO results (e.g. "audit consistent") stay on the overview; the live page flags what needs a test. */}
+      {edge.alerts.filter((a) => a.severity !== "INFO").map((a) => (
+        <Banner key={a.rule_id} tone={ALERT_TONE[a.severity]} title={`${ALERT_WORD[a.severity]}: ${a.title}`}>
+          {a.recommended_test}
+        </Banner>
+      ))}
       {stalled ? (
         <Banner tone="warn" title="Live data has stopped">
           No new readings for {Math.round((stalledFor ?? 0) / 1000)} s. The charts show the last values received. Check the
@@ -179,7 +190,7 @@ export default function LivePage() {
                       type="button"
                       aria-pressed={charted}
                       onClick={() =>
-                        setCharts((c) => (charted ? c.filter((p) => p !== s.pid) : [...c, s.pid].slice(-6)))
+                        setCharts((c) => (charted ? c.filter((p) => p !== s.pid) : [...c, s.pid].slice(-MAX_CHARTS)))
                       }
                       className={`w-full rounded-lg border p-2.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-accent ${
                         charted ? "border-accent bg-raised" : "border-line bg-raised hover:border-faint"
@@ -201,19 +212,15 @@ export default function LivePage() {
             </ul>
           )}
           <p className="text-xs text-faint">
-            Tap a reading to add or remove its chart (up to 6). The last {PID_WINDOW_MS / 60_000} minutes are kept in this browser.
+            Tap a reading to add or remove it from the oscilloscope (up to {MAX_CHARTS}). The last {PID_WINDOW_MS / 60_000} minutes are kept in this browser.
           </p>
         </div>
       </Card>
 
       {chartSeries.length ? (
-        <div className="grid gap-3 lg:grid-cols-2">
-          {chartSeries.map((s) => (
-            <LineChart key={s.pid} title={s.name} unit={s.unit} points={s.points} windowMs={windowMs} now={now} />
-          ))}
-        </div>
+        <Oscilloscope channels={chartSeries} windowMs={windowMs} now={now} />
       ) : series.length ? (
-        <EmptyState title="No charts selected">Tap a reading above to chart it.</EmptyState>
+        <EmptyState title="Nothing on the oscilloscope">Tap a reading above to add it.</EmptyState>
       ) : null}
       {charts.some((pid) => !bySeries.has(pid)) && series.length ? (
         <p className="text-xs text-muted">

@@ -5,6 +5,7 @@ revoke-platform-admin EMAIL
 accreditation-reminders        send "lapses soon" emails and lapse expired approvals (run daily)
 import-procedures FILE         import a licensed procedure JSON file (docs/dev/oem-procedures.md)
 sync-procedures                pull the licensed provider feed (PROCEDURE_PROVIDER_FEED_URL)
+drain-can-traces               upload raw CAN traces S3 refused at sync time (run every few minutes)
 """
 
 from __future__ import annotations
@@ -56,6 +57,19 @@ def main(argv: list[str]) -> int:
             print(exc.detail, file=sys.stderr)
             return 1
         return 0
+    if command == "drain-can-traces" and not args:
+        from sqlalchemy import create_engine
+
+        from app.config import get_settings
+        from app.services.can_traces import drain
+
+        engine = create_engine(get_settings().migration_database_url)  # owner: every tenant
+        try:
+            pending = drain(engine)
+        finally:
+            engine.dispose()
+        print(json.dumps({"pending": pending}))
+        return 0 if pending == 0 else 1
     print(__doc__, file=sys.stderr)
     return 2
 

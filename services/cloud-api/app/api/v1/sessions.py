@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
-from sqlalchemy import Text, literal, text
+from pydantic import BaseModel, Field
+from sqlalchemy import Text, literal, select, text
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
@@ -23,6 +25,7 @@ from app.db.models import (
 )
 from app.db.session import tenant_session
 from app.observability.metrics import count, inc, observe
+from app.services import can_traces, object_store
 from app.services.anonymizer import anonymize_audit_entry, anonymize_case, anonymize_telemetry_row
 from app.services.embeddings import EMBEDDING_MODEL, cosine_similarity, embed_canonical_text
 
@@ -174,9 +177,13 @@ def _case_to_dict(row: ResolvedCase) -> dict[str, Any]:
 class SyncBatchRequest(BaseModel):
     batch_id: str
     session_id: str
-    watermark_us: int
+    watermark_us: int = Field(le=2**63 - 1)  # stored in a BIGINT
     telemetry_rows: list[dict[str, Any]] = []
     audit_entries: list[dict[str, Any]] = []
+    # Raw CAN frames for this session, stored in S3 as a candump log (optional).
+    can_frames: list[can_traces.CanFrameIn] = Field(
+        default_factory=list, max_length=can_traces.MAX_FRAMES_PER_BATCH
+    )
     # Ignored: tenant is taken from the session, never the body.
     tenant_id: str | None = None
 
@@ -191,8 +198,145 @@ class PublishCaseRequest(BaseModel):
     parts_replaced: list[str] = []
 
 
+log = logging.getLogger("obd2.sessions")
+
+# Fields that decide whether a re-sent audit record is the same record.
+_AUDIT_IDENTITY = (
+    "user_ref",
+    "vehicle_ref",
+    "ecu",
+    "service",
+    "tier",
+    "outcome",
+    "code",
+    "nrc",
+    "detail",
+)
+
+
+class _AuditConflict(Exception):
+    def __init__(self, seqs: list[int]) -> None:
+        self.seqs = sorted(set(seqs))
+
+
+def _audit_rows(req: SyncBatchRequest, principal: Any) -> list[tuple[dict[str, Any], bool]]:
+    """Normalised audit rows, each with whether the edge supplied its own ``at``.
+
+    Every entry needs an integer ``seq``: it is the record's identity (one row
+    per attempt, A-CEO-4), so a guessed one could collide with a real record.
+    """
+    rows: list[tuple[dict[str, Any], bool]] = []
+    for index, raw in enumerate(req.audit_entries):
+        entry = anonymize_audit_entry(raw)
+        seq = entry.get("seq")
+        if isinstance(seq, bool) or not isinstance(seq, int):
+            raise HTTPException(
+                status_code=422,
+                detail=f"audit_entries[{index}] needs an integer seq (its record identity)",
+            )
+        rows.append(
+            (
+                {
+                    "tenant_id": principal.tenant_id,
+                    "edge_session_id": req.session_id,
+                    "seq": seq,
+                    "at": _as_datetime(entry.get("at")),
+                    "user_ref": str(entry.get("user_ref") or principal.user_id),
+                    "vehicle_ref": str(entry.get("vehicle_ref") or ""),
+                    "ecu": str(entry.get("ecu") or "UNKNOWN")[:64] or "UNKNOWN",
+                    "service": str(entry.get("service") or entry.get("action") or "UNKNOWN")[:64],
+                    "tier": str(entry.get("tier") or "A")[:1],
+                    "outcome": _audit_outcome(
+                        str(entry.get("outcome") or entry.get("status") or "logged")
+                    ),
+                    "code": str(entry.get("code") or "") or None,
+                    "nrc": int(entry["nrc"]) if str(entry.get("nrc") or "").isdigit() else None,
+                    "detail": str(entry.get("detail") or ""),
+                },
+                bool(entry.get("at")),
+            )
+        )
+    return rows
+
+
+def _store_audit(store: Any, edge_session_id: str, rows: list[tuple[dict[str, Any], bool]]) -> int:
+    """Inserts the batch's audit rows; returns how many were new.
+
+    A record re-sent in a later batch (the edge lost its ack) is skipped. A
+    different record on a seq that is already taken, in the database or earlier
+    in this batch, raises ``_AuditConflict``: refusing loudly keeps the record
+    with the edge instead of dropping it silently.
+    """
+    if not rows:
+        return 0
+    inserted = set(
+        store.execute(
+            pg_insert(AuditLogEntry)
+            .values([row for row, _ in rows])
+            .on_conflict_do_nothing(index_elements=["tenant_id", "edge_session_id", "seq"])
+            .returning(AuditLogEntry.seq)
+        ).scalars()
+    )
+    first_seen: set[int] = set()
+    to_check: list[tuple[dict[str, Any], bool]] = []
+    for row, at_given in rows:
+        if row["seq"] in inserted and row["seq"] not in first_seen:
+            first_seen.add(row["seq"])
+        else:
+            to_check.append((row, at_given))
+    if to_check:
+        stored = {
+            e.seq: e
+            for e in store.execute(
+                select(AuditLogEntry).where(
+                    AuditLogEntry.edge_session_id == edge_session_id,
+                    AuditLogEntry.seq.in_({row["seq"] for row, _ in to_check}),
+                )
+            ).scalars()
+        }
+        clashes = [
+            row["seq"]
+            for row, at_given in to_check
+            if any(getattr(stored[row["seq"]], f) != row[f] for f in _AUDIT_IDENTITY)
+            or (at_given and stored[row["seq"]].at != row["at"])
+        ]
+        if clashes:
+            raise _AuditConflict(clashes)
+    return len(inserted)
+
+
+def _upload_now(tenant_id: UUID, trace: can_traces.QueuedTrace) -> int:
+    """Uploads a just-committed trace from memory; returns 1 if it is left pending.
+
+    No transaction or row lock is held during the S3 call, and the short-timeout
+    client is used, so a slow S3 costs this request a couple of seconds at most.
+    The batch is already committed: any failure here leaves the row for the drain.
+    """
+    try:
+        object_store.put(trace.s3_key, trace.body, can_traces.CONTENT_TYPE, fast=True)
+    except object_store.StorageError as exc:
+        try:
+            with tenant_session(tenant_id) as store:
+                can_traces.record_failure(store, trace.s3_key, str(exc))
+        except Exception:  # noqa: BLE001 - the drain still finds the row
+            log.warning("could not record a CAN trace upload failure", exc_info=True)
+        return 1
+    except Exception:  # noqa: BLE001 - committed batch; never turn this into a 500
+        log.warning("CAN trace upload failed unexpectedly", exc_info=True)
+        return 1
+    try:
+        with tenant_session(tenant_id) as store:
+            can_traces.mark_uploaded(store, trace.s3_key)
+    except Exception:  # noqa: BLE001 - uploaded; the drain re-uploads the same bytes
+        log.warning("could not mark a CAN trace uploaded", exc_info=True)
+        return 1
+    return 0
+
+
 @router.post("/sessions/sync")
 def sync_session_batch(req: SyncBatchRequest, principal: RequirePrincipal) -> dict[str, Any]:
+    audit_rows = _audit_rows(req, principal)
+    queued: can_traces.QueuedTrace | None = None
     try:
         with tenant_session(principal.tenant_id) as store:
             if store.get(SyncBatch, (principal.tenant_id, req.batch_id)) is not None:
@@ -230,34 +374,12 @@ def sync_session_batch(req: SyncBatchRequest, principal: RequirePrincipal) -> di
                 store.add(sample)
                 telemetry_ingested += 1
 
-            audit_ingested = 0
-            for index, raw in enumerate(req.audit_entries):
-                entry = anonymize_audit_entry(raw)
-                try:
-                    seq = int(entry.get("seq", index + 1))
-                except (TypeError, ValueError):
-                    seq = index + 1
-                store.add(
-                    AuditLogEntry(
-                        tenant_id=principal.tenant_id,
-                        edge_session_id=req.session_id,
-                        seq=seq,
-                        at=_as_datetime(entry.get("at")),
-                        user_ref=str(entry.get("user_ref") or principal.user_id),
-                        vehicle_ref=str(entry.get("vehicle_ref") or ""),
-                        ecu=str(entry.get("ecu") or "UNKNOWN")[:64] or "UNKNOWN",
-                        service=str(entry.get("service") or entry.get("action") or "UNKNOWN")[:64],
-                        tier=str(entry.get("tier") or "A")[:1],
-                        outcome=_audit_outcome(
-                            str(entry.get("outcome") or entry.get("status") or "logged")
-                        ),
-                        code=str(entry.get("code") or "") or None,
-                        nrc=int(entry["nrc"]) if str(entry.get("nrc") or "").isdigit() else None,
-                        detail=str(entry.get("detail") or ""),
-                    )
-                )
-                audit_ingested += 1
+            audit_ingested = _store_audit(store, req.session_id, audit_rows)
 
+            # Raw frames go to S3 through the outbox, committed with the batch.
+            queued = can_traces.queue_trace(
+                store, principal.tenant_id, req.batch_id, sess.id, req.can_frames
+            )
             store.add(
                 SyncBatch(
                     tenant_id=principal.tenant_id,
@@ -277,6 +399,18 @@ def sync_session_batch(req: SyncBatchRequest, principal: RequirePrincipal) -> di
                     "watermark_us": req.watermark_us,
                 }
         raise HTTPException(status_code=409, detail="session sync conflict") from exc
+    except _AuditConflict as exc:
+        inc("sessions_sync_audit_conflict")
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "audit seq already holds a different record; nothing from this "
+                "batch was stored",
+                "seqs": exc.seqs,
+            },
+        ) from exc
+
+    traces_pending = 0 if queued is None else _upload_now(principal.tenant_id, queued)
 
     inc("sessions_sync_accepted")
     count("obd2_sync_batches_total", outcome="accepted")
@@ -288,6 +422,8 @@ def sync_session_batch(req: SyncBatchRequest, principal: RequirePrincipal) -> di
         "batch_id": req.batch_id,
         "telemetry_ingested": telemetry_ingested,
         "audit_ingested": audit_ingested,
+        "can_frames_ingested": len(req.can_frames),
+        "traces_pending": traces_pending,
         "watermark_us": req.watermark_us,
     }
 

@@ -12,6 +12,7 @@ import {
   type Credential,
   type EdgeMode,
   type EdgeSnapshot,
+  browserBlocksLocalAccess,
 } from "@/lib/edge-client";
 import { useAuth } from "@/context/auth";
 import type {
@@ -165,6 +166,7 @@ export function EdgeProvider({ children }: { children: React.ReactNode }) {
       clientVersion: APP_VERSION,
       credential,
       onSnapshot: setSnapshot,
+      localAccessBlocked: browserBlocksLocalAccess,
     });
     setClient(c);
     c.start();

@@ -26,7 +26,7 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import BYTEA, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 EMBEDDING_DIM = 384
@@ -322,6 +322,26 @@ class SyncBatch(Base):
     session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("diagnostic_sessions.id"))
     watermark_us: Mapped[int] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = _created()
+
+
+class CanTraceOutbox(Base):
+    """A session's raw CAN frames from one sync batch: queued for S3 in the batch's
+    transaction, then kept as the trace index once uploaded (migration 012)."""
+
+    __tablename__ = "can_trace_outbox"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"))
+    batch_id: Mapped[str] = mapped_column(Text)
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("diagnostic_sessions.id"))
+    s3_key: Mapped[str] = mapped_column(Text)
+    frame_count: Mapped[int] = mapped_column(Integer)
+    first_timestamp_us: Mapped[int] = mapped_column(BigInteger)
+    last_timestamp_us: Mapped[int] = mapped_column(BigInteger)
+    body: Mapped[bytes | None] = mapped_column(BYTEA)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created()
+    uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class StripeEvent(Base):

@@ -18,8 +18,8 @@
 //!
 //! Connected adapters stream `CanFrameBatch` and `ObdPidStream` at 20 Hz. The
 //! PID poll also feeds the interlock live speed, RPM and battery (Rule 5).
-//! This task streams from the virtual vehicles; real-adapter sessions (one
-//! physical bus shared between streaming and diagnostics) arrive with Task 4.1.
+//! Virtual vehicles and physical adapters both stream; a physical bus is shared
+//! between streaming and diagnostics through one bus lock.
 
 use std::{
     collections::HashMap,
@@ -96,8 +96,13 @@ pub const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 pub const DIAG_PER_SECOND: u32 = 20;
 /// 20 Hz streaming.
 pub const STREAM_PERIOD: Duration = Duration::from_millis(50);
-/// PIDs polled for the live view and the interlock (max six per request).
-const LIVE_PIDS: [u8; 6] = [0x0C, 0x0D, 0x05, 0x0F, 0x06, 0x07];
+/// PIDs polled every cycle for the live view and the interlock (max six per
+/// request): RPM and speed (Rule 5 preconditions), MAF and the short-term trims.
+const FAST_PIDS: [u8; 5] = [0x0C, 0x0D, 0x10, 0x06, 0x08];
+/// Slow-moving PIDs, polled every `SLOW_EVERY` cycles: coolant and intake air
+/// temperature, long-term trims (Task 4.1 scope: RPM, MAF, STFT/LTFT B1/B2, ECT, IAT).
+const SLOW_PIDS: [u8; 4] = [0x05, 0x0F, 0x07, 0x09];
+const SLOW_EVERY: u32 = 5;
 /// PID samples kept for the live heuristics: about two minutes at 20 Hz.
 const HEURISTIC_HISTORY: usize = 20 * 6 * 120;
 
@@ -1196,7 +1201,7 @@ impl Session {
             return err(
                 rid,
                 ErrorCode::AdapterError,
-                "live view of K-line vehicles arrives with Task 4.1",
+                "live view of K-line vehicles isn't available over the local connection yet; use a CAN vehicle",
             );
         };
         let requested = r
@@ -1210,6 +1215,7 @@ impl Session {
                 &format!("{} is not a CAN protocol for this vehicle", r.protocol),
             );
         };
+        let profile = crate::sim::faults::Faults::from_env().apply(profile);
         let profile_id = profile.id;
         let bus = match VirtualBus::new(profile) {
             Ok(bus) => bus,
@@ -1253,12 +1259,12 @@ impl Session {
             self.tx.clone(),
         )));
         self.interlock.set_mode(r.safety_mode);
+        // The adapter measures battery voltage itself; speed and RPM count only
+        // once the PID poll has read them from the bus (Rule 5), so a vehicle
+        // that doesn't report them stays unknown and gated requests are refused.
         let battery = bus.with_vehicle(|v| v.battery_v);
         let vin = bus.with_vehicle(|v| v.vin.clone());
         self.interlock.update_battery(battery);
-        self.interlock
-            .update_speed(bus.with_vehicle(|v| v.speed_kmh));
-        self.interlock.update_rpm(bus.with_vehicle(|v| v.rpm));
         self.interlock.set_identity(None, Some(vin.clone()));
         if let Some(immo) = self.immo_lease.clone() {
             if let Err(refusal) =
@@ -1615,16 +1621,47 @@ async fn stream_pids(
     // Recent samples for the live heuristics (fuel-trim matrix, cold-soak).
     let mut history: std::collections::VecDeque<m::PidSample> = std::collections::VecDeque::new();
     let mut raised: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Ask only for what the ECU supports (Rule 6: the rest shows as not
+    // supported, never as a value). If the bitmap can't be read, or reads as
+    // empty, ask for all: an ECU leaves out PIDs it doesn't support.
+    let supported = match Obd(&mut ch).supported_pids().await {
+        Ok(s) if !s.is_empty() => Some(s),
+        Ok(_) => {
+            tracing::warn!("ECU reported no supported PIDs; polling the full live set");
+            None
+        }
+        Err(e) => {
+            tracing::warn!("supported-PID bitmap unreadable ({e}); polling the full live set");
+            None
+        }
+    };
+    let keep = |pids: &[u8]| -> Vec<u8> {
+        pids.iter()
+            .copied()
+            .filter(|p| supported.as_ref().is_none_or(|s| s.contains(p)))
+            .collect()
+    };
+    let (fast, slow) = (keep(&FAST_PIDS), keep(&SLOW_PIDS));
     loop {
         tick.tick().await;
         cycle = cycle.wrapping_add(1);
-        let mut values = match Obd(&mut ch).read_pids(&LIVE_PIDS).await {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::debug!("PID poll failed: {e}");
+        let mut values = Vec::new();
+        let slow_due = cycle % SLOW_EVERY == 1;
+        for group in [Some(&fast), slow_due.then_some(&slow)]
+            .into_iter()
+            .flatten()
+        {
+            if group.is_empty() {
                 continue;
             }
-        };
+            match Obd(&mut ch).read_pids(group).await {
+                Ok(v) => values.extend(v),
+                Err(e) => tracing::debug!("PID poll failed: {e}"),
+            }
+        }
+        if values.is_empty() {
+            continue;
+        }
         if cycle % 20 == 1 {
             if let Ok(battery) = Obd(&mut ch).read_pids(&[0x42]).await {
                 values.extend(battery);

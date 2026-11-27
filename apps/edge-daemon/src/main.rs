@@ -5,6 +5,7 @@
 //! edge-daemon pair       print a 6-digit pairing code (single use, 2 minutes)
 //! edge-daemon version    print daemon, protocol and safety-policy versions
 //! edge-daemon diagnostics [file]   write a redacted support bundle (Task 5.2)
+//! edge-daemon service    run under the Windows service manager (the MSI installs it)
 //! ```
 //!
 //! Environment: `EDGE_PORT` (default 8765), `EDGE_ALLOWED_ORIGINS` (comma
@@ -74,7 +75,7 @@ fn pair(dir: &std::path::Path) -> ExitCode {
     }
 }
 
-async fn serve(dir: PathBuf) -> ExitCode {
+async fn serve(dir: PathBuf, stop: impl std::future::Future<Output = ()>) -> ExitCode {
     let mut cfg = ServerConfig::new(
         edge_daemon::auth::dev_keys::keyring(),
         Arc::new(PairingStore::at(dir.join("pairing.json"))),
@@ -170,14 +171,24 @@ async fn serve(dir: PathBuf) -> ExitCode {
     tracing::info!(port = server.port(), %origins, data = %dir.display(), "edge-daemon listening on loopback");
     tokio::select! {
         () = server.run() => {}
-        _ = tokio::signal::ctrl_c() => tracing::info!("shutting down"),
+        () = stop => tracing::info!("shutting down"),
     }
     ExitCode::SUCCESS
 }
 
-#[tokio::main]
-async fn main() -> ExitCode {
+fn runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime")
+}
+
+fn main() -> ExitCode {
     let dir = data_dir();
+    let command = std::env::args().nth(1);
+    // Only the long-running daemon writes the log file; `edge-daemon pair`, run
+    // by a technician in a shared install, must not touch the service's logs.
+    let serving = matches!(command.as_deref(), None | Some("serve" | "service"));
     if let Err(e) = std::fs::create_dir_all(&dir) {
         eprintln!("cannot create data directory {}: {e}", dir.display());
         return ExitCode::FAILURE;
@@ -186,7 +197,7 @@ async fn main() -> ExitCode {
         tracing_subscriber::EnvFilter::try_from_default_env()
             .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
     };
-    let file_logging = std::env::var("EDGE_LOG_FILE").map_or(true, |v| v != "off");
+    let file_logging = serving && std::env::var("EDGE_LOG_FILE").map_or(true, |v| v != "off");
     let log_file = if file_logging {
         logfile::RotatingFile::open(
             &logfile::log_dir(&dir),
@@ -206,8 +217,11 @@ async fn main() -> ExitCode {
             .init(),
         None => tracing_subscriber::fmt().with_env_filter(filter()).init(),
     }
-    match std::env::args().nth(1).as_deref() {
-        None | Some("serve") => serve(dir).await,
+    match command.as_deref() {
+        None | Some("serve") => runtime().block_on(serve(dir, async {
+            let _ = tokio::signal::ctrl_c().await;
+        })),
+        Some("service") => service::run(dir),
         Some("pair") => pair(&dir),
         Some("version" | "--version") => {
             println!(
@@ -234,9 +248,110 @@ async fn main() -> ExitCode {
         }
         Some(other) => {
             eprintln!(
-                "unknown command {other:?}; use: edge-daemon [serve|pair|version|diagnostics]"
+                "unknown command {other:?}; use: edge-daemon [serve|pair|version|diagnostics|service]"
             );
             ExitCode::FAILURE
         }
+    }
+}
+
+/// `edge-daemon service`: the Windows service manager starts the daemon this
+/// way (the MSI installs it as `RootCauseEdgeDaemon`). Stop and system shutdown
+/// end `serve` the same way Ctrl-C does in a console.
+#[cfg(windows)]
+mod service {
+    use std::{
+        ffi::OsString,
+        path::PathBuf,
+        process::ExitCode,
+        sync::{Mutex, OnceLock},
+        time::Duration,
+    };
+
+    use windows_service::{
+        define_windows_service,
+        service::{
+            ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus,
+            ServiceType,
+        },
+        service_control_handler::{self, ServiceControlHandlerResult},
+        service_dispatcher,
+    };
+
+    /// Must match `ServiceInstall/@Name` in packaging/windows/edge-daemon.wxs.
+    pub const NAME: &str = "RootCauseEdgeDaemon";
+
+    static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+    define_windows_service!(ffi_service_main, service_main);
+
+    pub fn run(dir: PathBuf) -> ExitCode {
+        let _ = DATA_DIR.set(dir);
+        match service_dispatcher::start(NAME, ffi_service_main) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!(
+                    "edge-daemon service must be started by the Windows service manager: {e}"
+                );
+                ExitCode::FAILURE
+            }
+        }
+    }
+
+    fn status(state: ServiceState, exit: u32) -> ServiceStatus {
+        ServiceStatus {
+            service_type: ServiceType::OWN_PROCESS,
+            current_state: state,
+            controls_accepted: if state == ServiceState::Running {
+                ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN
+            } else {
+                ServiceControlAccept::empty()
+            },
+            exit_code: ServiceExitCode::Win32(exit),
+            checkpoint: 0,
+            wait_hint: Duration::from_secs(10),
+            process_id: None,
+        }
+    }
+
+    fn service_main(_args: Vec<OsString>) {
+        if let Err(e) = run_service() {
+            tracing::error!("Windows service failed: {e}");
+        }
+    }
+
+    fn run_service() -> windows_service::Result<()> {
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        let tx = Mutex::new(Some(tx));
+        let handle = service_control_handler::register(NAME, move |control| match control {
+            ServiceControl::Stop | ServiceControl::Shutdown => {
+                if let Some(tx) = tx.lock().ok().and_then(|mut t| t.take()) {
+                    let _ = tx.send(());
+                }
+                ServiceControlHandlerResult::NoError
+            }
+            ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
+            _ => ServiceControlHandlerResult::NotImplemented,
+        })?;
+        handle.set_service_status(status(ServiceState::Running, 0))?;
+        let dir = DATA_DIR.get().cloned().unwrap_or_else(super::data_dir);
+        let code = super::runtime().block_on(super::serve(dir, async {
+            let _ = rx.await;
+        }));
+        let exit = u32::from(code != ExitCode::SUCCESS);
+        handle.set_service_status(status(ServiceState::Stopped, exit))?;
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+mod service {
+    use std::{path::PathBuf, process::ExitCode};
+
+    pub fn run(_dir: PathBuf) -> ExitCode {
+        eprintln!(
+            "`edge-daemon service` is for the Windows service manager; run `edge-daemon` here"
+        );
+        ExitCode::FAILURE
     }
 }

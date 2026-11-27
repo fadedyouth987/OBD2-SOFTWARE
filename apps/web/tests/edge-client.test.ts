@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { browserSimTransport, BROWSER_SIM_ADAPTER_ID } from "@/lib/browser-sim";
-import { EdgeClient, EdgeRequestError, type EdgeSnapshot, type TransportFactory } from "@/lib/edge-client";
+import {
+  EdgeClient,
+  EdgeRequestError,
+  browserBlocksLocalAccess,
+  webSocketTransport,
+  type EdgeSnapshot,
+  type TransportFactory,
+} from "@/lib/edge-client";
 import { parseObdDtcs } from "@/lib/diag";
 
 function waitFor(client: EdgeClient, pred: (s: EdgeSnapshot) => boolean, ms = 2000): Promise<EdgeSnapshot> {
@@ -83,6 +90,130 @@ describe("EdgeClient failure handling", () => {
     expect(s.retryInMs).toBe(1000);
   });
 
+  it("says the browser blocked the connection when the socket can't even be created", async () => {
+    const refused: TransportFactory = (h) => {
+      setTimeout(() => h.onClose(false, true), 0);
+      return { send: () => undefined, close: () => undefined };
+    };
+    const c = make(refused, async () => ({ token: "jwt", method: "cloud" }));
+    c.start();
+    const s = await waitFor(c, (x) => x.phase === "failed");
+    expect(s.failure?.kind).toBe("blocked");
+    expect(s.failure?.message).toMatch(/browser blocked/);
+    expect(s.failure?.hint).toMatch(/local network access/);
+  });
+
+  it("tells a denied loopback permission apart from a daemon that isn't running, and keeps retrying", async () => {
+    const closed: TransportFactory = (h) => {
+      setTimeout(() => h.onClose(false), 0);
+      return { send: () => undefined, close: () => undefined };
+    };
+    const opts = { mode: "daemon" as const, transport: closed, clientVersion: "0.2.0", onSnapshot: () => undefined };
+    const cred = async () => ({ token: "jwt", method: "cloud" as const });
+    const denied = new EdgeClient({ ...opts, credential: cred, localAccessBlocked: async () => true });
+    const allowed = new EdgeClient({ ...opts, credential: cred, localAccessBlocked: async () => false });
+    const hung = new EdgeClient({ ...opts, credential: cred, localAccessBlocked: () => new Promise<boolean>(() => undefined) });
+    clients.push(denied, allowed, hung);
+    denied.start();
+    allowed.start();
+    hung.start();
+    // The permission can be granted while the page is open, so this waits and retries.
+    const d = await waitFor(denied, (x) => x.phase === "waiting");
+    expect(d.failure?.kind).toBe("blocked");
+    expect(d.retryInMs).toBe(1000);
+    const s = await waitFor(allowed, (x) => x.phase === "waiting");
+    expect(s.failure?.kind).toBe("unreachable");
+    expect(s.failure?.message).toMatch(/not running/);
+    // A permission query that never answers can't leave the client stuck connecting.
+    expect((await waitFor(hung, (x) => x.phase === "waiting", 3000)).failure?.kind).toBe("unreachable");
+  });
+
+  it("drops a permission answer that arrives after retry() or stop()", async () => {
+    let answer: (v: boolean) => void = () => undefined;
+    const closed: TransportFactory = (h) => {
+      setTimeout(() => h.onClose(false), 0);
+      return { send: () => undefined, close: () => undefined };
+    };
+    const c = new EdgeClient({
+      mode: "daemon",
+      transport: closed,
+      clientVersion: "0.2.0",
+      onSnapshot: () => undefined,
+      credential: async () => ({ token: "jwt", method: "cloud" }),
+      localAccessBlocked: () => new Promise<boolean>((r) => (answer = r)),
+    });
+    clients.push(c);
+    c.start();
+    await new Promise((r) => setTimeout(r, 20));
+    const stale = answer;
+    c.stop();
+    stale(true);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(c.snapshot.phase).toBe("idle");
+    expect(c.snapshot.failure).toBeNull();
+  });
+
+  it("leaves the blocked state on retry()", async () => {
+    let attempts = 0;
+    const transport: TransportFactory = (h) => {
+      attempts += 1;
+      setTimeout(() => h.onClose(false, attempts === 1), 0);
+      return { send: () => undefined, close: () => undefined };
+    };
+    const c = make(transport, async () => ({ token: "jwt", method: "cloud" }));
+    c.start();
+    expect((await waitFor(c, (x) => x.phase === "failed")).failure?.kind).toBe("blocked");
+    c.retry();
+    expect((await waitFor(c, (x) => x.phase === "waiting")).failure?.kind).toBe("unreachable");
+    expect(attempts).toBe(2);
+  });
+});
+
+describe("browser block detection", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const permissions = (states: Record<string, PermissionState>) => ({
+    permissions: {
+      query: async ({ name }: { name: string }) => {
+        if (!(name in states)) throw new TypeError(`unknown permission ${name}`);
+        return { state: states[name] };
+      },
+    },
+  });
+
+  it("reads Chrome's loopback permission, falling back to the older combined one", async () => {
+    vi.stubGlobal("navigator", permissions({ "loopback-network": "denied" }));
+    expect(await browserBlocksLocalAccess()).toBe(true);
+    vi.stubGlobal("navigator", permissions({ "local-network-access": "denied" }));
+    expect(await browserBlocksLocalAccess()).toBe(true);
+    // Once the loopback permission answers, the older name isn't consulted.
+    vi.stubGlobal("navigator", permissions({ "loopback-network": "granted", "local-network-access": "denied" }));
+    expect(await browserBlocksLocalAccess()).toBe(false);
+  });
+
+  it("ignores the LAN-only permission and browsers without the API", async () => {
+    vi.stubGlobal("navigator", permissions({ "local-network": "denied" }));
+    expect(await browserBlocksLocalAccess()).toBe(false);
+    vi.stubGlobal("navigator", {});
+    expect(await browserBlocksLocalAccess()).toBe(false);
+  });
+
+  it("reports a SecurityError from the WebSocket constructor as blocked", async () => {
+    vi.stubGlobal(
+      "WebSocket",
+      class {
+        constructor() {
+          throw new DOMException("insecure", "SecurityError");
+        }
+      },
+    );
+    const c = make(webSocketTransport("ws://127.0.0.1:8765"), async () => ({ token: "jwt", method: "cloud" }));
+    c.start();
+    expect((await waitFor(c, (x) => x.phase === "failed")).failure?.kind).toBe("blocked");
+  });
+});
+
+describe("EdgeClient handshake", () => {
   it("sends the credential and version in HelloRequest, and times out a silent handshake", async () => {
     const sent: string[] = [];
     const silent: TransportFactory = (h) => {

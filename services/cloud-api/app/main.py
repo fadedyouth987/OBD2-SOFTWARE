@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 
+from app.api.gzip_body import GzipRequestMiddleware
 from app.api.v1 import (
     accreditation,
     admin,
@@ -44,6 +45,9 @@ allowed_origins = [
     ).split(",")
     if o.strip()
 ]
+# Edge sync batches may arrive gzip-compressed (Task 2.2). Added before CORS so
+# it runs inside it: browsers can read its refusals.
+app.add_middleware(GzipRequestMiddleware, paths={"/api/v1/sessions/sync"})
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,

@@ -4,7 +4,11 @@
 //! readable by the user running the daemon (0600 on Unix), so the `pair`
 //! command and the running daemon share codes without any network listener.
 
-use std::{path::PathBuf, sync::Mutex, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    sync::Mutex,
+    time::Duration,
+};
 
 use sha2::{Digest, Sha256};
 
@@ -88,7 +92,7 @@ impl PairingStore {
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
-                    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+                    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(file_mode(p)))?;
                 }
                 std::fs::rename(tmp, p)
             }
@@ -138,6 +142,23 @@ impl PairingStore {
     }
 }
 
+/// Owner-only, except in a shared install directory (setgid, as the Linux
+/// package makes `/var/lib/obd2-edge`): there the daemon's user and the
+/// technicians in its group must both read the file, so the group may too.
+#[cfg(unix)]
+fn file_mode(path: &Path) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    let shared = path
+        .parent()
+        .and_then(|d| std::fs::metadata(d).ok())
+        .is_some_and(|m| m.permissions().mode() & 0o2000 != 0);
+    if shared {
+        0o660
+    } else {
+        0o600
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,6 +176,22 @@ mod tests {
             !store.consume(&late, 2_000 + CODE_TTL.as_secs()),
             "expired after 2 minutes"
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn group_readable_only_in_a_setgid_install_dir() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("edge-pairing-shared-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o2770)).unwrap();
+        let path = dir.join("pairing.json");
+        PairingStore::at(&path).issue(5_000).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        std::fs::remove_dir_all(&dir).unwrap();
+        // The daemon's user and technicians in its group share the file; nobody else.
+        assert_eq!(mode, 0o660);
     }
 
     #[test]

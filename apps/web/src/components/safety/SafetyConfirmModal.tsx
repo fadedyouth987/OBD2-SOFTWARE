@@ -191,8 +191,13 @@ export function SafetyConfirmModal(props: SafetyConfirmProps) {
           </ul>
           {liveUnknown ? (
             <p className="mt-1 text-xs text-warn">
-              Waiting for a fresh reading. Confirming unlocks when every check is met, because the daemon refuses
-              anything it can&apos;t verify.
+              <span className="font-mono font-bold">PRECONDITION_UNKNOWN</span>:{" "}
+              {checks
+                .filter((c) => c.state === "unknown")
+                .map((c) => c.reading)
+                .join(", ")}{" "}
+              can&apos;t be read right now. Confirming stays blocked until a fresh reading arrives, because the daemon
+              refuses anything it can&apos;t verify.
             </p>
           ) : null}
         </div>

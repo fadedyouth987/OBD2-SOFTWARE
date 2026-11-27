@@ -542,3 +542,49 @@ async fn lease_epoch_closes_open_sockets() {
     assert_eq!(msg["code"], "TOKEN_INVALID");
     assert!(next(&mut ws).await.is_none(), "socket should close");
 }
+
+/// The PIDs one virtual vehicle streams over about a second.
+async fn streamed_pids(adapter: &str) -> std::collections::BTreeSet<u64> {
+    let d = start(|_, _| {}).await;
+    let mut ws = paired(&d).await;
+    send(
+        &mut ws,
+        &json!({"type": "ConnectRequest", "request_id": "c1", "adapter_id": adapter,
+                "protocol": "AUTO", "baud_rate": null, "safety_mode": "SILENT"}),
+    )
+    .await;
+    assert_eq!(reply(&mut ws, "c1").await["state"], "CONNECTED");
+    let mut seen = std::collections::BTreeSet::new();
+    let start = Instant::now();
+    while Instant::now() - start < Duration::from_millis(1200) {
+        let msg = next(&mut ws).await.unwrap();
+        if msg["type"] == "ObdPidStream" {
+            for s in msg["samples"].as_array().unwrap() {
+                seen.insert(s["pid"].as_u64().unwrap());
+            }
+        }
+    }
+    seen
+}
+
+/// Task 4.1 scope: RPM, MAF, STFT/LTFT B1/B2, ECT and IAT stream (plus speed for
+/// the interlock and battery), and a PID the ECU doesn't support never does (Rule 6).
+#[tokio::test]
+async fn streams_the_contract_pids_and_only_supported_ones() {
+    let falcon = streamed_pids("virtual-ford-falcon-ba").await;
+    for pid in [0x0C, 0x0D, 0x10, 0x06, 0x07, 0x08, 0x09, 0x05, 0x0F] {
+        assert!(
+            falcon.contains(&pid),
+            "Falcon PID 0x{pid:02X} missing from {falcon:?}"
+        );
+    }
+    let polled = [0x0C, 0x0D, 0x10, 0x06, 0x07, 0x08, 0x09, 0x05, 0x0F, 0x42];
+    assert!(falcon.iter().all(|p| polled.contains(p)), "{falcon:?}");
+    // The generic engine ECU has a single bank: no bank 2 trims.
+    let generic = streamed_pids("virtual-generic-uds").await;
+    assert!(generic.contains(&0x10), "{generic:?}");
+    assert!(
+        !generic.contains(&0x08) && !generic.contains(&0x09),
+        "{generic:?}"
+    );
+}

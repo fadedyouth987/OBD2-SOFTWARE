@@ -18,8 +18,11 @@ class StorageError(RuntimeError):
     """Object storage couldn't be reached or refused the request."""
 
 
-@lru_cache(maxsize=1)
-def _client() -> Any:
+@lru_cache(maxsize=2)
+def _client(fast: bool = False) -> Any:
+    """The S3 client. ``fast`` is for calls made while a request waits (sync
+    uploads): one attempt and short timeouts, so a hanging S3 costs a request
+    about two seconds, not a minute; the outbox drain retries later."""
     import boto3
     from botocore.config import Config
 
@@ -29,9 +32,9 @@ def _client() -> Any:
         "config": Config(
             signature_version="s3v4",
             s3={"addressing_style": "path"},
-            retries={"max_attempts": 2, "mode": "standard"},
-            connect_timeout=3,
-            read_timeout=20,
+            retries={"max_attempts": 1 if fast else 2, "mode": "standard"},
+            connect_timeout=1 if fast else 3,
+            read_timeout=2 if fast else 20,
         ),
     }
     if s.s3_endpoint_url:
@@ -43,7 +46,7 @@ def _client() -> Any:
 
 
 def object_key(kind: str, tenant_id: UUID, object_id: UUID, ext: str) -> str:
-    if kind not in {"schematics", "dbc", "accreditation"}:
+    if kind not in {"schematics", "dbc", "accreditation", "can_traces"}:
         raise ValueError(f"unknown object kind {kind!r}")
     return f"{kind}/{tenant_id}/{object_id}.{ext.lstrip('.')}"
 
@@ -53,9 +56,9 @@ def key_belongs_to(key: str, tenant_id: UUID) -> bool:
     return len(parts) == 3 and parts[1] == str(tenant_id)
 
 
-def put(key: str, data: bytes, content_type: str) -> None:
+def put(key: str, data: bytes, content_type: str, *, fast: bool = False) -> None:
     try:
-        _client().put_object(
+        _client(fast).put_object(
             Bucket=get_settings().s3_bucket, Key=key, Body=data, ContentType=content_type
         )
     except Exception as exc:  # botocore raises many types; callers need one
