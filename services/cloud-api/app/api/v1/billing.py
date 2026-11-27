@@ -17,6 +17,7 @@ from app.db.session import tenant_session
 from app.observability.metrics import count
 from app.services.billing import (
     ACTIONABLE_EVENTS,
+    IMMO_ELIGIBLE,
     TRIAL_DAYS,
     BillingApplyError,
     apply_stripe_event,
@@ -108,7 +109,7 @@ def create_checkout_session(req: CheckoutRequest, principal: RequirePrincipal) -
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Community is the free default; pick a paid plan to check out",
         )
-    if req.immo_addon and req.tier not in {SubscriptionTier.WORKSHOP, SubscriptionTier.FLEET}:
+    if req.immo_addon and req.tier not in IMMO_ELIGIBLE:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="The IMMO add-on is only available on Workshop and Fleet",
@@ -147,6 +148,11 @@ def create_checkout_session(req: CheckoutRequest, principal: RequirePrincipal) -
             tenant = session.get(Tenant, principal.tenant_id)
             if tenant is None:
                 raise HTTPException(status_code=404, detail="Unknown tenant")
+            if tenant.subscription_tier != SubscriptionTier.COMMUNITY:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="The Workshop trial is for Community workspaces; upgrade instead",
+                )
             if tenant.trial_used:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,

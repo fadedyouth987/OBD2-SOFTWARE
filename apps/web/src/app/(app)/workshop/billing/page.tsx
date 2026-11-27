@@ -5,10 +5,9 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import { Badge, Banner, Button, Card, Meter, PageHeader, Skeleton } from "@/components/ui";
 import { useAuth } from "@/context/auth";
 import { api, ApiError, type BillingState, type PlanTier, type TierInfo } from "@/lib/api";
-import { FEATURE_INFO, TIER_LABEL } from "@/lib/entitlements";
+import { FEATURE_INFO, PLAN_ORDER as ORDER, TIER_LABEL, appExtras } from "@/lib/entitlements";
 import { formatDate, formatDateTime, formatNumber } from "@/lib/format";
 
-const ORDER: PlanTier[] = ["COMMUNITY", "PRO", "WORKSHOP", "FLEET"];
 const STATUS_TEXT: Record<string, [string, "ok" | "warn" | "danger" | "info"]> = {
   active: ["Active", "ok"],
   trialing: ["Trial", "info"],
@@ -200,7 +199,7 @@ function BillingInner() {
               </span>
             </span>
           </label>
-          <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
             {tiers.map((t: TierInfo) => {
               const price = interval === "year" ? t.annual_price_aud : t.monthly_price_aud;
               const current = t.tier === state.tier;
@@ -224,6 +223,9 @@ function BillingInner() {
                     <li>{t.schematic_pages ? `${t.schematic_pages} schematic pages / month` : "No schematic uploads"}</li>
                     {t.features.map((f) => (
                       <li key={f}>✓ {FEATURE_INFO[f]?.label ?? f}</li>
+                    ))}
+                    {appExtras(t.tier).map((label) => (
+                      <li key={label}>✓ {label} (Android app)</li>
                     ))}
                     {immo && state.immo_addon.eligible_tiers.includes(t.tier) ? <li>✓ Key programming add-on</li> : null}
                   </ul>

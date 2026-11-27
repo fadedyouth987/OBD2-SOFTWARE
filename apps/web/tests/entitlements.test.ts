@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { featureAccess, planHas } from "@/lib/entitlements";
+import { PLAN_ORDER, TIER_LABEL, appExtras, featureAccess, planHas } from "@/lib/entitlements";
 import type { Me } from "@/lib/api";
 
 const me = (features: string[], immo = false) =>
@@ -19,5 +19,18 @@ describe("featureAccess", () => {
     expect(planHas(me(["UDS_ACTIVE"], true), "IMMO_PROGRAM")).toBe(true);
     expect(planHas(me(["UDS_ACTIVE"], false), "IMMO_PROGRAM")).toBe(false);
     expect(planHas(null, "UDS_ACTIVE")).toBe(false);
+  });
+});
+
+describe("plan table", () => {
+  it("lists plans cheapest first, Mobile between Community and Pro", () => {
+    expect(PLAN_ORDER).toEqual(["COMMUNITY", "MOBILE", "PRO", "WORKSHOP", "FLEET"]);
+    expect(TIER_LABEL.MOBILE).toBe("Mobile");
+    expect(TIER_LABEL.WORKSHOP).toBe("Workshop");
+  });
+  it("shows recording as a paid app extra and nothing extra for Community", () => {
+    expect(appExtras("COMMUNITY")).toEqual([]);
+    expect(appExtras("MOBILE")).toEqual(["Live data recording and CSV export"]);
+    expect(appExtras("FLEET")).toContain("Live data recording and CSV export");
   });
 });

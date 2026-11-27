@@ -41,6 +41,8 @@ try:
         auth_allow_dev_login: bool = False
         stripe_webhook_secret: str = ""
         stripe_secret_key: str = ""
+        stripe_price_mobile_month: str = ""
+        stripe_price_mobile_year: str = ""
         stripe_price_pro_month: str = ""
         stripe_price_pro_year: str = ""
         stripe_price_workshop_month: str = ""
@@ -108,6 +110,8 @@ try:
 
         def price_catalog(self) -> dict[str, str]:
             return {
+                "MOBILE:month": self.stripe_price_mobile_month,
+                "MOBILE:year": self.stripe_price_mobile_year,
                 "PRO:month": self.stripe_price_pro_month,
                 "PRO:year": self.stripe_price_pro_year,
                 "WORKSHOP:month": self.stripe_price_workshop_month,
@@ -140,6 +144,8 @@ except ImportError:
         auth_allow_dev_login: bool = False
         stripe_webhook_secret: str = ""
         stripe_secret_key: str = ""
+        stripe_price_mobile_month: str = ""
+        stripe_price_mobile_year: str = ""
         stripe_price_pro_month: str = ""
         stripe_price_pro_year: str = ""
         stripe_price_workshop_month: str = ""
