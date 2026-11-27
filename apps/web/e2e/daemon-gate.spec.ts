@@ -8,18 +8,21 @@
 // hands the browser are real: issued by signing.py with a throwaway key that
 // this run pins in the daemon.
 import type { Page } from "@playwright/test";
-import { CloudSigner, Daemon, daemonAvailable, wireVersions } from "./daemon";
+import { CloudSigner, DAEMON_PORT, Daemon, daemonAvailable, wireVersions } from "./daemon";
 import { expect, test, useStandIns } from "./fixtures";
 
 const ORIGIN = `http://127.0.0.1:${Number(process.env.E2E_PORT ?? 3100)}`;
 
 test.describe.configure({ mode: "serial" });
-test.skip(!daemonAvailable() && !process.env.CI, "build the daemon first: cargo build -p edge-daemon");
+// `just e2e` builds the daemon first. A missing binary fails the gate rather than
+// skipping it; set E2E_SKIP_DAEMON=1 to run the other suites without it.
+test.skip(!!process.env.E2E_SKIP_DAEMON, "E2E_SKIP_DAEMON is set");
 
 let signer: CloudSigner;
 let daemon: Daemon;
 
 test.beforeAll(async () => {
+  if (!daemonAvailable()) throw new Error("no debug daemon: run `cargo build -p edge-daemon` (or `just e2e`), or set E2E_SKIP_DAEMON=1");
   signer = new CloudSigner(ORIGIN);
   daemon = new Daemon(ORIGIN, signer.keys());
   await daemon.start();
@@ -90,6 +93,10 @@ test("pairs with the daemon, streams live PIDs, and the safety modal blocks unti
       await expect(page.getByText(name, { exact: false }).first()).toBeVisible({ timeout: 10_000 });
     }
     await expect(page.getByTestId("scope")).toBeVisible();
+    // Each lane auto-zooms, so its scale is printed beside it.
+    await expect(page.getByTestId("scope").getByText(/^min .+ · max .+$/).first()).toBeVisible();
+    // The daemon's INFO audit result ("VIN and odometer agree") belongs on the overview, not as a live banner.
+    await expect(page.getByText(/VIN and odometer agree/)).toHaveCount(0);
   });
 
   await test.step("the modal blocks until the hold completes", async () => {
@@ -148,29 +155,39 @@ test("unknown vehicle speed shows PRECONDITION_UNKNOWN and confirming stays bloc
     // Asked directly over a second connection from the app's origin, as a
     // client that skipped the modal would: the daemon fails closed on its own.
     const reply = await page.evaluate(
-      async ({ token, versions }) => {
-        const ws = new WebSocket("ws://127.0.0.1:8765");
-        const next = () => new Promise<Record<string, unknown>>((ok) => ws.addEventListener("message", (e) => ok(JSON.parse(e.data)), { once: true }));
-        const ask = async (msg: Record<string, unknown>) => {
-          ws.send(JSON.stringify({ request_id: crypto.randomUUID().replace(/-/g, ""), ...msg }));
-          for (;;) {
-            const m = await next();
-            if (m.request_id !== undefined) return m;
+      async ({ url, token, versions }) => {
+        const ws = new WebSocket(url);
+        // One listener for the whole exchange: replies are matched by request_id,
+        // and the 20 Hz pushes in between are skipped, never lost or mistaken.
+        const waiting = new Map<string, (m: Record<string, unknown>) => void>();
+        ws.addEventListener("message", (e) => {
+          const m = JSON.parse(e.data);
+          const done = typeof m.request_id === "string" ? waiting.get(m.request_id) : undefined;
+          if (done) {
+            waiting.delete(m.request_id);
+            done(m);
           }
-        };
+        });
+        const ask = (msg: Record<string, unknown>) =>
+          new Promise<Record<string, unknown>>((ok) => {
+            const request_id = crypto.randomUUID().replace(/-/g, "");
+            waiting.set(request_id, ok);
+            ws.send(JSON.stringify({ request_id, ...msg }));
+          });
         await new Promise((ok) => ws.addEventListener("open", ok, { once: true }));
         const hello = await ask({ type: "HelloRequest", client_token: token, client_version: "0.0.0", protocol_version: versions.protocol, policy_version: versions.policy });
         if (hello.type !== "HelloResponse") return hello;
         const conn = await ask({ type: "ConnectRequest", adapter_id: "virtual-ford-falcon-ba", protocol: "AUTO", baud_rate: null, safety_mode: "ACTIVE_CONFIRMED" });
         if (conn.type !== "AdapterStatus") return conn;
-        await new Promise((ok) => setTimeout(ok, 2_500)); // longer than any speed reading may be old
+        // Asked at once: had the daemon seeded speed at connect, this would get a token.
         const r = await ask({ type: "SafetyConfirmRequest", tx_id: 0x7e0, rx_id: 0x7e8, protocol: "OBD", service_id: 4, payload_hex: "04", user_ack_text: "Clear codes on PCM (Task 4.1 gate)" });
         ws.close();
         return r;
       },
-      { token: signer.pairing(), versions: wireVersions() },
+      { url: `ws://127.0.0.1:${DAEMON_PORT}`, token: signer.pairing(), versions: wireVersions() },
     );
     expect(reply, JSON.stringify(reply)).toMatchObject({ type: "ErrorResponse", code: "PRECONDITION_UNKNOWN" });
+    expect(String(reply.message)).toMatch(/vehicle speed.*has not been read/);
     expect(daemon.audit().at(-1)).toMatchObject({ outcome: "token_refused", code: "PRECONDITION_UNKNOWN" });
   });
 });

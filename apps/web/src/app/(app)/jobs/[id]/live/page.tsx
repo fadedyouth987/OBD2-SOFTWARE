@@ -115,7 +115,8 @@ export default function LivePage() {
 
   return (
     <div className="space-y-4">
-      {edge.alerts.map((a) => (
+      {/* INFO results (e.g. "audit consistent") stay on the overview; the live page flags what needs a test. */}
+      {edge.alerts.filter((a) => a.severity !== "INFO").map((a) => (
         <Banner key={a.rule_id} tone={ALERT_TONE[a.severity]} title={`${ALERT_WORD[a.severity]}: ${a.title}`}>
           {a.recommended_test}
         </Banner>

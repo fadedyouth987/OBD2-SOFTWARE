@@ -84,8 +84,9 @@ fn trim_snapshots(samples: &[PidSample]) -> Vec<(f64, [Option<f64>; 2])> {
                     out.push((r, totals));
                 }
             }
+            // Long-term trims move slowly and are polled less often than the
+            // short-term ones, so the last value carries into later snapshots.
             stft = [None, None];
-            ltft = [None, None];
         }
         last_ts = Some(s.timestamp_us.0);
         let pid = s.pid as u8;
@@ -412,6 +413,19 @@ mod tests {
 
     fn snapshot(t: u64, rpm: f64, stft: f64, ltft: f64) -> Vec<PidSample> {
         vec![s(t, PID_RPM, rpm), s(t, 0x06, stft), s(t, 0x07, ltft)]
+    }
+
+    #[test]
+    fn long_term_trim_carries_into_later_snapshots() {
+        // LTFT arrives on the slow poll only; every fast snapshot still counts.
+        let mut samples = snapshot(0, 800.0, 10.0, 5.0);
+        for t in 1..5 {
+            samples.extend([s(t * 50, PID_RPM, 800.0), s(t * 50, 0x06, 10.0)]);
+        }
+        samples.push(s(250, PID_RPM, 800.0)); // closes the last snapshot
+        let snaps = trim_snapshots(&samples);
+        assert_eq!(snaps.len(), 5, "{snaps:?}");
+        assert!(snaps.iter().all(|(_, t)| t[0] == Some(15.0)), "{snaps:?}");
     }
 
     #[test]

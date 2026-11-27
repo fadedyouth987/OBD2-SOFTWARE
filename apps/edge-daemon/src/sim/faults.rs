@@ -5,7 +5,7 @@
 //! paths (Task 4.1 gate: "unknown speed shows PRECONDITION_UNKNOWN"):
 //!
 //! - `no-road-speed`: no ECU answers OBD PID 0x0D, as when the speed source is
-//!   dead or the car reports speed only on another module.
+//!   dead.
 //!
 //! Release builds ignore the variable (`cfg!(debug_assertions)`), like
 //! `EDGE_DEV_CLOUD_KEYS`, so a shipped daemon's vehicles can't be altered.
@@ -56,14 +56,6 @@ impl Faults {
     }
 }
 
-/// Whether any ECU of the profile answers OBD road speed.
-pub fn reports_speed(profile: &Profile) -> bool {
-    profile
-        .ecus
-        .iter()
-        .any(|n| n.spec.obd_pids.contains(&PID_SPEED))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -71,6 +63,8 @@ mod tests {
 
     #[test]
     fn no_road_speed_removes_pid_0d_and_nothing_else() {
+        let reports_speed =
+            |p: &Profile| p.ecus.iter().any(|n| n.spec.obd_pids.contains(&PID_SPEED));
         let p = profiles::by_id("ford-falcon-ba").unwrap();
         assert!(reports_speed(&p));
         let before: Vec<Vec<u8>> = p.ecus.iter().map(|n| n.spec.obd_pids.clone()).collect();

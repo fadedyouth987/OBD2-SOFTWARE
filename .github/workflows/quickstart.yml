@@ -46,6 +46,10 @@ jobs:
       # A-DES gates: session flow, state table, copilot evidence, axe + 44 px targets.
       - name: Install Playwright Chromium
         run: cd apps/web && pnpm exec playwright install --with-deps chromium
+      # The Task 4.1 gate drives the real debug daemon; build it here rather than
+      # rely on the Test step having built it.
+      - name: Build edge daemon (debug)
+        run: cargo build -p edge-daemon --locked
       - name: Web end-to-end tests
         run: cd apps/web && pnpm e2e --trace off
 

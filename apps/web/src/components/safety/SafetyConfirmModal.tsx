@@ -194,7 +194,7 @@ export function SafetyConfirmModal(props: SafetyConfirmProps) {
               <span className="font-mono font-bold">PRECONDITION_UNKNOWN</span>:{" "}
               {checks
                 .filter((c) => c.state === "unknown")
-                .map((c) => (c.label.startsWith("Vehicle stationary") ? "road speed" : c.label.toLowerCase()))
+                .map((c) => c.reading)
                 .join(", ")}{" "}
               can&apos;t be read right now. Confirming stays blocked until a fresh reading arrives, because the daemon
               refuses anything it can&apos;t verify.

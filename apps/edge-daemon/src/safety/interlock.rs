@@ -399,10 +399,15 @@ impl SafetyInterlock {
         }
     }
 
-    /// Ends the session: tokens, halts and bench mode are cleared, mode back to SILENT.
+    /// Ends the session: tokens, halts, bench mode and the live readings are
+    /// cleared, mode back to SILENT. The next vehicle's speed, RPM and battery
+    /// must be read afresh, never inherited from the last one.
     pub fn end_session(&self) {
         let aborted = self.abort_immo("link_drop_or_session_end");
         let mut s = self.lock();
+        s.speed = None;
+        s.rpm = None;
+        s.battery = None;
         s.tokens.clear();
         s.halts.clear();
         s.bench_mode = false;
@@ -735,6 +740,19 @@ mod tests {
         u8::from_str_radix(s.trim_start_matches("0x"), 16).unwrap()
     }
 
+    /// The next vehicle never inherits the last one's speed, RPM or battery.
+    #[test]
+    fn end_session_clears_the_live_readings() {
+        let (_, lock) = interlock();
+        lock.update_speed(0.0);
+        lock.update_rpm(0.0);
+        lock.update_battery(13.0);
+        lock.end_session();
+        let p = lock.preconditions();
+        assert_eq!((p.speed_kmh, p.rpm, p.battery_v), (None, None, None));
+        assert!(p.speed_age.is_none());
+    }
+
     /// Task 1.2 gate: every service in safety_policy.json is refused in SILENT.
     #[test]
     fn every_gated_service_refused_in_silent() {
@@ -955,9 +973,16 @@ mod tests {
         tokio::time::advance(DEFAULT_SECURITY_DELAY).await;
         lock.update_speed(0.0);
         assert!(lock.issue_token(&other, "ack").is_ok());
-        // end_session clears halts.
+        // end_session clears halts, and the readings: speed must be read again.
         lock.end_session();
         lock.set_mode(SafetyMode::ActiveConfirmed);
+        assert_eq!(
+            lock.issue_token(&req(&[0x27, 0x01]), "ack")
+                .unwrap_err()
+                .code,
+            RefusalCode::PreconditionUnknown
+        );
+        lock.update_speed(0.0);
         assert!(lock.issue_token(&req(&[0x27, 0x01]), "ack").is_ok());
         assert!(audit
             .entries()

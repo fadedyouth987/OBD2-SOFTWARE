@@ -18,8 +18,8 @@
 //!
 //! Connected adapters stream `CanFrameBatch` and `ObdPidStream` at 20 Hz. The
 //! PID poll also feeds the interlock live speed, RPM and battery (Rule 5).
-//! This task streams from the virtual vehicles; real-adapter sessions (one
-//! physical bus shared between streaming and diagnostics) arrive with Task 4.1.
+//! Virtual vehicles and physical adapters both stream; a physical bus is shared
+//! between streaming and diagnostics through one bus lock.
 
 use std::{
     collections::HashMap,
@@ -1217,7 +1217,6 @@ impl Session {
         };
         let profile = crate::sim::faults::Faults::from_env().apply(profile);
         let profile_id = profile.id;
-        let reports_speed = crate::sim::faults::reports_speed(&profile);
         let bus = match VirtualBus::new(profile) {
             Ok(bus) => bus,
             Err(e) => return err(rid, ErrorCode::AdapterError, &e.to_string()),
@@ -1260,16 +1259,12 @@ impl Session {
             self.tx.clone(),
         )));
         self.interlock.set_mode(r.safety_mode);
+        // The adapter measures battery voltage itself; speed and RPM count only
+        // once the PID poll has read them from the bus (Rule 5), so a vehicle
+        // that doesn't report them stays unknown and gated requests are refused.
         let battery = bus.with_vehicle(|v| v.battery_v);
         let vin = bus.with_vehicle(|v| v.vin.clone());
         self.interlock.update_battery(battery);
-        // Seed speed only from a vehicle that reports it; otherwise it stays
-        // unknown and gated requests are refused (Rule 5).
-        if reports_speed {
-            self.interlock
-                .update_speed(bus.with_vehicle(|v| v.speed_kmh));
-        }
-        self.interlock.update_rpm(bus.with_vehicle(|v| v.rpm));
         self.interlock.set_identity(None, Some(vin.clone()));
         if let Some(immo) = self.immo_lease.clone() {
             if let Err(refusal) =
@@ -1627,8 +1622,19 @@ async fn stream_pids(
     let mut history: std::collections::VecDeque<m::PidSample> = std::collections::VecDeque::new();
     let mut raised: std::collections::HashSet<String> = std::collections::HashSet::new();
     // Ask only for what the ECU supports (Rule 6: the rest shows as not
-    // supported, never as a value). If the bitmap can't be read, ask for all.
-    let supported = Obd(&mut ch).supported_pids().await.ok();
+    // supported, never as a value). If the bitmap can't be read, or reads as
+    // empty, ask for all: an ECU leaves out PIDs it doesn't support.
+    let supported = match Obd(&mut ch).supported_pids().await {
+        Ok(s) if !s.is_empty() => Some(s),
+        Ok(_) => {
+            tracing::warn!("ECU reported no supported PIDs; polling the full live set");
+            None
+        }
+        Err(e) => {
+            tracing::warn!("supported-PID bitmap unreadable ({e}); polling the full live set");
+            None
+        }
+    };
     let keep = |pids: &[u8]| -> Vec<u8> {
         pids.iter()
             .copied()

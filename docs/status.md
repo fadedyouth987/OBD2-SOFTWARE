@@ -191,6 +191,8 @@ The existing Playwright suite drove the browser demo car, so the gate ("pairs wi
 | Killed daemon shows "not running" | Unit test only | The daemon is killed mid-session; Devices shows "The edge daemon is not running", the start command and Retry now |
 | `ConnectionStatus`: "browser blocked local connection" | Shown as "not running" | Its own state with the fix: a `SecurityError` when the socket is created (mixed content, CSP) or Chrome's local network access permission set to Block (`tests/edge-client.test.ts`) |
 
+gstack `/review` (7 specialists, red team, adversarial pass) found and this change fixed: the daemon seeded speed and RPM from the simulator at connect instead of reading them from the bus, and kept readings across sessions (`end_session` now clears them; only bus reads count); the browser-permission probe also read Chrome's LAN-only permission and had no timeout (now loopback only, 500 ms, and a denied permission keeps retrying); long-term trims, now polled every fifth cycle, dropped 4 of 5 fuel-trim heuristic snapshots (carried forward now); an empty or unreadable supported-PID bitmap is logged instead of silently disabling the stream filter; the INFO "audit consistent" result no longer shows as a live banner; oscilloscope lanes print their min and max; `just e2e` and CI build the daemon before the gate, and a missing daemon fails the gate instead of skipping it. New tests: `ws_gate::streams_the_contract_pids_and_only_supported_ones`, `interlock::end_session_clears_the_live_readings`, `heuristics::long_term_trim_carries_into_later_snapshots`, and permission/SecurityError/stale-probe cases in `tests/edge-client.test.ts`.
+
 Open:
 
 - The contract names a Zustand store in `apps/web/src/store/diagnostic-store.ts`; the app keeps that state in a React context (`context/edge.tsx`). Same behaviour, different library: needs a decision before Task 4.2.
@@ -198,3 +200,4 @@ Open:
 - K-line vehicles (the pre-03/2007 E90) can't be connected over the local WebSocket, so they have no live view.
 - Reloading the page drops the adapter connection; the technician reconnects on Devices.
 - Not yet run against real adapters (A-ENG-10).
+- None of the virtual vehicles raises a RED or AMBER audit alert over the WebSocket (the Falcon session reports VIN and odometer consistent, unlike the Task 1.3 fixture run), so live-banner rendering for those severities is covered by type checks, not by the gate.

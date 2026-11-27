@@ -64,8 +64,10 @@ test:
     cd apps/web && pnpm typecheck
     cd apps/web && pnpm test
 
-# Web end-to-end tests for the A-DES gates (builds first; no infrastructure needed)
+# Web end-to-end tests: the A-DES gates and the Task 4.1 gate against the real
+# debug daemon (builds both first; no infrastructure needed)
 e2e:
+    cargo build -p edge-daemon --locked
     cd apps/web && pnpm build && pnpm e2e --trace off
 
 # Lint and format checks across all languages, plus generated-code drift

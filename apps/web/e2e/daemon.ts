@@ -101,17 +101,20 @@ export class Daemon {
     if (await portOpen(DAEMON_PORT)) {
       throw new Error(`something is already listening on 127.0.0.1:${DAEMON_PORT}; stop it before the daemon gate`);
     }
+    // EDGE_* left in a developer's shell (a fault, another data dir) never leaks in.
+    const childEnv: NodeJS.ProcessEnv = { ...process.env };
+    for (const k of Object.keys(childEnv)) if (k.startsWith("EDGE_")) delete childEnv[k];
+    Object.assign(childEnv, {
+      EDGE_PORT: String(DAEMON_PORT),
+      EDGE_DATA_DIR: this.dataDir,
+      EDGE_ALLOWED_ORIGINS: this.origin,
+      EDGE_LOG_FILE: "off",
+      EDGE_DEV_CLOUD_KEYS: this.keys,
+      RUST_LOG: "info",
+      ...env,
+    });
     this.proc = spawn(DAEMON_BIN, ["serve"], {
-      env: {
-        ...process.env,
-        EDGE_PORT: String(DAEMON_PORT),
-        EDGE_DATA_DIR: this.dataDir,
-        EDGE_ALLOWED_ORIGINS: this.origin,
-        EDGE_LOG_FILE: "off",
-        EDGE_DEV_CLOUD_KEYS: this.keys,
-        RUST_LOG: "info",
-        ...env,
-      },
+      env: childEnv,
       stdio: ["ignore", "pipe", "pipe"],
     });
     const keep = (b: Buffer) => {
@@ -119,7 +122,15 @@ export class Daemon {
     };
     this.proc.stdout?.on("data", keep);
     this.proc.stderr?.on("data", keep);
-    await waitFor(() => portOpen(DAEMON_PORT), "the daemon to listen");
+    let failed = null as Error | null;
+    this.proc.once("error", (e) => (failed = e));
+    this.proc.once("exit", (code, signal) => {
+      failed ??= new Error(`the daemon exited early (code ${code}, signal ${signal}):\n${this.log}`);
+    });
+    await waitFor(async () => {
+      if (failed) throw failed;
+      return portOpen(DAEMON_PORT);
+    }, "the daemon to listen");
   }
 
   /** Kills the process outright (no graceful shutdown) and waits for the port to close. */

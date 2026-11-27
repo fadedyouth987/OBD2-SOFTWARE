@@ -97,10 +97,27 @@ export function Oscilloscope({ channels, windowMs, now }: { channels: ScopeChann
     return () => cancelAnimationFrame(frame);
   }, [channels, windowMs, now, width]);
 
+  // Each lane zooms to its own data, so its min and max are shown beside it:
+  // a trim drifting 1% and one swinging 25% look alike without them.
+  const t0 = now - windowMs;
+  const ranges = new Map(
+    channels.map((ch) => {
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (const p of ch.points) {
+        if (p.t < t0) continue;
+        if (p.v < lo) lo = p.v;
+        if (p.v > hi) hi = p.v;
+      }
+      return [ch.pid, lo <= hi ? ([lo, hi] as const) : null];
+    }),
+  );
   const summary = `Oscilloscope, last ${Math.round(windowMs / 1000)} seconds: ${channels
     .map((ch) => {
       const last = ch.points.at(-1);
-      return `${ch.name} ${last ? `${formatReading(last.v)} ${ch.unit}` : "no reading"}`;
+      const r = ranges.get(ch.pid);
+      const reading = last ? `${formatReading(last.v)} ${ch.unit}` : "no reading";
+      return `${ch.name} ${reading}${r ? `, range ${formatReading(r[0])} to ${formatReading(r[1])} ${ch.unit}` : ""}`;
     })
     .join("; ")}.`;
 
@@ -113,11 +130,15 @@ export function Oscilloscope({ channels, windowMs, now }: { channels: ScopeChann
         <ul className="w-44 shrink-0 sm:w-52" aria-hidden>
           {channels.map((ch) => {
             const last = ch.points.at(-1);
+            const r = ranges.get(ch.pid);
             return (
-              <li key={ch.pid} className="flex flex-col justify-center border-b border-line last:border-0" style={{ height: LANE_H }}>
+              <li key={ch.pid} className="flex flex-col justify-center border-b border-line leading-tight last:border-0" style={{ height: LANE_H }}>
                 <span className="truncate text-xs text-muted">{ch.name}</span>
                 <span className="font-mono text-base font-bold tabular-nums">
                   {last ? formatReading(last.v) : "—"} <span className="text-xs font-normal text-muted">{ch.unit}</span>
+                </span>
+                <span className="truncate font-mono text-[11px] text-faint tabular-nums">
+                  {r ? `min ${formatReading(r[0])} · max ${formatReading(r[1])}` : "no data in window"}
                 </span>
               </li>
             );

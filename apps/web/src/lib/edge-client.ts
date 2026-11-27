@@ -161,19 +161,40 @@ export const BLOCKED_FAILURE: EdgeFailure = {
     "Allow local network access for this site (the icon at the left of the address bar, then Site settings), or turn off the privacy shield or extension blocking it, then retry.",
 };
 
-/** Chrome's permission for pages to reach loopback and local addresses, by its current and older names. */
+/** How long to wait for the browser's permission answer before assuming no block. */
+export const LOCAL_ACCESS_PROBE_MS = 500;
+
+/**
+ * Whether Chrome's permission for this page to reach loopback (127.0.0.1) is
+ * set to Block. Chrome names it `loopback-network`; versions before the split
+ * used one `local-network-access` permission for loopback and LAN. The LAN-only
+ * `local-network` permission is not consulted: the daemon is loopback-only.
+ */
 export async function browserBlocksLocalAccess(): Promise<boolean> {
   const perms = typeof navigator !== "undefined" ? navigator.permissions : undefined;
   if (!perms) return false;
-  for (const name of ["loopback-network", "local-network-access", "local-network"]) {
+  for (const name of ["loopback-network", "local-network-access"]) {
     try {
       const status = await perms.query({ name } as unknown as PermissionDescriptor);
-      if (status.state === "denied") return true;
+      return status.state === "denied";
     } catch {
-      // Not a permission this browser knows.
+      // Not a permission this browser knows: try the older name.
     }
   }
   return false;
+}
+
+/** The probe's answer, or false if it fails or takes longer than `ms`. */
+function probeWithin(probe: () => Promise<boolean>, ms: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), ms);
+    probe()
+      .catch(() => false)
+      .then((v) => {
+        clearTimeout(timer);
+        resolve(v);
+      });
+  });
 }
 
 interface Pending {
@@ -462,21 +483,20 @@ export class EdgeClient {
     this.rejectAll("The connection to the daemon dropped.");
     if (this.stopped) return;
     if (!wasOpen && this.snap.mode === "daemon") {
-      // A browser block won't clear by itself: stop and say how to fix it.
+      // A SecurityError (mixed content, CSP) won't clear without a page change: stop and say how to fix it.
       if (blocked) {
         this.update({ phase: "failed", failure: BLOCKED_FAILURE, hello: null, retryInMs: null });
         return;
       }
+      // A denied permission can be granted while the page is open, so keep retrying.
       const probe = this.opts.localAccessBlocked;
       if (probe) {
         const epoch = this.epoch;
-        void probe()
-          .catch(() => false)
-          .then((denied) => {
-            if (epoch !== this.epoch || this.stopped) return;
-            if (denied) this.update({ phase: "failed", failure: BLOCKED_FAILURE, hello: null, retryInMs: null });
-            else this.notRunning();
-          });
+        void probeWithin(probe, LOCAL_ACCESS_PROBE_MS).then((denied) => {
+          if (epoch !== this.epoch || this.stopped) return;
+          if (denied) this.scheduleRetry(BLOCKED_FAILURE);
+          else this.notRunning();
+        });
         return;
       }
       this.notRunning();

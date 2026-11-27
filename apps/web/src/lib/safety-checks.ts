@@ -14,7 +14,8 @@ export interface LiveReadings {
 const BATTERY_MAX_AGE_MS = 10_000;
 
 
-export type Check = { label: string; state: "ok" | "fail" | "unknown"; value: string };
+/** `reading` names the signal itself ("road speed"), for sentences about a missing reading. */
+export type Check = { label: string; reading: string; state: "ok" | "fail" | "unknown"; value: string };
 
 /**
  * One precondition. Like the daemon (Rule 5), it fails closed: a missing
@@ -22,33 +23,34 @@ export type Check = { label: string; state: "ok" | "fail" | "unknown"; value: st
  */
 function check(
   label: string,
+  reading: string,
   value: number | null,
   ageMs: number | null | undefined,
   maxAgeMs: number,
   pass: (v: number) => boolean,
   show: (v: number) => string,
 ): Check {
-  if (value === null) return { label, state: "unknown", value: "no reading" };
+  if (value === null) return { label, reading, state: "unknown", value: "no reading" };
   if (ageMs != null && ageMs > maxAgeMs) {
-    return { label, state: "unknown", value: `stale (${Math.round(ageMs / 1000)} s old)` };
+    return { label, reading, state: "unknown", value: `stale (${Math.round(ageMs / 1000)} s old)` };
   }
-  return { label, state: pass(value) ? "ok" : "fail", value: show(value) };
+  return { label, reading, state: pass(value) ? "ok" : "fail", value: show(value) };
 }
 
 export function liveChecks(tier: "A" | "B", live: LiveReadings): Check[] {
   const req = SAFETY_POLICY.tiers[tier];
   const maxAge = req.max_speed_age_ms;
   const checks: Check[] = [
-    check(`Vehicle stationary (${req.max_speed_kmh} km/h)`, live.speedKmh, live.speedAgeMs, maxAge,
+    check(`Vehicle stationary (${req.max_speed_kmh} km/h)`, "road speed", live.speedKmh, live.speedAgeMs, maxAge,
       (v) => v <= req.max_speed_kmh, (v) => `${v.toFixed(0)} km/h`),
   ];
   if (req.max_rpm !== null) {
     const maxRpm = req.max_rpm;
-    checks.push(check("Engine off (0 rpm)", live.rpm, live.rpmAgeMs, maxAge, (v) => v <= maxRpm, (v) => `${v.toFixed(0)} rpm`));
+    checks.push(check("Engine off (0 rpm)", "engine speed", live.rpm, live.rpmAgeMs, maxAge, (v) => v <= maxRpm, (v) => `${v.toFixed(0)} rpm`));
   }
   if (req.min_battery_v !== null) {
     const minV = req.min_battery_v;
-    checks.push(check(`Battery at least ${minV} V`, live.batteryV, live.batteryAgeMs, BATTERY_MAX_AGE_MS,
+    checks.push(check(`Battery at least ${minV} V`, "battery voltage", live.batteryV, live.batteryAgeMs, BATTERY_MAX_AGE_MS,
       (v) => v >= minV, (v) => `${v.toFixed(1)} V`));
   }
   return checks;
