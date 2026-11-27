@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
+from sqlalchemy.exc import OperationalError
 
 from app.api.gzip_body import GzipRequestMiddleware
 from app.api.v1 import (
@@ -71,6 +72,19 @@ app.include_router(team.router)
 app.include_router(schematics.router)
 app.include_router(accreditation.router)
 app.include_router(admin.router)
+
+
+@app.exception_handler(OperationalError)
+def db_unavailable_handler(_request: Request, _exc: OperationalError) -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": (
+                "Database unavailable — start Docker Desktop / PostgreSQL "
+                "and run Alembic migrations."
+            )
+        },
+    )
 
 
 @app.get("/healthz")

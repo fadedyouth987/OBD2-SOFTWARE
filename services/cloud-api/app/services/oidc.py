@@ -74,19 +74,33 @@ class OidcConfig:
     logout_url: str
 
 
+GOOGLE_ISSUER = "https://accounts.google.com"
+
+
 def config() -> OidcConfig | None:
     s = get_settings()
-    if not (s.oidc_issuer and s.oidc_client_id and s.oidc_redirect_uri):
-        return None
-    return OidcConfig(
-        issuer=s.oidc_issuer.rstrip("/"),
-        client_id=s.oidc_client_id,
-        client_secret=s.oidc_client_secret,
-        redirect_uri=s.oidc_redirect_uri,
-        scopes=s.oidc_scopes or "openid email profile",
-        provider_name=s.oidc_provider_name or "single sign-on",
-        logout_url=s.oidc_logout_url,
-    )
+    if s.oidc_issuer and s.oidc_client_id and s.oidc_redirect_uri:
+        return OidcConfig(
+            issuer=s.oidc_issuer.rstrip("/"),
+            client_id=s.oidc_client_id,
+            client_secret=s.oidc_client_secret,
+            redirect_uri=s.oidc_redirect_uri,
+            scopes=s.oidc_scopes or "openid email profile",
+            provider_name=s.oidc_provider_name or "single sign-on",
+            logout_url=s.oidc_logout_url,
+        )
+    if s.google_client_id:
+        redirect = s.oidc_redirect_uri or f"{s.public_app_url.rstrip('/')}/auth/callback"
+        return OidcConfig(
+            issuer=GOOGLE_ISSUER,
+            client_id=s.google_client_id,
+            client_secret=s.google_client_secret,
+            redirect_uri=redirect,
+            scopes="openid email profile",
+            provider_name="Google",
+            logout_url="",
+        )
+    return None
 
 
 def _require() -> OidcConfig:
@@ -243,7 +257,12 @@ def _exchange(cfg: OidcConfig, code: str, verifier: str) -> dict:
         "client_id": cfg.client_id,
         "code_verifier": verifier,
     }
-    auth = (cfg.client_id, cfg.client_secret) if cfg.client_secret else None
+    auth = None
+    if cfg.client_secret:
+        if cfg.issuer == GOOGLE_ISSUER:
+            form["client_secret"] = cfg.client_secret
+        else:
+            auth = (cfg.client_id, cfg.client_secret)
     try:
         with _http() as http:
             resp = http.post(disc["token_endpoint"], data=form, auth=auth)

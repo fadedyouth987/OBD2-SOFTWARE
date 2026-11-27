@@ -73,6 +73,9 @@ try:
         oidc_scopes: str = "openid email profile"
         oidc_provider_name: str = "AWS Cognito"
         oidc_logout_url: str = ""
+        # Optional Google OAuth 2.0 / OIDC shorthand (sets issuer=https://accounts.google.com).
+        google_client_id: str = ""
+        google_client_secret: str = ""
         # Email: none | console | file | ses. See docs/dev/email.md.
         email_provider: str = "none"
         email_from: str = ""
@@ -172,6 +175,9 @@ except ImportError:
         oidc_scopes: str = "openid email profile"
         oidc_provider_name: str = "AWS Cognito"
         oidc_logout_url: str = ""
+        # Optional Google OAuth 2.0 / OIDC shorthand (sets issuer=https://accounts.google.com).
+        google_client_id: str = ""
+        google_client_secret: str = ""
         # Email: none | console | file | ses. See docs/dev/email.md.
         email_provider: str = "none"
         email_from: str = ""
