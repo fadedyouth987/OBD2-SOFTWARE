@@ -7,8 +7,7 @@
     "start": "expo start --dev-client",
     "android": "expo run:android",
     "test": "jest",
-    "typecheck": "tsc --noEmit -p .",
-    "lint": "eslint ."
+    "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
     "@obd2/core": "workspace:*",

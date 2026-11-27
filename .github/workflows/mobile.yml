@@ -1,0 +1,56 @@
+# Android app (apps/mobile): tests, a JavaScript bundle, and a debug APK you can
+# install on a phone. Real Bluetooth and dongles are tested by hand on a device.
+name: mobile
+
+on:
+  push:
+    paths:
+      - "apps/mobile/**"
+      - "packages/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/mobile.yml"
+  pull_request:
+    paths:
+      - "apps/mobile/**"
+      - "packages/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/mobile.yml"
+
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Web dependencies unchanged
+        run: node scripts/check-web-deps.mjs
+      - name: Apps stay separate (no web <-> mobile imports)
+        run: |
+          ! grep -rnE "from ['\"](\.\./)+(web|apps/web)/|@/lib/" apps/mobile/app apps/mobile/src apps/mobile/modules
+          ! grep -rnE "from ['\"](\.\./)+(mobile|apps/mobile)/" apps/web/src
+      - name: Shared package tests
+        run: cd packages/core && pnpm typecheck && pnpm test
+      - name: App typecheck and tests
+        run: cd apps/mobile && pnpm typecheck && pnpm test
+      - name: Bundle JavaScript
+        run: cd apps/mobile && CI=1 npx expo export --platform android --output-dir dist
+      - name: Generate the Android project
+        run: cd apps/mobile && CI=1 npx expo prebuild --platform android --no-install --clean
+      - name: Build debug APK
+        run: cd apps/mobile/android && ./gradlew assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rootcause-mobile-debug-apk
+          path: apps/mobile/android/app/build/outputs/apk/debug/*.apk
+          retention-days: 14
