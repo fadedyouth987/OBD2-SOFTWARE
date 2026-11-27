@@ -36,7 +36,7 @@ use edge_daemon::{
     protocol,
     safety::audit::JsonlAudit,
     server::{
-        pairing::PairingStore,
+        pairing::{pairing_path, PairingStore},
         ws::{Server, ServerConfig, DEFAULT_PORT},
     },
     telemetry::{logfile, support_bundle},
@@ -58,33 +58,83 @@ fn data_dir() -> PathBuf {
     )
 }
 
+/// The installed service's data folder (Linux package, Windows MSI), when present.
+fn installed_data_dir() -> Option<PathBuf> {
+    let dir = if cfg!(windows) {
+        PathBuf::from(std::env::var_os("PROGRAMDATA")?).join("RootCauseOBD")
+    } else {
+        PathBuf::from("/var/lib/obd2-edge")
+    };
+    // The folder itself, not pairing/: a user outside the technicians group
+    // can't look inside, and should get "ask to be added", not a private code.
+    dir.is_dir().then_some(dir)
+}
+
+/// Where `edge-daemon pair` writes: `EDGE_DATA_DIR` when set, else the installed
+/// service's folder, else the per-user one. A shell that missed the installer's
+/// profile or system variable (sudo, ssh, an old terminal) still pairs with the
+/// running service instead of printing a code nobody reads.
+fn pair_dir() -> PathBuf {
+    if std::env::var_os("EDGE_DATA_DIR").is_some() {
+        return data_dir();
+    }
+    installed_data_dir().unwrap_or_else(data_dir)
+}
+
 fn pair(dir: &std::path::Path) -> ExitCode {
-    match PairingStore::at(dir.join("pairing.json")).issue(unix_now()) {
+    let path = pairing_path(dir);
+    match PairingStore::at(&path).issue(unix_now()) {
         Ok(code) => {
             println!("Pairing code: {code}");
             println!("Enter it in the app within 2 minutes. It works once.");
+            println!("(saved for the daemon using {})", dir.display());
             ExitCode::SUCCESS
         }
         Err(e) => {
             eprintln!(
-                "could not write the pairing code under {}: {e}",
-                dir.display()
+                "could not write the pairing code to {}: {e}",
+                path.display()
             );
+            if e.kind() == std::io::ErrorKind::PermissionDenied {
+                eprintln!(
+                    "On an installed daemon, ask an administrator to add you to the technicians group \
+                     (Linux: obd2-edge; Windows: \"RootCause Technicians\"), then sign in again."
+                );
+            }
             ExitCode::FAILURE
         }
     }
 }
 
-async fn serve(dir: PathBuf, stop: impl std::future::Future<Output = ()>) -> ExitCode {
+/// Origins a release daemon trusts when `EDGE_ALLOWED_ORIGINS` is unset: the
+/// production web app only, so a lost setting never falls back to a dev origin.
+const PRODUCTION_ORIGIN: &str = "https://app.rootcauseobd.com.au";
+
+/// `lease.min_ver` only ever goes up: a lower value (an old file, a tampered
+/// one) would bring revoked leases back.
+fn raise_min_version(current: i64, file: i64) -> Option<i64> {
+    (file > current).then_some(file)
+}
+
+/// Runs the daemon until `stop` resolves. `listening` is called once the port
+/// is bound (the Windows service reports Running only then).
+async fn serve(
+    dir: PathBuf,
+    stop: impl std::future::Future<Output = ()>,
+    listening: impl FnOnce(),
+) -> ExitCode {
     let mut cfg = ServerConfig::new(
         edge_daemon::auth::dev_keys::keyring(),
-        Arc::new(PairingStore::at(dir.join("pairing.json"))),
+        Arc::new(PairingStore::at(pairing_path(&dir))),
         Arc::new(JsonlAudit::new(dir.join("audit.jsonl"))),
     );
     cfg.port = std::env::var("EDGE_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(DEFAULT_PORT);
+    if !cfg!(debug_assertions) {
+        cfg.allowed_origins = vec![PRODUCTION_ORIGIN.to_owned()];
+    }
     if let Ok(origins) = std::env::var("EDGE_ALLOWED_ORIGINS") {
         cfg.allowed_origins = origins
             .split(',')
@@ -147,7 +197,14 @@ async fn serve(dir: PathBuf, stop: impl std::future::Future<Output = ()>) -> Exi
             }
             if let Ok(s) = std::fs::read_to_string(&min_path) {
                 if let Ok(n) = s.trim().parse::<i64>() {
-                    if n != last_min {
+                    if n < last_min {
+                        tracing::warn!(
+                            file = n,
+                            current = last_min,
+                            "lease.min_ver went down; ignored (it can only be raised)"
+                        );
+                    }
+                    if let Some(n) = raise_min_version(last_min, n) {
                         last_min = n;
                         min_ver.store(n, Ordering::SeqCst);
                         epoch.fetch_add(1, Ordering::SeqCst);
@@ -164,16 +221,42 @@ async fn serve(dir: PathBuf, stop: impl std::future::Future<Output = ()>) -> Exi
     let server = match Server::bind(cfg).await {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("cannot listen on the edge port: {e}");
+            // Logged, not just printed: a service has no console to print to.
+            tracing::error!("cannot listen on the edge port: {e}");
             return ExitCode::FAILURE;
         }
     };
     tracing::info!(port = server.port(), %origins, data = %dir.display(), "edge-daemon listening on loopback");
-    tokio::select! {
-        () = server.run() => {}
-        () = stop => tracing::info!("shutting down"),
+    if origins.contains("localhost") && !cfg!(debug_assertions) {
+        tracing::warn!("a release daemon is trusting a localhost origin ({origins})");
     }
-    ExitCode::SUCCESS
+    listening();
+    tokio::select! {
+        () = server.run() => {
+            tracing::error!("the WebSocket server stopped unexpectedly");
+            ExitCode::FAILURE
+        }
+        () = stop => {
+            tracing::info!("shutting down");
+            ExitCode::SUCCESS
+        }
+    }
+}
+
+/// Ctrl-C in a console, or SIGTERM from systemd (`systemctl stop`/restart).
+async fn console_stop() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        if let Ok(mut term) = signal(SignalKind::terminate()) {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = term.recv() => {}
+            }
+            return;
+        }
+    }
+    let _ = tokio::signal::ctrl_c().await;
 }
 
 fn runtime() -> tokio::runtime::Runtime {
@@ -184,8 +267,12 @@ fn runtime() -> tokio::runtime::Runtime {
 }
 
 fn main() -> ExitCode {
-    let dir = data_dir();
     let command = std::env::args().nth(1);
+    let dir = if command.as_deref() == Some("pair") {
+        pair_dir()
+    } else {
+        data_dir()
+    };
     // Only the long-running daemon writes the log file; `edge-daemon pair`, run
     // by a technician in a shared install, must not touch the service's logs.
     let serving = matches!(command.as_deref(), None | Some("serve" | "service"));
@@ -218,10 +305,8 @@ fn main() -> ExitCode {
         None => tracing_subscriber::fmt().with_env_filter(filter()).init(),
     }
     match command.as_deref() {
-        None | Some("serve") => runtime().block_on(serve(dir, async {
-            let _ = tokio::signal::ctrl_c().await;
-        })),
-        Some("service") => service::run(dir),
+        None | Some("serve") => runtime().block_on(serve(dir, console_stop(), || {})),
+        Some("service") => service::run(),
         Some("pair") => pair(&dir),
         Some("version" | "--version") => {
             println!(
@@ -256,17 +341,13 @@ fn main() -> ExitCode {
 }
 
 /// `edge-daemon service`: the Windows service manager starts the daemon this
-/// way (the MSI installs it as `RootCauseEdgeDaemon`). Stop and system shutdown
-/// end `serve` the same way Ctrl-C does in a console.
+/// way (the MSI installs it as `RootCauseEdgeDaemon`). It reports StartPending
+/// until the port is bound, then Running; Stop and system shutdown end `serve`
+/// the same way Ctrl-C does in a console. A failure exit makes the service
+/// manager run the MSI's recovery actions (restart).
 #[cfg(windows)]
 mod service {
-    use std::{
-        ffi::OsString,
-        path::PathBuf,
-        process::ExitCode,
-        sync::{Mutex, OnceLock},
-        time::Duration,
-    };
+    use std::{ffi::OsString, process::ExitCode, sync::Mutex, time::Duration};
 
     use windows_service::{
         define_windows_service,
@@ -281,12 +362,9 @@ mod service {
     /// Must match `ServiceInstall/@Name` in packaging/windows/edge-daemon.wxs.
     pub const NAME: &str = "RootCauseEdgeDaemon";
 
-    static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
-
     define_windows_service!(ffi_service_main, service_main);
 
-    pub fn run(dir: PathBuf) -> ExitCode {
-        let _ = DATA_DIR.set(dir);
+    pub fn run() -> ExitCode {
         match service_dispatcher::start(NAME, ffi_service_main) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
@@ -333,12 +411,20 @@ mod service {
             ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
             _ => ServiceControlHandlerResult::NotImplemented,
         })?;
-        handle.set_service_status(status(ServiceState::Running, 0))?;
-        let dir = DATA_DIR.get().cloned().unwrap_or_else(super::data_dir);
-        let code = super::runtime().block_on(super::serve(dir, async {
-            let _ = rx.await;
-        }));
-        let exit = u32::from(code != ExitCode::SUCCESS);
+        handle.set_service_status(status(ServiceState::StartPending, 0))?;
+        let code = super::runtime().block_on(super::serve(
+            super::data_dir(),
+            async {
+                let _ = rx.await;
+            },
+            || {
+                if let Err(e) = handle.set_service_status(status(ServiceState::Running, 0)) {
+                    tracing::error!("could not report Running to the service manager: {e}");
+                }
+            },
+        ));
+        // ERROR_SERVICE_SPECIFIC_ERROR-style failure: the recovery actions restart it.
+        let exit = if code == ExitCode::SUCCESS { 0 } else { 1 };
         handle.set_service_status(status(ServiceState::Stopped, exit))?;
         Ok(())
     }
@@ -346,12 +432,28 @@ mod service {
 
 #[cfg(not(windows))]
 mod service {
-    use std::{path::PathBuf, process::ExitCode};
+    use std::process::ExitCode;
 
-    pub fn run(_dir: PathBuf) -> ExitCode {
+    pub fn run() -> ExitCode {
         eprintln!(
             "`edge-daemon service` is for the Windows service manager; run `edge-daemon` here"
         );
         ExitCode::FAILURE
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::raise_min_version;
+
+    #[test]
+    fn lease_min_version_only_goes_up() {
+        assert_eq!(raise_min_version(3, 4), Some(4));
+        assert_eq!(raise_min_version(3, 3), None);
+        assert_eq!(
+            raise_min_version(3, 1),
+            None,
+            "a lower value never un-revokes leases"
+        );
     }
 }

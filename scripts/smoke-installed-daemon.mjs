@@ -7,10 +7,13 @@
 //
 // Checks that the daemon listens on loopback only, refuses connections from a
 // non-loopback address, refuses an unpaired client and a wrong code, accepts a
-// pairing code made by `edge-daemon pair` (when --pair-code is given), and
-// started with the production origin only (when --log is given). Exit 0 = pass.
+// pairing code made by `edge-daemon pair` (when --pair-code is given), refuses
+// WebSocket handshakes from any origin but production, and started with exactly
+// the production origin (when --log is given). Exit 0 = pass.
 // Needs Node 22+ (global WebSocket).
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { request } from "node:http";
 import { readFileSync } from "node:fs";
 import { connect } from "node:net";
 import { networkInterfaces, platform } from "node:os";
@@ -113,6 +116,40 @@ const hello = (token) => ({
   ...versions,
 });
 
+/** The HTTP status a WebSocket upgrade from `origin` gets (101 = accepted). */
+function upgradeStatus(origin) {
+  return new Promise((resolve) => {
+    const req = request({
+      host: "127.0.0.1",
+      port: PORT,
+      path: "/",
+      headers: {
+        Connection: "Upgrade",
+        Upgrade: "websocket",
+        "Sec-WebSocket-Version": "13",
+        "Sec-WebSocket-Key": randomBytes(16).toString("base64"),
+        Host: `127.0.0.1:${PORT}`,
+        Origin: origin,
+      },
+      timeout: 5000,
+    });
+    req.on("upgrade", (res, socket) => {
+      socket.destroy();
+      resolve(res.statusCode);
+    });
+    req.on("response", (res) => {
+      res.resume();
+      resolve(res.statusCode);
+    });
+    req.on("timeout", () => req.destroy());
+    req.on("error", (e) => resolve(`error ${e.code ?? e.message}`));
+    req.end();
+  });
+}
+
+// 0. The service may report "running" a moment before the port is bound.
+for (let i = 0; i < 30 && listeners().length === 0; i++) await new Promise((r) => setTimeout(r, 500));
+
 // 1. Loopback only.
 const addrs = listeners();
 check(addrs.length > 0, `daemon listens on port ${PORT}`, addrs.join(", ") || "nothing listening");
@@ -138,14 +175,21 @@ if (args["pair-code"]) {
   check(ok.type === "HelloResponse", "accepts a code from `edge-daemon pair`", JSON.stringify(ok));
 }
 
-// 5. Started with the production origin only.
+// 5. Trusts the production origin only: the handshake itself, and the startup log.
+const want = args["expect-origin"] ?? "https://app.rootcauseobd.com.au";
+for (const bad of ["http://localhost:3000", "http://127.0.0.1:3000", "https://evil.example"]) {
+  const status = await upgradeStatus(bad);
+  check(status !== 101, `refuses a WebSocket from ${bad}`, String(status));
+}
+const good = await upgradeStatus(want);
+check(good === 101, `accepts a WebSocket from ${want}`, String(good));
 if (args.log) {
   const line = readFileSync(args.log, "utf8")
     .split(/\r?\n/)
     .reverse()
     .find((l) => l.includes("edge-daemon listening"));
-  const want = args["expect-origin"] ?? "https://app.rootcauseobd.com.au";
-  check(!!line && line.includes(want) && !line.includes("localhost"), `allowed origins are ${want} only`, line ?? "no startup line");
+  const origins = line?.match(/origins=(.*?) data=/)?.[1]?.split(", ") ?? [];
+  check(origins.length === 1 && origins[0] === want, `allowed origins are exactly ${want}`, line ?? "no startup line");
 }
 
 if (failures.length) {
