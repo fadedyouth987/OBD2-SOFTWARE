@@ -169,6 +169,8 @@ export function EdgeProvider({ children }: { children: React.ReactNode }) {
   const latestRef = useRef<Map<number, PidSample>>(new Map());
   const dirtyRef = useRef(false);
   const adaptersRef = useRef<AdapterInfo[] | null>(null);
+  // Bumped by every connect and disconnect, so a stale connect reply is ignored.
+  const linkIntent = useRef(0);
   adaptersRef.current = adapters;
 
   useEffect(() => setModeState(readMode()), []);
@@ -328,11 +330,14 @@ export function EdgeProvider({ children }: { children: React.ReactNode }) {
       latestRef.current = new Map();
       pidHistory.current = new Map();
       setLink({ adapter, adapterId, state: "CONNECTING", batteryV: null, safetyMode, protocol, since: Date.now() });
+      const attempt = ++linkIntent.current;
       try {
         const res = await client.request(
           { type: "ConnectRequest", adapter_id: adapterId, protocol, baud_rate: null, safety_mode: safetyMode },
           20_000,
         );
+        // Disconnected (or reconnected elsewhere) while this connect was in flight: drop it.
+        if (attempt !== linkIntent.current) return;
         if (res.state !== "CONNECTED") {
           setLink(null);
           throw new EdgeRequestError(
@@ -344,6 +349,7 @@ export function EdgeProvider({ children }: { children: React.ReactNode }) {
         setLink({ adapter, adapterId, state: "CONNECTED", batteryV: res.battery_v, safetyMode, protocol, since: Date.now() });
         saveLink({ adapterId, protocol });
       } catch (e) {
+        if (attempt !== linkIntent.current) return;
         setLink(null);
         const err =
           e instanceof EdgeRequestError ? e : new EdgeRequestError("ADAPTER_ERROR", String(e), "Try again.");
@@ -355,11 +361,14 @@ export function EdgeProvider({ children }: { children: React.ReactNode }) {
   );
 
   const disconnectAdapter = useCallback(async () => {
+    // Forget the adapter first, whatever this render thinks is connected: a reload before
+    // the daemon replies must not reconnect it, and a connect in flight must not save it.
+    linkIntent.current += 1;
+    saveLink(null);
     if (!client || !link) return;
     try {
       await client.request({ type: "DisconnectRequest", adapter_id: link.adapterId });
     } finally {
-      saveLink(null);
       resetVehicleState();
     }
   }, [client, link, resetVehicleState]);
