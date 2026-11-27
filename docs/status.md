@@ -132,7 +132,7 @@ Deviations from the Task 1.1 target paths, on purpose:
 | 3.3 KG-guided RAG localizer | Implemented | `services/cloud-api/app/services/{embeddings,ai_diagnostic_agent}.py`, `api/v1/diagnose.py` (A-CEO-1 fallback, A-DES-4 bands). |
 | 4.1 Edge client, pairing, live dashboard | Done, gate verified | Verification Gate run against the real daemon on 2026-11-27; see "Task 4.1 gate verification" below. |
 | 4.2–4.3 CAN studio, copilot + `DESIGN.md` | Implemented | `DESIGN.md`, `edge-client.ts`, `SafetyConfirmModal.tsx` (1.5s hold), `BitFlipMatrix.tsx` (29-bit), `WiringTopologyViewer.tsx`, `/live`, `/can-studio`, `/copilot/[sessionId]`. |
-| 5.1 Native installers and CI | Gate running in CI | See "Task 5.1 gate verification" below. |
+| 5.1 Native installers and CI | Done, gate verified in CI (signing waits on certificates) | `package.yml` and `quickstart.yml` green on `c93c1e4` (2026-11-27): release builds, install, post-install smoke test and uninstall on Linux and Windows. See "Task 5.1 gate verification" below. |
 | 5.2 Telemetry, runbooks | Implemented | `apps/edge-daemon/src/telemetry/`, `packaging/{linux,windows}/`, `scripts/export_cloud_keys.py`, `.github/workflows/ci.yml`, `infra/monitoring/prometheus.yml`, `docs/runbooks/incident-response.md`. |
 
 Remaining verification requiring local host/hardware: `cargo test --workspace`, `pnpm --filter web build`, live Postgres/Neo4j integration tests, and physical `A-ENG-10` vehicle captures.
