@@ -1,10 +1,14 @@
 """A-ENG-8: per-page timeout, memory cap and no network for the ingest worker."""
 
-import resource
 import socket
 import time
 
 import pytest
+
+try:
+    import resource
+except ImportError:
+    resource = None  # type: ignore[assignment]
 
 from app import sandbox
 from app.vision import schematic_pipeline
@@ -53,6 +57,7 @@ def test_egress_blocked_except_broker():
         sandbox.restore_network()
 
 
+@pytest.mark.skipif(resource is None, reason="POSIX RLIMIT_AS is unavailable on Windows")
 def test_memory_cap_is_applied():
     before = resource.getrlimit(resource.RLIMIT_AS)
     try:

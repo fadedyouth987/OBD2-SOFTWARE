@@ -3,17 +3,58 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
+import os
+import urllib.request
 from collections.abc import Sequence
 
 EMBEDDING_DIM = 384
 EMBEDDING_MODEL = "bge-small-en-v1.5-ap-se-2"
+FALLBACK_EMBEDDING_MODEL = "local-hash-384-v1"
+
+
+def active_embedding_model() -> str:
+    """Returns the model ID matching the vector space actually generated.
+
+    Prevents hash-fallback vectors from being mislabeled as BGE embeddings when
+    ``EMBEDDING_BACKEND_URL`` is unset.
+    """
+    if os.environ.get("EMBEDDING_BACKEND_URL", "").strip():
+        return os.environ.get("EMBEDDING_MODEL", EMBEDDING_MODEL).strip() or EMBEDDING_MODEL
+    return FALLBACK_EMBEDDING_MODEL
 
 
 def embed_canonical_text(text: str) -> list[float]:
-    """Deterministic unit-norm 384-dim embedding fallback when local ONNX runtime is absent.
-    Never makes outbound calls outside ap-southeast-2."""
-    vec: list[float] = []
+    """Computes a unit-norm 384-dim embedding in ap-southeast-2.
+
+    Uses the configured regional ``EMBEDDING_BACKEND_URL`` (OpenAI-compatible
+    ``/v1/embeddings``) when set; otherwise falls back to a deterministic
+    unit-norm hash projection (never making outbound calls outside ap-southeast-2).
+    """
+    backend_url = os.environ.get("EMBEDDING_BACKEND_URL", "").strip()
+    if backend_url:
+        model = active_embedding_model()
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        api_key = os.environ.get("EMBEDDING_API_KEY", "").strip()
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        req = urllib.request.Request(
+            backend_url,
+            data=json.dumps({"model": model, "input": text}).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10.0) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        raw_vec = payload["data"][0]["embedding"]
+        if len(raw_vec) != EMBEDDING_DIM:
+            raise ValueError(f"expected {EMBEDDING_DIM}-dim embedding, got {len(raw_vec)}")
+        vec = [float(x) for x in raw_vec]
+        norm = math.sqrt(sum(v * v for v in vec)) or 1.0
+        return [round(v / norm, 6) for v in vec]
+
+    vec = []
     seed = text.encode("utf-8")
     counter = 0
     while len(vec) < EMBEDDING_DIM:

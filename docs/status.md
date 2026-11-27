@@ -11,6 +11,11 @@ Progress through [`PLAN.md`](PLAN.md), in Rule 1 order. A task is done when its 
 | 1.3 Edge heuristics, CAN RE, ring buffer | Done | See below. |
 | 1.4 Secured WebSocket server, lease verifier | Done | See below. Phase 1 complete. |
 | 2.1 Multi-tenant schema with RLS | Done | See below. |
+| 2.2 Control plane, lease/pairing issuer, session sync | Done | PR #9–#10: Ed25519 signing (`cryptography`), fail-closed key loading, gzipped batch sync + outbox, password & OIDC/Cognito auth. |
+| 2.3 Subscription metering & Australian gateway compliance | Done | PR #9–#10: Stripe Checkout + webhook idempotency, FLEET tier, AASRA accreditation workflow + admin review, immo gateway hooks. |
+| 3.1–3.3 Neo4j topology, schematic ingest & KG-guided RAG | Done | PR #10–#11: `TopologyRepository` isolation gate, hybrid schematic pipeline, Bedrock LLM + free rules fallback with quota refund. |
+| 4.1–4.3 Web app, CAN RE Studio, Copilot & E2E | Done | PR #10–#13: Real daemon/API wiring, safety confirmation, CAN Studio + DBC storage, team/site management, Playwright E2E + WCAG AA. |
+| 5.1–5.2 Native installers, CI, observability & runbooks | Done | PR #11–#12: Linux/Windows installers + service runner, Prometheus metrics, alerts, runbooks, A-ENG-10 HIL checklist. |
 
 ## Task 1.1 detail
 

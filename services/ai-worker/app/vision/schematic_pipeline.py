@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import os
 import signal
 import threading
@@ -21,20 +22,31 @@ class PageTimeout(Exception):
 
 
 def _with_timeout[T](fn: Callable[[], T], seconds: float) -> T:
-    """Run ``fn`` with a wall-clock limit (SIGALRM; worker tasks run on the main thread)."""
-    if seconds <= 0 or threading.current_thread() is not threading.main_thread():
+    """Run ``fn`` with a wall-clock limit (SIGALRM on POSIX, thread timeout on Windows)."""
+    if seconds <= 0:
         return fn()
 
-    def _raise(signum, frame):  # noqa: ARG001
-        raise PageTimeout
+    if hasattr(signal, "SIGALRM") and threading.current_thread() is threading.main_thread():
+        def _raise(signum, frame):  # noqa: ARG001
+            raise PageTimeout
 
-    previous = signal.signal(signal.SIGALRM, _raise)
-    signal.setitimer(signal.ITIMER_REAL, seconds)
+        previous = signal.signal(signal.SIGALRM, _raise)
+        signal.setitimer(signal.ITIMER_REAL, seconds)
+        try:
+            return fn()
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous)
+
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = pool.submit(fn)
     try:
-        return fn()
+        return future.result(timeout=seconds)
+    except concurrent.futures.TimeoutError as exc:
+        future.cancel()
+        raise PageTimeout from exc
     finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous)
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
 def _extract_page(idx: int, text: str) -> list[dict[str, Any]]:
