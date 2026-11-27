@@ -263,3 +263,22 @@ Not done yet:
 - Play Store release (T7).
 - A real-dongle field test. The APK is only verified by CI and the simulated car.
 - Database-backed billing tests for Mobile were written but skip locally (no TimescaleDB here); CI runs them.
+
+## Windows installer verified in CI (2026-11-27)
+
+`package.yml` run 46063134287 (commit c98a7c5) passed on both platforms.
+
+On Windows, every step ran:
+- The MSI builds with WiX 4.0.5.
+- It installs, and the service runs as `NT SERVICE\RootCauseEdgeDaemon` with an unrestricted SID and restart-on-failure. These were checked with `sc.exe`.
+- The data folder is closed to users, and only the technicians group can write to `pairing\`.
+- A standard user in that group can pair.
+- The smoke test passes: the daemon listens on loopback only and refuses unpaired connections.
+- The service stops and starts on request, and uninstall stops the daemon.
+
+Three fixes got it there:
+- the WiX 4 attribute names (`FailureActionsWhen`, `restartService`);
+- service SID type and failure actions set by `sc.exe` custom actions instead of the MsiServiceConfig tables, which made a fresh install fail with 1603;
+- a CI log that prints the failing action instead of the log's tail.
+
+The signing jobs are skipped on pull requests, as designed: they run only for `v*` tags, once certificates exist.
