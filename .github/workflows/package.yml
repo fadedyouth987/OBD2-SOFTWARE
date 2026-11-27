@@ -142,8 +142,19 @@ jobs:
       - name: Install the MSI
         run: |
           $p = Start-Process msiexec -ArgumentList '/i', (Resolve-Path $env:MSI), '/qn', '/l*v', "$env:RUNNER_TEMP\install.log" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\install.log" -Tail 80; exit $p.ExitCode }
+          if ($p.ExitCode -ne 0) {
+            # The real error is where an action returned 3, not at the end (property dump).
+            Select-String -Path "$env:RUNNER_TEMP\install.log" -Pattern 'Return value 3' -Context 40,2 | Select-Object -First 1 | ForEach-Object { $_.Context.PreContext; $_.Line; $_.Context.PostContext }
+            Select-String -Path "$env:RUNNER_TEMP\install.log" -Pattern '(Error|error) 1[0-9]{3}|CustomAction .* returned actual error' | Select-Object -First 15 | ForEach-Object { $_.Line }
+            exit $p.ExitCode
+          }
           (Get-Service RootCauseEdgeDaemon).WaitForStatus('Running', '00:00:30')
+          $sid = sc.exe qsidtype RootCauseEdgeDaemon | Out-String
+          if ($sid -notmatch 'UNRESTRICTED') { throw "service SID type: $sid" }
+          $fail = sc.exe qfailure RootCauseEdgeDaemon | Out-String
+          if ($fail -notmatch 'RESTART' -or $fail -notmatch '86400') { throw "failure actions: $fail" }
+          $flag = sc.exe qfailureflag RootCauseEdgeDaemon | Out-String
+          if ($flag -notmatch 'TRUE') { throw "failure flag: $flag" }
           $account = (Get-CimInstance Win32_Service -Filter "Name='RootCauseEdgeDaemon'").StartName
           if ($account -ne 'NT SERVICE\RootCauseEdgeDaemon') { throw "service runs as $account" }
           $data = (Get-Acl C:\ProgramData\RootCauseOBD).Access | ForEach-Object { "$($_.IdentityReference)" }
