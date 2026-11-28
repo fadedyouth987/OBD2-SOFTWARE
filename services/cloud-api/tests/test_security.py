@@ -261,7 +261,9 @@ def test_aasra_and_sgw_ignore_client_flags_until_marked(client: TestClient):
     assert unlocked.status_code == 200, unlocked.text
     body = unlocked.json()
     assert "vin" not in body and "vin_last4" not in body
-    assert "SGW_UNLOCK" not in body["sgw_session_lease"]["features"]
+    # No OEM gateway is integrated: it says so, and hands out no lease.
+    assert body["status"] == "not_available"
+    assert "sgw_session_lease" not in body
 
 
 @pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")

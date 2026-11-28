@@ -5,10 +5,10 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import { Badge, Banner, Button, Card, Meter, PageHeader, Skeleton } from "@/components/ui";
 import { useAuth } from "@/context/auth";
 import { api, ApiError, type BillingState, type PlanTier, type TierInfo } from "@/lib/api";
-import { FEATURE_INFO, TIER_LABEL } from "@/lib/entitlements";
+import { FEATURE_INFO, PLAN_ORDER as ORDER, TIER_LABEL, appExtras } from "@/lib/entitlements";
 import { formatDate, formatDateTime, formatNumber } from "@/lib/format";
+import { useNativeApp } from "@/lib/native";
 
-const ORDER: PlanTier[] = ["COMMUNITY", "PRO", "WORKSHOP", "FLEET"];
 const STATUS_TEXT: Record<string, [string, "ok" | "warn" | "danger" | "info"]> = {
   active: ["Active", "ok"],
   trialing: ["Trial", "info"],
@@ -32,6 +32,9 @@ function BillingInner() {
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const checkout = params.get("checkout");
+  // The Android app shows plans and what they include, but never sells them (Google
+  // Play rules): changing the plan happens on the website.
+  const native = useNativeApp();
 
   const load = useCallback(async () => {
     try {
@@ -125,13 +128,18 @@ function BillingInner() {
       ) : null}
       {actionError ? <Banner tone="danger">{actionError}</Banner> : null}
       {!owner ? <Banner tone="info">Only the workshop owner can change the plan. You can see what&apos;s included below.</Banner> : null}
+      {native && owner ? (
+        <Banner tone="info" title="Change the plan on the website">
+          Plans and payments are managed at app.rootcauseobd.com.au on a computer. Changes show here straight away.
+        </Banner>
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
         <Card
           title={`${TIER_LABEL[state.tier]} plan`}
           subtitle={state.stored_tier !== state.tier ? `Billed as ${TIER_LABEL[state.stored_tier]}; running as ${TIER_LABEL[state.tier]} until billing is fixed.` : undefined}
           actions={
-            owner && state.has_stripe_customer ? (
+            owner && state.has_stripe_customer && !native ? (
               <Button size="sm" variant="ghost" busy={busy === "portal"} onClick={() => void portal()}>
                 Invoices & payment method
               </Button>
@@ -200,7 +208,7 @@ function BillingInner() {
               </span>
             </span>
           </label>
-          <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
             {tiers.map((t: TierInfo) => {
               const price = interval === "year" ? t.annual_price_aud : t.monthly_price_aud;
               const current = t.tier === state.tier;
@@ -225,10 +233,13 @@ function BillingInner() {
                     {t.features.map((f) => (
                       <li key={f}>✓ {FEATURE_INFO[f]?.label ?? f}</li>
                     ))}
+                    {appExtras(t.tier).map((label) => (
+                      <li key={label}>✓ {label} (Android app)</li>
+                    ))}
                     {immo && state.immo_addon.eligible_tiers.includes(t.tier) ? <li>✓ Key programming add-on</li> : null}
                   </ul>
                   <div className="mt-auto space-y-2 pt-4">
-                    {t.tier === "COMMUNITY" ? null : current ? (
+                    {t.tier === "COMMUNITY" || native ? null : current ? (
                       owner && state.has_stripe_customer ? (
                         <Button size="sm" variant="ghost" className="w-full" busy={busy === "portal"} onClick={() => void portal()}>
                           Change or cancel
@@ -254,7 +265,7 @@ function BillingInner() {
                       </>
                     )}
                   </div>
-                  {t.tier === state.trial_tier && canTrial ? (
+                  {t.tier === state.trial_tier && canTrial && !native ? (
                     <p className="mt-2 text-xs text-faint">Trial is monthly{state.trial_requires_card ? " and needs a card" : ""}; cancel any time before it ends.</p>
                   ) : null}
                 </li>

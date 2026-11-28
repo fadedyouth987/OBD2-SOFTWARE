@@ -1,5 +1,5 @@
 // Needs IMMO_FEATURE_ENABLED=true on the local API. Sandbox ECU only (virtual-sandbox-immo).
-import { launch, shot, signup, apiCall, connectAdapter, nav, confirmGated, BASE } from './lib.mjs';
+import { launch, shot, signup, apiCall, connectAdapter, nav, confirmGated, BASE, fail } from './lib.mjs';
 const { browser, page, errors } = await launch();
 const log = (...a) => console.log('•', ...a);
 try {
@@ -35,7 +35,7 @@ try {
   await shot(page, '54-immo-key-learned');
   log('key learned on sandbox ECU');
 } catch (e) {
-  console.log('FAIL', e.message.split('\n').slice(0, 5).join(' | '));
+  fail(e.message.split('\n').slice(0, 5).join(' | '));
   await shot(page, 'zz-fail-immo');
 } finally {
   console.log('console errors:', errors.length ? errors.slice(0, 10) : 'none');

@@ -20,6 +20,8 @@ import os
 import time
 from typing import Any
 
+from app.services.plans import load_plans
+
 # The key ID put on every token. Change it (with CLOUD_SIGNING_PRIVATE_KEY_HEX) when
 # rotating keys; see docs/runbooks/signing-key-rotation.md.
 PINNED_KID = os.environ.get("CLOUD_SIGNING_KID", "cloud-2026-11").strip() or "cloud-2026-11"
@@ -35,11 +37,9 @@ IMMO_FEATURE = "IMMO_PROGRAM"
 # Features the edge Feature enum actually understands. Anything else is dropped.
 KNOWN_FEATURES: frozenset[str] = frozenset({"J2534", "UDS_ACTIVE", "CAN_RE_PRO", "IMMO_PROGRAM"})
 
+# Lease features per tier, from packages/schemas/plan_features.json (app/services/plans.py).
 TIER_DEFAULT_FEATURES: dict[str, list[str]] = {
-    "COMMUNITY": [],
-    "PRO": ["UDS_ACTIVE"],
-    "WORKSHOP": ["UDS_ACTIVE", "CAN_RE_PRO", "J2534"],
-    "FLEET": ["UDS_ACTIVE", "CAN_RE_PRO", "J2534"],
+    t.tier: list(t.lease_features) for t in load_plans().tiers
 }
 
 ISSUER = "obd2-cloud-api"
@@ -126,9 +126,9 @@ def _sign_payload(header: dict[str, Any], payload: dict[str, Any]) -> str:
 
 
 def normalize_tier(tier: str) -> str:
-    """Map a billing/price label onto the edge/DB enum. FLEET is a real tier."""
+    """Map a billing/price label onto the edge/DB enum; unknown labels are Community."""
     norm = (tier or "COMMUNITY").upper()
-    if norm not in {"COMMUNITY", "PRO", "WORKSHOP", "FLEET"}:
+    if norm not in TIER_DEFAULT_FEATURES:
         return "COMMUNITY"
     return norm
 

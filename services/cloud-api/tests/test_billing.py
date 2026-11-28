@@ -22,6 +22,8 @@ os.environ.setdefault("CLOUD_SIGNING_PRIVATE_KEY_HEX", "cd" * 32)
 os.environ.setdefault("AUTH_ALLOW_DEV_LOGIN", "true")
 os.environ.setdefault("STRIPE_WEBHOOK_SECRET", "whsec_test_local_not_prod")
 os.environ.setdefault("STRIPE_SECRET_KEY", "sk_test_local_not_prod")
+os.environ["STRIPE_PRICE_MOBILE_MONTH"] = "price_test_mobile_month"
+os.environ["STRIPE_PRICE_MOBILE_YEAR"] = "price_test_mobile_year"
 os.environ["STRIPE_PRICE_PRO_MONTH"] = "price_test_pro_month"
 os.environ["STRIPE_PRICE_PRO_YEAR"] = "price_test_pro_year"
 os.environ["STRIPE_PRICE_WORKSHOP_MONTH"] = "price_test_workshop_month"
@@ -43,6 +45,7 @@ WORKSHOP_PRICE = os.environ["STRIPE_PRICE_WORKSHOP_MONTH"]
 FLEET_PRICE = os.environ["STRIPE_PRICE_FLEET_MONTH"]
 IMMO_PRICE = os.environ["STRIPE_PRICE_IMMO_MONTH"]
 PRO_PRICE = os.environ["STRIPE_PRICE_PRO_MONTH"]
+MOBILE_PRICE = os.environ["STRIPE_PRICE_MOBILE_MONTH"]
 
 
 @pytest.fixture(scope="module")
@@ -146,6 +149,15 @@ def _subscription_event(
         "created": created if created is not None else int(time.time()),
         "data": {"object": obj},
     }
+
+
+@pytest.fixture
+def mobile_on(monkeypatch: pytest.MonkeyPatch):
+    """The Mobile plan is off by default (not approved); these tests cover it switched on."""
+    monkeypatch.setenv("PLAN_MOBILE_ENABLED", "true")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 @pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
@@ -259,6 +271,32 @@ def test_checkout_creates_session_for_owner(client: TestClient, monkeypatch: pyt
     prices = [item["price"] for item in captured["line_items"]]
     assert WORKSHOP_PRICE in prices
     assert IMMO_PRICE in prices
+
+
+@pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
+def test_checkout_refuses_a_second_subscription(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+):
+    """Review M8: a workspace already paying goes to the portal, not a second Checkout."""
+    owner = _dev_session(client)
+    ev = _checkout_event(
+        tenant_id=owner["tenant_id"],
+        price_ids=[WORKSHOP_PRICE],
+        customer=f"cus_{uuid.uuid4().hex[:10]}",
+        subscription=f"sub_{uuid.uuid4().hex[:10]}",
+        metadata_tier="WORKSHOP",
+    )
+    assert _post_event(client, ev).status_code == 200
+    called: list = []
+    monkeypatch.setattr("stripe.checkout.Session.create", lambda **kw: called.append(kw))
+    res = client.post(
+        "/api/v1/billing/checkout-session",
+        json={"tier": "FLEET", "interval": "month"},
+        headers=_auth(owner["access_token"]),
+    )
+    assert res.status_code == 409, res.text
+    assert res.json()["detail"]["code"] == "subscription_exists"
+    assert called == []
 
 
 @pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
@@ -584,3 +622,124 @@ def test_checkout_redirects_only_to_paths_on_this_app():
         None,
     ):
         assert _app_url(hostile, "/workshop/billing") == f"{base}/workshop/billing"
+
+
+# --- Mobile plan (docs/design/mobile-app.md, Task 6.1) ---
+
+
+@pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
+def test_mobile_checkout_grants_mobile_with_40_ai_and_no_lease_features(
+    client: TestClient, mobile_on
+):
+    session = _dev_session(client)
+    res = _post_event(
+        client, _checkout_event(tenant_id=session["tenant_id"], price_ids=[MOBILE_PRICE])
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["active_tier"] == "MOBILE"
+    me = client.get("/api/v1/auth/me", headers=_auth(session["access_token"])).json()
+    assert me["entitlements"]["tier"] == "MOBILE"
+    assert me["entitlements"]["ai_diagnoses"] == 40
+    assert me["entitlements"]["features"] == []
+    lease = client.post("/api/v1/auth/edge-lease", json={}, headers=_auth(session["access_token"]))
+    assert lease.status_code == 200
+    assert lease.json()["tier"] == "MOBILE"
+    assert lease.json()["features"] == []
+
+
+@pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
+def test_mobile_to_pro_is_upgrade_and_pro_to_mobile_bumps_lease_version(
+    client: TestClient, mobile_on
+):
+    session = _dev_session(client)
+    tenant_id = session["tenant_id"]
+    customer = f"cus_{uuid.uuid4().hex[:10]}"
+    sub = f"sub_{uuid.uuid4().hex[:10]}"
+    created = int(time.time())
+    first = _post_event(
+        client,
+        _checkout_event(
+            tenant_id=tenant_id,
+            price_ids=[MOBILE_PRICE],
+            customer=customer,
+            subscription=sub,
+            created=created,
+        ),
+    ).json()
+    up = _post_event(
+        client,
+        _subscription_event(
+            "customer.subscription.updated",
+            tenant_id=tenant_id,
+            price_ids=[PRO_PRICE],
+            customer=customer,
+            subscription=sub,
+            created=created + 5,
+        ),
+    ).json()
+    assert up["active_tier"] == "PRO"
+    assert up["lease_version"] == first["lease_version"]
+    down = _post_event(
+        client,
+        _subscription_event(
+            "customer.subscription.updated",
+            tenant_id=tenant_id,
+            price_ids=[MOBILE_PRICE],
+            customer=customer,
+            subscription=sub,
+            created=created + 10,
+        ),
+    ).json()
+    assert down["active_tier"] == "MOBILE"
+    assert down["lease_version"] == up["lease_version"] + 1
+
+
+@pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
+def test_workshop_trial_is_not_offered_to_a_mobile_workspace(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, mobile_on
+):
+    session = _dev_session(client)
+    _post_event(client, _checkout_event(tenant_id=session["tenant_id"], price_ids=[MOBILE_PRICE]))
+    monkeypatch.setattr(
+        "stripe.checkout.Session.create",
+        lambda **kw: SimpleNamespace(id="cs_x", url="https://checkout.stripe.test/cs_x"),
+    )
+    res = client.post(
+        "/api/v1/billing/checkout-session",
+        json={"tier": "WORKSHOP", "interval": "month", "start_trial": True},
+        headers=_auth(session["access_token"]),
+    )
+    assert res.status_code == 400, res.text
+    assert "Community" in res.json()["detail"]
+
+
+@pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
+def test_mobile_checkout_refused_clearly_without_its_price(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, mobile_on
+):
+    owner = _dev_session(client)
+    monkeypatch.setenv("STRIPE_PRICE_MOBILE_MONTH", "")
+    get_settings.cache_clear()
+    try:
+        res = client.post(
+            "/api/v1/billing/checkout-session",
+            json={"tier": "MOBILE", "interval": "month"},
+            headers=_auth(owner["access_token"]),
+        )
+        assert res.status_code == 503, res.text
+        assert "MOBILE" in res.json()["detail"]
+    finally:
+        monkeypatch.setenv("STRIPE_PRICE_MOBILE_MONTH", MOBILE_PRICE)
+        get_settings.cache_clear()
+
+
+@pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
+def test_mobile_checkout_refused_while_the_plan_is_off(client: TestClient):
+    owner = _dev_session(client)
+    res = client.post(
+        "/api/v1/billing/checkout-session",
+        json={"tier": "MOBILE", "interval": "month"},
+        headers=_auth(owner["access_token"]),
+    )
+    assert res.status_code == 400, res.text
+    assert "isn't offered" in res.json()["detail"]

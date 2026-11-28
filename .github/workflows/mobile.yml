@@ -1,0 +1,60 @@
+# Android app (apps/mobile): tests, a JavaScript bundle, and a debug APK you can
+# install on a phone. Real Bluetooth and dongles are tested by hand on a device.
+name: mobile
+
+on:
+  push:
+    paths:
+      - "apps/mobile/**"
+      - "apps/web/src/app/globals.css"
+      - "apps/web/src/lib/native.ts"
+      - "packages/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/mobile.yml"
+  pull_request:
+    paths:
+      - "apps/mobile/**"
+      - "apps/web/src/app/globals.css"
+      - "apps/web/src/lib/native.ts"
+      - "packages/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/mobile.yml"
+
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Web dependencies unchanged
+        run: node scripts/check-web-deps.mjs
+      - name: Apps stay separate (no web <-> mobile imports)
+        run: |
+          ! grep -rnE "from ['\"](\.\./)+(web|apps/web)/|@/lib/" apps/mobile/app apps/mobile/src apps/mobile/modules
+          ! grep -rnE "from ['\"](\.\./)+(mobile|apps/mobile)/" apps/web/src
+      - name: Shared package tests
+        run: cd packages/core && pnpm typecheck && pnpm test
+      - name: App typecheck and tests
+        run: cd apps/mobile && pnpm typecheck && pnpm test
+      - name: Bundle JavaScript
+        run: cd apps/mobile && CI=1 npx expo export --platform android --output-dir dist
+      - name: Generate the Android project
+        run: cd apps/mobile && CI=1 npx expo prebuild --platform android --no-install --clean
+      - name: Build debug APK
+        run: cd apps/mobile/android && ./gradlew assembleDebug --no-daemon
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: rootcause-mobile-debug-apk
+          path: apps/mobile/android/app/build/outputs/apk/debug/*.apk
+          retention-days: 14

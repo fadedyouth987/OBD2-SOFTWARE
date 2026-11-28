@@ -1,4 +1,4 @@
-import { launch, shot, signup, connectAdapter, nav, confirmGated, apiCall, BASE } from './lib.mjs';
+import { launch, shot, signup, connectAdapter, nav, confirmGated, apiCall, BASE, fail } from './lib.mjs';
 const { browser, page, errors } = await launch();
 const log = (...a) => console.log('•', ...a);
 try {
@@ -52,7 +52,7 @@ try {
   await page.waitForTimeout(2000);
   await shot(page, '28-workshop');
 } catch (e) {
-  console.log('FAIL', e.message.split('\n')[0]);
+  fail(e.message.split('\n')[0]);
   await shot(page, 'zz-fail-workshop');
 } finally {
   console.log('console errors:', errors.length ? errors.slice(0, 15) : 'none');

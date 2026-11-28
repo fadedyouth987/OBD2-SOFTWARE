@@ -183,17 +183,137 @@ def test_new_user_signs_up_through_cognito(client, idp):
     assert second.json()["created"] is False
 
 
-def test_links_existing_password_account_only_when_email_verified(client, idp):
+RUN = uuid.uuid4().hex[:8]
+SUB = {
+    n: f"{n}-{RUN}"
+    for n in ("s-1", "holder-sub", "mailbox-sub", "late-sub", "first-sub", "second-sub")
+}
+
+
+class Recorder:
+    name = "recorder"
+
+    def __init__(self) -> None:
+        self.sent: list = []
+
+    def send(self, message, *, sender, reply_to):
+        self.sent.append(message)
+        return "id"
+
+
+@pytest.fixture
+def outbox():
+    from app.services import email as email_service
+
+    rec = Recorder()
+    email_service.set_provider_for_tests(rec)
+    yield rec
+    email_service.set_provider_for_tests(None)
+
+
+def _linked_subject(user_id: str):
+    with owner_engine().connect() as c:
+        return c.execute(
+            text("SELECT oidc_subject FROM users WHERE id = :id"), {"id": user_id}
+        ).scalar_one()
+
+
+def _token_from(message) -> str:
+    return parse_qs(urlparse(message.text.split("account: ")[1].split()[0]).query)["token"][0]
+
+
+def test_existing_account_is_never_linked_on_the_providers_word(client, idp, outbox):
+    """Review H3: a matching verified email alone links nothing; the holder confirms."""
     email = _email()
     made = client.post("/api/v1/auth/signup", json={"email": email, "password": PASSWORD})
     assert made.status_code == 201
-    unverified, _ = _sign_in(client, idp, email=email, email_verified=False)
-    assert unverified.status_code == 403
-    linked, _ = _sign_in(client, idp, email=email.upper(), email_verified="true")
-    assert linked.status_code == 200, linked.text
-    assert linked.json()["user_id"] == made.json()["user_id"]
-    other, _ = _sign_in(client, idp, email=email)  # different sub, same email
+    for verified in (True, False):
+        res, _ = _sign_in(client, idp, email=email.upper(), email_verified=verified, sub=SUB["s-1"])
+        assert res.status_code == 409, res.text
+        detail = res.json()["detail"]
+        assert detail["code"] == "link_required" and detail["provider"] == "AWS Cognito"
+        assert detail["email_sent"] is True and email[1:] not in detail["email_hint"]
+        assert "access_token" not in res.json()
+    assert _linked_subject(made.json()["user_id"]) is None
+    asks = [m for m in outbox.sent if m.tags.get("kind") == "oidc_link_confirm"]
+    assert len(asks) == 2 and all(m.to == email for m in asks)
+
+
+def test_signed_in_holder_confirms_and_is_notified(client, idp, outbox):
+    email = _email()
+    made = client.post("/api/v1/auth/signup", json={"email": email, "password": PASSWORD}).json()
+    res, _ = _sign_in(client, idp, email=email, sub=SUB["holder-sub"])
+    token = res.json()["detail"]["link_token"]
+    # Someone else signed in can't use it.
+    other = client.post(
+        "/api/v1/auth/signup", json={"email": _email(), "password": PASSWORD}
+    ).json()
+    wrong = client.post(
+        "/api/v1/auth/oidc/link/confirm",
+        json={"token": token},
+        headers={"Authorization": f"Bearer {other['access_token']}"},
+    )
+    assert wrong.status_code == 403
+    assert client.post("/api/v1/auth/oidc/link/confirm", json={"token": token}).status_code == 401
+    session = client.post("/api/v1/auth/login", json={"email": email, "password": PASSWORD}).json()
+    ok = client.post(
+        "/api/v1/auth/oidc/link/confirm",
+        json={"token": token},
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+    )
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["linked"] is True
+    assert _linked_subject(made["user_id"]) == SUB["holder-sub"]
+    done = [m for m in outbox.sent if m.tags.get("kind") == "oidc_linked"]
+    assert [m.to for m in done] == [email]
+    again, _ = _sign_in(client, idp, email=email, sub=SUB["holder-sub"])
+    assert again.status_code == 200 and again.json()["user_id"] == made["user_id"]
+    reuse = client.post(
+        "/api/v1/auth/oidc/link/confirm",
+        json={"token": token},
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+    )
+    assert reuse.status_code == 400
+
+
+def test_emailed_link_confirms_once(client, idp, outbox):
+    email = _email()
+    made = client.post("/api/v1/auth/signup", json={"email": email, "password": PASSWORD}).json()
+    _sign_in(client, idp, email=email, sub=SUB["mailbox-sub"])
+    ask = next(m for m in outbox.sent if m.tags.get("kind") == "oidc_link_confirm")
+    token = _token_from(ask)
+    ok = client.post("/api/v1/auth/oidc/link/email-confirm", json={"token": token})
+    assert ok.status_code == 200, ok.text
+    assert "access_token" not in ok.json()  # it links; it never signs anyone in
+    assert _linked_subject(made["user_id"]) == SUB["mailbox-sub"]
+    again = client.post("/api/v1/auth/oidc/link/email-confirm", json={"token": token})
+    assert again.status_code == 400
+
+
+def test_link_requests_expire(client, idp, outbox):
+    email = _email()
+    client.post("/api/v1/auth/signup", json={"email": email, "password": PASSWORD})
+    _sign_in(client, idp, email=email, sub=SUB["late-sub"])
+    token = _token_from(next(m for m in outbox.sent if m.tags.get("kind") == "oidc_link_confirm"))
+    with owner_engine().begin() as c:
+        c.execute(
+            text(
+                "UPDATE oidc_link_requests SET expires_at = now() - interval '1 minute' "
+                "WHERE oidc_subject = :s"
+            ),
+            {"s": SUB["late-sub"]},
+        )
+    res = client.post("/api/v1/auth/oidc/link/email-confirm", json={"token": token})
+    assert res.status_code == 400
+
+
+def test_email_already_linked_elsewhere_is_refused(client, idp, outbox):
+    email = _email()
+    first, _ = _sign_in(client, idp, email=email, sub=SUB["first-sub"])
+    assert first.status_code == 200
+    other, _ = _sign_in(client, idp, email=email, sub=SUB["second-sub"])
     assert other.status_code == 409
+    assert other.json()["detail"] == "This email is already linked to a different sign-in account."
 
 
 @pytest.mark.parametrize(
@@ -272,3 +392,42 @@ def test_not_configured(client, monkeypatch):
     get_settings.cache_clear()
     assert client.get("/api/v1/auth/oidc/start").status_code == 404
     assert client.get("/api/v1/auth/config").json()["oidc"]["enabled"] is False
+
+
+def _app_start(client, idp, verifier: str, **claims):
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=")
+    start = client.get("/api/v1/auth/oidc/start", params={"client_challenge": challenge.decode()})
+    assert start.status_code == 200, start.text
+    return idp.issue_code(start.json()["authorize_url"], **claims)
+
+
+def test_app_started_sign_in_needs_the_apps_verifier(client, idp):
+    """Android hand-off: a code and state copied off the rootcause:// link are useless."""
+    verifier = "v" * 64
+    code, state = _app_start(client, idp, verifier, email=_email())
+    assert state.startswith("m.")
+    stolen = client.post("/api/v1/auth/oidc/callback", json={"code": code, "state": state})
+    assert stolen.status_code == 401 and "app" in stolen.json()["detail"]
+
+    code, state = _app_start(client, idp, verifier, email=_email())
+    wrong = client.post(
+        "/api/v1/auth/oidc/callback",
+        json={"code": code, "state": state, "client_verifier": "w" * 64},
+    )
+    assert wrong.status_code == 401
+
+    email = _email()
+    code, state = _app_start(client, idp, verifier, email=email)
+    ok = client.post(
+        "/api/v1/auth/oidc/callback",
+        json={"code": code, "state": state, "client_verifier": verifier},
+    )
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["access_token"]
+
+
+def test_web_sign_in_is_unchanged_and_challenge_is_checked(client, idp):
+    res, state = _sign_in(client, idp, email=_email())
+    assert res.status_code == 200 and not state.startswith("m.")
+    bad = client.get("/api/v1/auth/oidc/start", params={"client_challenge": "x" * 42 + "!"})
+    assert bad.status_code == 422

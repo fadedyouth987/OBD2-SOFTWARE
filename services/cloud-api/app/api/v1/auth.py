@@ -288,21 +288,29 @@ def auth_config() -> dict:
 def oidc_start(
     return_to: Annotated[str | None, Query(max_length=500)] = None,
     invite_token: Annotated[str | None, Query(min_length=20, max_length=200)] = None,
+    client_challenge: Annotated[str | None, Query(min_length=43, max_length=43)] = None,
 ) -> dict:
-    """The provider URL to send the browser to (state, nonce and PKCE are set up here)."""
-    return oidc.start(return_to=return_to, invite_token=invite_token)
+    """The provider URL to send the browser to (state, nonce and PKCE are set up here).
+    The Android app adds ``client_challenge`` for its hand-off (see migration 015)."""
+    return oidc.start(
+        return_to=return_to, invite_token=invite_token, client_challenge=client_challenge
+    )
 
 
 class OidcCallbackRequest(BaseModel):
     code: str = Field(min_length=1, max_length=4096)
     state: str = Field(min_length=20, max_length=200)
+    # The Android app's verifier for a sign-in it started (client_challenge).
+    client_verifier: str | None = Field(default=None, min_length=43, max_length=128)
 
 
 @router.post("/oidc/callback")
 def oidc_callback(req: OidcCallbackRequest) -> dict:
     """Finish provider sign-in: checks the ID token, then signs in like /login."""
     try:
-        done = oidc.finish(code=req.code, state=req.state)
+        done = oidc.finish(code=req.code, state=req.state, client_verifier=req.client_verifier)
+    except oidc.LinkRequired as pending:
+        raise HTTPException(status_code=409, detail=pending.detail()) from None
     except IntegrityError as exc:
         raise HTTPException(
             status_code=409, detail="An account with this email already exists. Sign in instead."
@@ -321,6 +329,25 @@ def oidc_callback(req: OidcCallbackRequest) -> dict:
         "return_to": done.return_to,
         "created": done.created,
     }
+
+
+class LinkConfirmRequest(BaseModel):
+    token: str = Field(min_length=20, max_length=200)
+
+
+@router.post("/oidc/link/confirm")
+def oidc_link_confirm(req: LinkConfirmRequest, principal: RequirePrincipal) -> dict:
+    """Signed-in confirmation: the account holder links the pending provider sign-in."""
+    done = oidc.confirm_link(token=req.token, via="session", user_id=principal.user_id)
+    # An invite that started this sign-in stays open: accept it now from its link.
+    return {"linked": True, "provider": done.provider, "invite_pending": bool(done.invite_token)}
+
+
+@router.post("/oidc/link/email-confirm")
+def oidc_link_email_confirm(req: LinkConfirmRequest) -> dict:
+    """Mailbox confirmation from the emailed link. Links only; it doesn't sign anyone in."""
+    done = oidc.confirm_link(token=req.token, via="email")
+    return {"linked": True, "provider": done.provider}
 
 
 @router.post("/signup", status_code=201)

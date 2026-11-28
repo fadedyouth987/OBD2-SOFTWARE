@@ -1,0 +1,7 @@
+{
+  "name": "bt-classic",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Classic Bluetooth (SPP) serial link for ELM327 dongles. Android only.",
+  "main": "index.ts"
+}

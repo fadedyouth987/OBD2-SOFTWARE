@@ -8,7 +8,7 @@ import {
   type EdgeSnapshot,
   type TransportFactory,
 } from "@/lib/edge-client";
-import { parseObdDtcs } from "@/lib/diag";
+import { parseObdDtcs } from "@obd2/core/diag";
 
 function waitFor(client: EdgeClient, pred: (s: EdgeSnapshot) => boolean, ms = 2000): Promise<EdgeSnapshot> {
   return new Promise((resolve, reject) => {

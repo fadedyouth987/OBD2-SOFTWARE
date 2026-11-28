@@ -1,0 +1,21 @@
+{
+  "name": "@obd2/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Plain TypeScript helpers shared by the web and mobile apps: DTC and VIN parsing, OBD-II PID decoding. No React, no I/O.",
+  "type": "module",
+  "exports": {
+    "./diag": "./src/diag.ts",
+    "./dtc-library": "./src/dtc-library.ts",
+    "./vin": "./src/vin.ts",
+    "./obd-pids": "./src/obd-pids.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "vitest": "^5.1.1"
+  }
+}

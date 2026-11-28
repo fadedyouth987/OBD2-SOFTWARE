@@ -61,6 +61,8 @@ test:
     cargo test --workspace --locked
     cd services/cloud-api && uv run pytest -q
     cd services/ai-worker && uv run pytest -q
+    cd packages/core && pnpm typecheck && pnpm test
+    cd apps/mobile && pnpm typecheck && pnpm test
     cd apps/web && pnpm typecheck
     cd apps/web && pnpm test
 
@@ -72,6 +74,7 @@ e2e:
 
 # Lint and format checks across all languages, plus generated-code drift
 lint: codegen-check
+    node scripts/check-web-deps.mjs
     cargo fmt --all --check
     cargo clippy --workspace --all-targets --locked -- -D warnings
     cd services/cloud-api && uv run ruff check . && uv run ruff format --check .

@@ -44,6 +44,7 @@ class MembershipRole(enum.StrEnum):
 
 class SubscriptionTier(enum.StrEnum):
     COMMUNITY = "COMMUNITY"
+    MOBILE = "MOBILE"
     PRO = "PRO"
     WORKSHOP = "WORKSHOP"
     FLEET = "FLEET"

@@ -115,7 +115,7 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
 
 // --- Response shapes --------------------------------------------------------
 
-export type PlanTier = "COMMUNITY" | "PRO" | "WORKSHOP" | "FLEET";
+export type PlanTier = "COMMUNITY" | "MOBILE" | "PRO" | "WORKSHOP" | "FLEET";
 export type LeaseFeature = "J2534" | "UDS_ACTIVE" | "CAN_RE_PRO" | "IMMO_PROGRAM";
 
 export interface Workspace {

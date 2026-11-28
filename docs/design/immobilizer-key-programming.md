@@ -90,7 +90,7 @@ OEM-issued, short-lived response bound to an `immo_lease`.
 | --- | --- |
 | Plan scope | Immobilizer key programming is out of scope except AASRA-gated broker endpoints. ECU flashing is also out of scope. Mobile-native apps and DoIP/CAN FD were held out of the original plan. |
 | AASRA verifier | `FailClosedAasraVerifier` trusts only `tenants.aasra_verified`, set by an operator or by the local-only `POST /api/v1/auth/dev-mark-aasra` hook. No AASRA member lookup, no per-technician VSP check. |
-| Gateways | `POST /api/v1/gateways/aasra/verify` reports eligibility from that tenant flag. `POST /api/v1/gateways/sgw/unlock` issues a 900 s diagnostic edge lease after the same check. Neither binds VIN, technician, or device, and neither issues an immobilizer lease. |
+| Gateways | `POST /api/v1/gateways/aasra/verify` reports eligibility from that tenant flag. `POST /api/v1/gateways/sgw/unlock` makes the same check and then answers `not_available` (no OEM gateway service is integrated; it used to hand out a 900 s diagnostic edge lease). Neither binds VIN, technician, or device, and neither issues an immobilizer lease. |
 | Leases | Ed25519 JWT, `aud=edge-daemon`, up to 72 h. Claims: `tenant_id`, `tier`, `features`, `aasra_verified`. Features are only `J2534`, `UDS_ACTIVE`, `CAN_RE_PRO`. |
 | Safety | `SafetyInterlock` gates `0x27`. One NRC `0x35` (invalid key) halts SecurityAccess to that ECU for the session. NRC `0x36`/`0x37` halt for 10 s (`DEFAULT_SECURITY_DELAY`) when the ECU does not report a delay. Tier B (programming session, download/upload) already requires speed 0, RPM 0, and battery ≥ 12.5 V. |
 | Simulator | Virtual ECUs implement a fake seed/key and lockout, for tests only. |
@@ -387,10 +387,10 @@ PRO, or WORKSHOP automatically. Grant it only when an immobilizer
 session is created, for a Workshop (or later paid add-on) tenant, and
 the technician is VSP-verified.
 
-The current `POST /api/v1/gateways/sgw/unlock` 900-second diagnostic
-lease should be replaced or narrowed in the same work: SGW unlock
-becomes a VIN- and device-bound session token, not a generic capability
-upgrade.
+`POST /api/v1/gateways/sgw/unlock` no longer issues its old 900-second
+diagnostic lease; it answers `not_available` (review, 28 Nov 2026). When
+an OEM gateway is integrated, SGW unlock becomes a VIN- and device-bound
+session token, not a generic capability upgrade.
 
 The daemon refuses `IMMO_PROGRAM` commands when:
 

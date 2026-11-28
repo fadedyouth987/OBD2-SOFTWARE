@@ -47,7 +47,7 @@ use tokio_tungstenite::{
     },
 };
 
-use super::pairing::{looks_like_code, PairingStore};
+use super::pairing::{looks_like_code, Consumed, PairingStore};
 use crate::{
     analytics::{
         did_maps::{self, ModuleAddr},
@@ -502,21 +502,22 @@ fn authenticate(
     let now = unix_now();
     let token = hello.client_token.as_str();
     let user = if looks_like_code(token) {
-        if let Some(secs) = cfg.pairing.locked_for(now) {
-            return Err(err(
-                rid,
-                ErrorCode::Unauthenticated,
-                &format!(
-                    "too many wrong pairing codes; every code was cancelled. Run `edge-daemon pair` again in {secs} s"
-                ),
-            ));
-        }
-        if !cfg.pairing.consume(token, now) {
-            return Err(err(
-                rid,
-                ErrorCode::Unauthenticated,
-                "pairing code is wrong, expired or already used",
-            ));
+        match cfg.pairing.try_consume(token, now) {
+            Consumed::Paired => {}
+            Consumed::Refused => {
+                return Err(err(
+                    rid,
+                    ErrorCode::Unauthenticated,
+                    "pairing code is wrong, expired or already used",
+                ))
+            }
+            Consumed::CancelledAll => {
+                return Err(err(
+                    rid,
+                    ErrorCode::Unauthenticated,
+                    "too many wrong pairing codes; every code was cancelled. Run `edge-daemon pair` for a new one",
+                ))
+            }
         }
         None
     } else if origin.is_none() {

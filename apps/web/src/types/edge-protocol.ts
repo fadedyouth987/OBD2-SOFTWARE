@@ -300,7 +300,7 @@ export const HelloRequest = z
   .describe("First message on every connection (Rule 4). Request -> HelloResponse.");
 export type HelloRequest = z.infer<typeof HelloRequest>;
 
-export const LeaseTier = z.enum(["COMMUNITY", "PRO", "WORKSHOP", "FLEET"]);
+export const LeaseTier = z.enum(["COMMUNITY", "MOBILE", "PRO", "WORKSHOP", "FLEET"]);
 export type LeaseTier = z.infer<typeof LeaseTier>;
 
 export const HelloResponse = z

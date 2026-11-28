@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { identText, readIdent } from "@/lib/ident";
 import { EdgeRequestError } from "@/lib/edge-client";
 import type { DiagFn } from "@/lib/scan";
-import { redactVin } from "@/lib/vin";
+import { redactVin } from "@obd2/core/vin";
 
 const ascii = (s: string) => Array.from(s, (c) => c.charCodeAt(0).toString(16).padStart(2, "0")).join("");
 const reply = (positive: boolean, hex: string) => ({ type: "DiagCommandResponse" as const, request_id: "r", positive, response_hex: hex, nrc: positive ? null : { code: 0x31, name: "requestOutOfRange" } });

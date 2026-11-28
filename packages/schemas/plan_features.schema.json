@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plan_features.schema.json",
+  "title": "RootCause plans and the features each one includes",
+  "type": "object",
+  "required": ["plans_version", "currency", "tiers", "app_features"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "plans_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "currency": { "const": "AUD" },
+    "tiers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["tier", "display_name", "rank", "paid", "immo_eligible", "monthly_price_aud", "annual_price_aud", "ai_diagnoses", "schematic_pages", "seats", "sites", "lease_features", "description"],
+        "properties": {
+          "tier": { "enum": ["COMMUNITY", "MOBILE", "PRO", "WORKSHOP", "FLEET"] },
+          "display_name": { "type": "string", "minLength": 1 },
+          "rank": { "type": "integer", "minimum": 0 },
+          "paid": { "type": "boolean" },
+          "immo_eligible": { "type": "boolean" },
+          "monthly_price_aud": { "type": "integer", "minimum": 0 },
+          "annual_price_aud": { "type": "integer", "minimum": 0 },
+          "ai_diagnoses": { "type": "integer", "minimum": 0 },
+          "schematic_pages": { "type": "integer", "minimum": 0 },
+          "seats": { "type": "integer", "minimum": 1 },
+          "sites": { "type": "integer", "minimum": 1 },
+          "lease_features": { "type": "array", "items": { "enum": ["UDS_ACTIVE", "CAN_RE_PRO", "J2534"] }, "uniqueItems": true },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "app_features": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "label", "what", "tiers", "desktop_only"],
+        "properties": {
+          "key": { "type": "string", "pattern": "^[A-Z0-9_]+$" },
+          "label": { "type": "string" },
+          "what": { "type": "string" },
+          "tiers": { "type": "array", "items": { "enum": ["COMMUNITY", "MOBILE", "PRO", "WORKSHOP", "FLEET"] }, "uniqueItems": true },
+          "quota": { "enum": ["ai_diagnoses", "schematic_pages"] },
+          "desktop_only": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}
