@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api, ApiError, type AuthConfig } from "@/lib/api";
+import { postToNative } from "@/lib/native";
 
 export const SSO_FLAG = "rootcause.sso";
 
@@ -40,6 +41,9 @@ export function safeReturnTo(value: string | null | undefined): string {
 
 /** Sends the browser to the provider. Resolves only if it couldn't (throws ApiError). */
 export async function startSso(opts: { returnTo?: string; inviteToken?: string } = {}): Promise<void> {
+  // In the Android app the provider opens in the phone's browser (Google refuses
+  // embedded web views); the app runs the sign-in and hands the session back.
+  if (postToNative({ type: "sso-start", returnTo: opts.returnTo, inviteToken: opts.inviteToken })) return;
   const params = new URLSearchParams();
   if (opts.returnTo) params.set("return_to", opts.returnTo);
   if (opts.inviteToken) params.set("invite_token", opts.inviteToken);

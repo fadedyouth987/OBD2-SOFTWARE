@@ -2,6 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   devIndicators: false,
+  // Shared TypeScript helpers (packages/core) ship as source.
+  transpilePackages: ["@obd2/core"],
   // Old demo URLs from before the app shell.
   async redirects() {
     return [

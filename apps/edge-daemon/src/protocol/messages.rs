@@ -2578,6 +2578,8 @@ impl ::std::convert::TryFrom<::std::string::String> for LeaseStatusType {
 pub enum LeaseTier {
     #[serde(rename = "COMMUNITY")]
     Community,
+    #[serde(rename = "MOBILE")]
+    Mobile,
     #[serde(rename = "PRO")]
     Pro,
     #[serde(rename = "WORKSHOP")]
@@ -2589,6 +2591,7 @@ impl ::std::fmt::Display for LeaseTier {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         match *self {
             Self::Community => f.write_str("COMMUNITY"),
+            Self::Mobile => f.write_str("MOBILE"),
             Self::Pro => f.write_str("PRO"),
             Self::Workshop => f.write_str("WORKSHOP"),
             Self::Fleet => f.write_str("FLEET"),
@@ -2602,6 +2605,7 @@ impl ::std::str::FromStr for LeaseTier {
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
         match value {
             "COMMUNITY" => Ok(Self::Community),
+            "MOBILE" => Ok(Self::Mobile),
             "PRO" => Ok(Self::Pro),
             "WORKSHOP" => Ok(Self::Workshop),
             "FLEET" => Ok(Self::Fleet),

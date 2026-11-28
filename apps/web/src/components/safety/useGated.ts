@@ -7,7 +7,7 @@ import { useEdge, type DiagRequest } from "@/context/edge";
 import { EdgeRequestError } from "@/lib/edge-client";
 import { gatedRule } from "@/lib/edge-protocol";
 import { ensureSyncSession, syncBatch, type AuditRow } from "@/lib/job-sync";
-import { bytesOf, hexId, nrcText } from "@/lib/diag";
+import { bytesOf, hexId, nrcText } from "@obd2/core/diag";
 import type { Job } from "@/lib/api";
 import type { DiagCommandResponse, SafetyConfirmResponse } from "@/types/edge-protocol";
 import type { LiveReadings } from "@/components/safety/SafetyConfirmModal";

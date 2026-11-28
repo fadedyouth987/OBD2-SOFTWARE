@@ -263,3 +263,47 @@ Every route was loaded against the real local stack (Postgres, API, daemon, web 
 - Unknown addresses showed Next.js's bare 404; they now get the app's own page with a way home (`e2e/states.spec.ts`).
 
 Checked and not a bug: the virtual Falcon's audit reports VIN and odometer consistent because the simulated car is untampered by default (the Task 1.3 test injects the rollback). Noted: the simulator's Falcon VIN decodes to model year 1998 and has an invalid check digit, which a 2002-2005 BA wouldn't.
+
+## Mobile app, Phase 6 (2026-11-27)
+
+New scope, planned and reviewed in `docs/design/mobile-app.md` (owner decisions D1-D8). The plan proposes Phase 6 after Task 5.2; the owner asked to build it now.
+
+Done:
+- **Mobile plan** (A$15/month, A$150/year, 40 AI diagnoses, no desktop lease features). Every plan's prices, quotas and features, plus the app feature matrix, live in one file, `packages/schemas/plan_features.json`. `billing.py`, `signing.py`, the web billing page and the app all read it. A golden test keeps the four existing plans unchanged. Migration 013 adds `MOBILE` to the enum, with 90-day telemetry retention. The Workshop trial stays Community-only.
+- **`packages/core`**: DTC, VIN and diag helpers moved out of the web app, whose imports switched in the same change. Also adds OBD-II mode 01 decoding.
+- **`apps/mobile`** (Expo SDK 58, Android):
+  - read-only scan (codes per module, readiness, VIN, freeze frame), live data, AI diagnosis with quota, customer report PDF;
+  - recording and CSV export for Mobile and up;
+  - a "Your plan" screen that marks every feature as included, locked or desktop-only;
+  - Bluetooth LE and classic (a Kotlin module in the app);
+  - a demo car;
+  - an allow-list send guard (modes 01, 02, 03, 07, 09, 0A only; `safety_policy.json` as the second layer).
+  - A failed read shows "Scan incomplete", never "no codes".
+- **CI**: `mobile.yml` builds a debug APK artifact. `scripts/check-web-deps.mjs` fails lint if a web dependency version moves.
+- **Web fix**: Disconnect now sticks across a reload. A reload or an in-flight connect used to bring the adapter back; this was the cause of the failing `session-flow` e2e.
+
+Not done yet:
+- App refresh tokens and the OIDC app redirect (T3); phone sessions still last 12 h.
+- Screen-off recording via an Android foreground service (D7). Recording works while the app is open, with the screen kept awake, capped at 4 h.
+- Play Store release (T7).
+- A real-dongle field test. The APK is only verified by CI and the simulated car.
+- Database-backed billing tests for Mobile were written but skip locally (no TimescaleDB here); CI runs them.
+
+## Windows installer verified in CI (2026-11-27)
+
+`package.yml` run 46063134287 (commit c98a7c5) passed on both platforms.
+
+On Windows, every step ran:
+- The MSI builds with WiX 4.0.5.
+- It installs, and the service runs as `NT SERVICE\RootCauseEdgeDaemon` with an unrestricted SID and restart-on-failure. These were checked with `sc.exe`.
+- The data folder is closed to users, and only the technicians group can write to `pairing\`.
+- A standard user in that group can pair.
+- The smoke test passes: the daemon listens on loopback only and refuses unpaired connections.
+- The service stops and starts on request, and uninstall stops the daemon.
+
+Three fixes got it there:
+- the WiX 4 attribute names (`FailureActionsWhen`, `restartService`);
+- service SID type and failure actions set by `sc.exe` custom actions instead of the MsiServiceConfig tables, which made a fresh install fail with 1603;
+- a CI log that prints the failing action instead of the log's tail.
+
+The signing jobs are skipped on pull requests, as designed: they run only for `v*` tags, once certificates exist.

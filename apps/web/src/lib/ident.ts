@@ -1,9 +1,9 @@
 // Module identification: UDS 0x22 identification DIDs (ISO 14229 F18x/F19x)
 // or KWP2000 0x1A ReadECUIdentification. Read-only, never gated.
 
-import { bytesOf } from "@/lib/diag";
+import { bytesOf } from "@obd2/core/diag";
 import { EdgeRequestError } from "@/lib/edge-client";
-import { redactVin } from "@/lib/vin";
+import { redactVin } from "@obd2/core/vin";
 import type { DiagFn, ScanTarget } from "@/lib/scan";
 
 export interface IdentField {

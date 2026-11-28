@@ -288,21 +288,27 @@ def auth_config() -> dict:
 def oidc_start(
     return_to: Annotated[str | None, Query(max_length=500)] = None,
     invite_token: Annotated[str | None, Query(min_length=20, max_length=200)] = None,
+    client_challenge: Annotated[str | None, Query(min_length=43, max_length=43)] = None,
 ) -> dict:
-    """The provider URL to send the browser to (state, nonce and PKCE are set up here)."""
-    return oidc.start(return_to=return_to, invite_token=invite_token)
+    """The provider URL to send the browser to (state, nonce and PKCE are set up here).
+    The Android app adds ``client_challenge`` for its hand-off (see migration 015)."""
+    return oidc.start(
+        return_to=return_to, invite_token=invite_token, client_challenge=client_challenge
+    )
 
 
 class OidcCallbackRequest(BaseModel):
     code: str = Field(min_length=1, max_length=4096)
     state: str = Field(min_length=20, max_length=200)
+    # The Android app's verifier for a sign-in it started (client_challenge).
+    client_verifier: str | None = Field(default=None, min_length=43, max_length=128)
 
 
 @router.post("/oidc/callback")
 def oidc_callback(req: OidcCallbackRequest) -> dict:
     """Finish provider sign-in: checks the ID token, then signs in like /login."""
     try:
-        done = oidc.finish(code=req.code, state=req.state)
+        done = oidc.finish(code=req.code, state=req.state, client_verifier=req.client_verifier)
     except oidc.LinkRequired as pending:
         raise HTTPException(status_code=409, detail=pending.detail()) from None
     except IntegrityError as exc:

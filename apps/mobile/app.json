@@ -1,0 +1,49 @@
+{
+  "expo": {
+    "name": "RootCause",
+    "slug": "rootcause-mobile",
+    "scheme": "rootcause",
+    "version": "0.2.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0c0f14",
+    "platforms": [
+      "android"
+    ],
+    "android": {
+      "package": "au.com.rootcauseobd.mobile",
+      "versionCode": 2,
+      "permissions": [
+        "android.permission.INTERNET"
+      ],
+      "blockedPermissions": [
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-web-browser",
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": false,
+          "neverForLocation": true
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 26
+          }
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": false
+    }
+  }
+}

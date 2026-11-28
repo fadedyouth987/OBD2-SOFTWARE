@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db.models import StripeEvent, SubscriptionTier, Tenant
 from app.db.session import owner_engine, tenant_session
+from app.services.plans import PlanFileError, load_plans
 
 log = logging.getLogger(__name__)
 
@@ -22,16 +23,6 @@ QUOTA_TZ = ZoneInfo("Australia/Adelaide")
 CURRENCY = "AUD"
 OVERAGE_AUD = 0.25
 TRIAL_DAYS = 14
-PAID_TIERS = frozenset({SubscriptionTier.PRO, SubscriptionTier.WORKSHOP, SubscriptionTier.FLEET})
-IMMO_ELIGIBLE = frozenset({SubscriptionTier.WORKSHOP, SubscriptionTier.FLEET})
-
-# Rank used to detect downgrades (and to bump lease_version).
-_TIER_RANK = {
-    SubscriptionTier.COMMUNITY: 0,
-    SubscriptionTier.PRO: 1,
-    SubscriptionTier.WORKSHOP: 2,
-    SubscriptionTier.FLEET: 3,
-}
 
 
 @dataclass(frozen=True)
@@ -47,59 +38,34 @@ class TierQuota:
     description: str
 
 
+# Built from packages/schemas/plan_features.json (the one plan table; see app/services/plans.py).
+_PLANS = load_plans()
+if {t.tier for t in _PLANS.tiers} != {t.value for t in SubscriptionTier}:
+    raise PlanFileError("plan_features.json tiers must match the subscription_tier enum")
+
 TIER_QUOTAS: dict[SubscriptionTier, TierQuota] = {
-    SubscriptionTier.COMMUNITY: TierQuota(
-        display_name="Community",
-        monthly_price_aud=0,
-        annual_price_aud=0,
-        ai_diagnoses=5,
-        schematic_pages=0,
-        seats=1,
-        sites=1,
-        features=(),
-        description="Read-only OBD-II diagnostics. One seat, no schematics, no paid edge features.",
-    ),
-    SubscriptionTier.PRO: TierQuota(
-        display_name="Pro",
-        monthly_price_aud=39,
-        annual_price_aud=390,
-        ai_diagnoses=100,
-        schematic_pages=25,
-        seats=1,
-        sites=1,
-        features=("UDS_ACTIVE",),
-        description=(
-            "Active UDS for a single technician. 100 AI diagnoses and 25 schematic pages a month."
-        ),
-    ),
-    SubscriptionTier.WORKSHOP: TierQuota(
-        display_name="Workshop",
-        monthly_price_aud=99,
-        annual_price_aud=990,
-        ai_diagnoses=400,
-        schematic_pages=100,
-        seats=5,
-        sites=1,
-        features=("UDS_ACTIVE", "CAN_RE_PRO", "J2534"),
-        description="Shop plan: CAN reverse-engineering, J2534, five seats, 400 AI diagnoses.",
-    ),
-    SubscriptionTier.FLEET: TierQuota(
-        display_name="Fleet",
-        monthly_price_aud=229,
-        annual_price_aud=2290,
-        ai_diagnoses=1000,
-        schematic_pages=100,
-        seats=10,
-        sites=3,
-        features=("UDS_ACTIVE", "CAN_RE_PRO", "J2534"),
-        description="Multi-site plan: ten seats across three sites, 1,000 AI diagnoses a month.",
-    ),
+    SubscriptionTier(t.tier): TierQuota(
+        display_name=t.display_name,
+        monthly_price_aud=t.monthly_price_aud,
+        annual_price_aud=t.annual_price_aud,
+        ai_diagnoses=t.ai_diagnoses,
+        schematic_pages=t.schematic_pages,
+        seats=t.seats,
+        sites=t.sites,
+        features=t.lease_features,
+        description=t.description,
+    )
+    for t in _PLANS.tiers
 }
+PAID_TIERS = frozenset(SubscriptionTier(t.tier) for t in _PLANS.tiers if t.paid)
+IMMO_ELIGIBLE = frozenset(SubscriptionTier(t.tier) for t in _PLANS.tiers if t.immo_eligible)
+# Rank used to detect downgrades (and to bump lease_version).
+_TIER_RANK = {SubscriptionTier(t.tier): t.rank for t in _PLANS.tiers}
 
 IMMO_ADDON = {
     "monthly_price_aud": 49,
     "annual_price_aud": 490,
-    "eligible_tiers": ("WORKSHOP", "FLEET"),
+    "eligible_tiers": tuple(t.tier for t in _PLANS.tiers if t.immo_eligible),
     "feature": "IMMO_PROGRAM",
     "description": (
         "Immobilizer / key-learn add-on. Still gated by AASRA, "
@@ -126,10 +92,20 @@ def period_start_adelaide(day: date | None = None) -> date:
     return d.replace(day=1)
 
 
+def offered_tiers() -> frozenset[SubscriptionTier]:
+    """Tiers a workspace can see and buy. MOBILE only once PLAN_MOBILE_ENABLED is on."""
+    hidden = set() if get_settings().plan_mobile_enabled else {SubscriptionTier.MOBILE}
+    return frozenset(t for t in SubscriptionTier if t not in hidden)
+
+
 def catalog_public() -> dict[str, Any]:
     settings = get_settings()
+    offered = offered_tiers()
+    offered_names = {t.value for t in offered}
     tiers = []
     for tier, q in TIER_QUOTAS.items():
+        if tier not in offered:
+            continue
         tiers.append(
             {
                 "tier": tier.value,
@@ -156,7 +132,12 @@ def catalog_public() -> dict[str, Any]:
         "overage_aud": OVERAGE_AUD,
         "overage_enabled": settings.stripe_ai_overage_enabled,
         "immo_addon": IMMO_ADDON,
+        "plans_version": _PLANS.version,
         "tiers": tiers,
+        "app_features": [
+            {**f, "tiers": [t for t in f.get("tiers") or [] if t in offered_names]}
+            for f in _PLANS.app_features
+        ],
     }
 
 

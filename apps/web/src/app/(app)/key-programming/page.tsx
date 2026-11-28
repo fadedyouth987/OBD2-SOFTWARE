@@ -1,6 +1,6 @@
 "use client";
 
-import { redactVin } from "@/lib/vin";
+import { redactVin } from "@obd2/core/vin";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { SafetyConfirmModal } from "@/components/safety/SafetyConfirmModal";
@@ -10,7 +10,7 @@ import { Badge, Banner, Button, ButtonLink, Card, Field, Mono, PageHeader, Skele
 import { useAuth } from "@/context/auth";
 import { useEdge } from "@/context/edge";
 import { api, ApiError, type ImmoEligibility, type ImmoProfile, type ImmoProfiles, type ImmoSessionStart } from "@/lib/api";
-import { bytesOf, hexId, nrcText, parseVin } from "@/lib/diag";
+import { bytesOf, hexId, nrcText, parseVin } from "@obd2/core/diag";
 import { EdgeRequestError } from "@/lib/edge-client";
 import { formatTime } from "@/lib/format";
 import { IMMO_SESSION_KEY, OPERATION_LABEL, VIN_RE, adapterMatchesProfile, canonicalDeviceId } from "@/lib/immo";

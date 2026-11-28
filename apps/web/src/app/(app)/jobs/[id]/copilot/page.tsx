@@ -9,7 +9,7 @@ import { useJob } from "@/context/job";
 import { api, ApiError, type AnalysisInfo, type CopilotAnswer, type DiagnosisResult } from "@/lib/api";
 import { engineView, nextRunNote } from "@/lib/analysis";
 import { can } from "@/lib/permissions";
-import { describeDtc } from "@/lib/dtc-library";
+import { describeDtc } from "@obd2/core/dtc-library";
 import { formatDateTime, safetyTierLabel } from "@/lib/format";
 
 interface Turn {

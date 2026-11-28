@@ -6,6 +6,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { AuthCard } from "@/components/AuthCard";
 import { Banner, ButtonLink, Spinner } from "@/components/ui";
 import { useAuth } from "@/context/auth";
+import { appHandoffUrl } from "@/lib/native";
 import { pendingLinkFrom, providerError, safeReturnTo, savePendingLink } from "@/lib/sso";
 
 /** Where the sign-in provider (AWS Cognito) sends the browser back to: OIDC_REDIRECT_URI. */
@@ -14,6 +15,7 @@ function Callback() {
   const router = useRouter();
   const params = useSearchParams();
   const [error, setError] = useState<string | null>(null);
+  const [handedOff, setHandedOff] = useState(false);
   const started = useRef(false);
 
   useEffect(() => {
@@ -28,6 +30,13 @@ function Callback() {
     }
     if (!code || !state) {
       setError("This page needs the code and state the sign-in provider adds. Start sign-in again.");
+      return;
+    }
+    // Started in the Android app: hand it back; only the app can redeem it.
+    const handoff = appHandoffUrl(code, state);
+    if (handoff) {
+      window.location.replace(handoff);
+      setHandedOff(true);
       return;
     }
     // Drop the code from the address bar and history.
@@ -47,6 +56,13 @@ function Callback() {
       });
   }, [params, completeSso, router]);
 
+  if (handedOff) {
+    return (
+      <AuthCard title="Back to the RootCause app" subtitle="Your sign-in continues in the app.">
+        <p className="text-sm text-muted">If the app didn&apos;t open, switch to it now. You can close this tab.</p>
+      </AuthCard>
+    );
+  }
   if (error) {
     return (
       <AuthCard title="Sign-in didn't complete" subtitle="Nothing was changed.">

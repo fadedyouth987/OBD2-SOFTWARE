@@ -9,10 +9,10 @@ import { Badge, Banner, Button, Card, Field, Mono, PageHeader, Spinner, TextArea
 import { useAuth } from "@/context/auth";
 import { useEdge } from "@/context/edge";
 import { ApiError, api, type Job, type JobList, type VehiclePlatform } from "@/lib/api";
-import { parseVin } from "@/lib/diag";
+import { parseVin } from "@obd2/core/diag";
 import { EdgeRequestError } from "@/lib/edge-client";
 import { syntheticSessionId } from "@/lib/job-sync";
-import { redactVin } from "@/lib/vin";
+import { redactVin } from "@obd2/core/vin";
 
 const VIN_RE = /^[A-HJ-NPR-Z0-9]{17}$/;
 

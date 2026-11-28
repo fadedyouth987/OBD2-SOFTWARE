@@ -2,7 +2,7 @@
 // 0x19 / KWP2000 0x18 on every known module. Each module reports what really
 // happened: codes, "no codes", a refusal (NRC) or no response.
 
-import { parseObdDtcs, parseUdsDtcs, bytesOf, dtcText, nrcText, parseRegistryId, type ReadDtc } from "@/lib/diag";
+import { parseObdDtcs, parseUdsDtcs, bytesOf, dtcText, nrcText, parseRegistryId, type ReadDtc } from "@obd2/core/diag";
 import { EdgeRequestError } from "@/lib/edge-client";
 import type { DiagCommandResponse, DiagProtocol } from "@/types/edge-protocol";
 import type { VehicleModule } from "@/lib/api";

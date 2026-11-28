@@ -1,12 +1,23 @@
+import plansJson from "@obd2/schemas/plan_features.json";
 import type { Me, PlanTier, LeaseFeature } from "@/lib/api";
 import type { LeaseStatus } from "@/types/edge-protocol";
 
-export const TIER_LABEL: Record<PlanTier, string> = {
-  COMMUNITY: "Community",
-  PRO: "Pro",
-  WORKSHOP: "Workshop",
-  FLEET: "Fleet",
-};
+/** Plans cheapest first, from the one plan table (packages/schemas/plan_features.json). */
+export const PLAN_ORDER: PlanTier[] = [...plansJson.tiers]
+  .sort((a, b) => a.rank - b.rank)
+  .map((t) => t.tier as PlanTier);
+
+/** Phone-app features a plan adds on top of Community (not the desktop-only ones). */
+export function appExtras(tier: PlanTier): string[] {
+  return plansJson.app_features
+    .filter((f) => !f.desktop_only && f.tiers.includes(tier) && !f.tiers.includes("COMMUNITY"))
+    .map((f) => f.label);
+}
+
+export const TIER_LABEL = Object.fromEntries(plansJson.tiers.map((t) => [t.tier, t.display_name])) as Record<
+  PlanTier,
+  string
+>;
 
 export const FEATURE_INFO: Record<LeaseFeature, { label: string; plan: string; what: string }> = {
   UDS_ACTIVE: {

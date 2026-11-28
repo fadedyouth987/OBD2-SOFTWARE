@@ -1,0 +1,23 @@
+{
+  "@obd2/core": "link:../../packages/core",
+  "@obd2/schemas": "link:../../packages/schemas",
+  "next": "15.5.29",
+  "react": "19.1.0",
+  "react-dom": "19.1.0",
+  "zod": "4.6.7",
+  "@eslint/eslintrc": "3.3.7",
+  "@playwright/test": "1.63.0",
+  "@tailwindcss/postcss": "4.3.5",
+  "@testing-library/react": "16.3.0",
+  "@types/node": "22.20.5",
+  "@types/react": "19.3.0",
+  "@types/react-dom": "19.3.0",
+  "ajv": "8.20.0",
+  "axe-core": "4.10.2",
+  "eslint": "9.39.5",
+  "eslint-config-next": "15.5.29",
+  "jsdom": "26.1.0",
+  "tailwindcss": "4.3.5",
+  "typescript": "5.9.3",
+  "vitest": "5.1.1"
+}
