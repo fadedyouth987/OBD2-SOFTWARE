@@ -19,10 +19,14 @@ On top of that the app adds:
 
 **Changing a car** (clearing codes, service functions, key programming) works
 only through the edge daemon and its safety interlock: checklist, hold-to-confirm and
-audit log, exactly as on the web. The phone never sends these over Bluetooth. The
-daemon listens on its computer's loopback, so a phone reaches it only through
-`adb reverse tcp:8765 tcp:8765` (USB) or an emulator. Everywhere else the web shows
-"daemon offline" and those actions stay locked.
+audit log, exactly as on the web. The phone never sends these over Bluetooth.
+Instead it **pairs with the workshop PC**: on the PC, Devices → Phone access →
+*Pair a phone* shows a QR code; on the phone, Devices → *Pair with a PC* scans it.
+The app then reaches that PC's daemon over the workshop Wi-Fi with TLS, pinned to
+the certificate in the QR code (`modules/daemon-link`, `src/lan`). Phone access is
+off on a PC until an administrator runs `edge-daemon lan enable`. Until a PC is
+paired, the app says so and those actions stay locked. Design and threat model:
+`docs/design/lan-phone-access.md`.
 
 ## Addresses
 
@@ -33,7 +37,8 @@ daemon listens on its computer's loopback, so a phone reaches it only through
 
 A release build without https addresses shows "This build isn't set up" instead of
 loading. For a dev build, `adb reverse tcp:3000 tcp:3000`, `adb reverse tcp:8000
-tcp:8000` and (for the daemon) `adb reverse tcp:8765 tcp:8765`.
+tcp:8000` and (for the daemon) `adb reverse tcp:8765 tcp:8765`. A dev build with no
+PC paired uses that loopback daemon; once paired it uses the PC.
 
 ## What each plan unlocks
 
@@ -47,7 +52,7 @@ until it's approved.
 ```bash
 pnpm install
 cd apps/mobile
-pnpm test        # web view policy, bridge, SSO hand-off, tokens, OBD driver, send guard, plans
+pnpm test        # web view policy, bridge, SSO hand-off, tokens, OBD driver, send guard, plans, PC pairing
 pnpm typecheck
 npx expo run:android   # needs the Android SDK and a phone or emulator
 ```
@@ -63,3 +68,6 @@ npx expo run:android   # needs the Android SDK and a phone or emulator
 - `src/ui/tokens.ts`: the web's design tokens for the app's own screens
   (`tests/tokens.test.ts` keeps them equal to `globals.css`).
 - `app/dongle/*`, `src/obd/*`, `src/transports/*`: the read-only phone dongle.
+- `app/lan/pair.tsx`, `src/lan/*`, `modules/daemon-link`: pairing with the workshop
+  PC (camera or pasted link), the paired PC in secure storage, and the relay that
+  carries the web app's daemon connection over the pinned TLS link (Kotlin, OkHttp).

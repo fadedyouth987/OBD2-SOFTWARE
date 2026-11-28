@@ -18,6 +18,22 @@ Progress through [`PLAN.md`](PLAN.md), in Rule 1 order. A task is done when its 
 | 5.1–5.2 Native installers, CI, observability & runbooks | Done | PR #11–#12: Linux/Windows installers + service runner, Prometheus metrics, alerts, runbooks, A-ENG-10 HIL checklist. |
 | 6.2 Module discovery and catalogue | Built; real-car confirmation open | Web: 20 new tests, 166 total pass; tsc, eslint, build clean; a11y on job pages passes. Cloud API: 48 new tests (157 pass, Postgres tests skipped here). Daemon: 29-bit and channel-cap unit tests, plus a real-server sweep of the virtual Falcon finding exactly IC/ABS/PCM in 18.6 s; full suite, clippy and rustfmt clean. Open: confirm catalogue entries on real cars (A-ENG-10); reach Ford HS-CAN2 (pins 3/11) and Toyota sub-addressed ECUs (see docs/dev/module-discovery.md). The session-flow "reload keeps the vehicle connected" e2e test is flaky on main too (3 of 8 runs fail). |
 
+## Phone access to the edge daemon (2026-11-29, branch feat/lan-daemon-pairing)
+
+| Item | Status |
+| --- | --- |
+| Opt-in TLS listener (default port 8766), off by default | Done: `edge-daemon lan enable/disable/status`, `EDGE_LAN*` env overrides |
+| Self-signed per-daemon certificate pinned via QR pairing | Done: single-use 5-minute codes; `lan rotate-cert` |
+| Paired-device registry with revoke | Done: hashes only; revoke closes sockets at once; CLI edits picked up in 2 s |
+| Per-technician leases kept | Done: Hello still uses the technician's cloud token; phone bound to one workshop |
+| Rate limit, origin and host checks | Done: 30/min/IP, 5 failures then a 5 min block, 16 concurrent; Origin allow-list; Host must be an IP or `.local` |
+| Pairing UI | Done: PC Devices → Phone access (QR, list, remove); app Devices → Workshop PC; clear reasons when car changes are unavailable |
+| Android app | Done: QR scan or pasted link, Keystore-backed storage, Kotlin pinned-TLS module, relay; compiled in CI only |
+| Threat model | `docs/design/lan-phone-access.md` (also explains why PR #15's on-phone licence isn't rebuilt) |
+| Tests | Rust `tests/lan_gate.rs` + unit tests; web vitest; mobile jest; API origin validation; Playwright e2e against the real daemon over TLS |
+| Phone-width layout | Fixed: a too-wide card and top bar pushed the job's Scan/Clear and the hold-to-confirm off screen (`e2e/phone-layout.spec.ts`) |
+| Not verified here | A physical Android phone on Wi-Fi with the camera |
+
 ## Task 1.1 detail
 
 Gate (`cargo test --package edge-daemon hal::`, 38 tests):

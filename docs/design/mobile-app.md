@@ -101,6 +101,12 @@ Rows that already exist on the web keep the web's rule, so a plan never means tw
 
 ## 4. Release 2: gated actions on the phone
 
+**Update (2026-11-29):** the phone now changes a car through the workshop PC's
+own edge daemon over the local network (pinned TLS, QR pairing, the same
+interlock and audit log): `docs/design/lan-phone-access.md`. The on-device
+`edge-core` route below is only needed for working away from a PC with a USB
+VCI.
+
 - Split the daemon's safety core (`SafetyInterlock::check()`, policy loader, lease verification, audit log) into an `edge-core` library crate. The daemon keeps using it, with behaviour and tests unchanged.
 - Build `edge-core` for Android (`aarch64-linux-android`, `x86_64-linux-android`) and expose it to the app as a native module (UniFFI). The phone then runs the **same Rust interlock and the same `safety_policy.json`** as the desktop. No TypeScript copy of the safety logic.
 - Clear codes and service functions unlock per plan, from the existing lease features (`UDS_ACTIVE` for Pro and up), with an Ed25519 lease verified on the device. The speed, RPM and battery checks fail closed (Rule 5), and every attempt writes an audit row that syncs to `audit_log` (A-CEO-4).
