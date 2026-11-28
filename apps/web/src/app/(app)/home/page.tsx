@@ -66,7 +66,7 @@ export default function HomePage() {
           </ButtonLink>
         }
       />
-      <div className="grid gap-4 xl:grid-cols-[1.6fr_1fr]">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.6fr_1fr]">
         <div className="space-y-4">
           {!allDone ? (
             <Card title="Get set up" subtitle="Three steps to your first diagnosis.">

@@ -528,8 +528,9 @@ impl DeviceRegistry {
             .map(|m| m.get(id).is_none_or(|t| now >= t + 60))
             .unwrap_or(true);
         if due {
+            // Saved while still holding the lock, so it can never overwrite a
+            // newer file (for example one without a phone just revoked).
             let snapshot = devices.clone();
-            drop(devices);
             if self.save(&snapshot).is_ok() {
                 if let Ok(mut m) = self.last_saved_seen.lock() {
                     m.insert(id.to_owned(), now);
@@ -559,8 +560,13 @@ impl DeviceRegistry {
         let Some(path) = &self.path else {
             return Vec::new();
         };
-        let on_disk = read_devices(path);
+        // Read under the lock: every save happens under it too, so a phone
+        // paired (or a workshop recorded) a moment ago is never mistaken for
+        // one the command line removed.
         let mut devices = self.lock();
+        let Some(on_disk) = read_devices_checked(path) else {
+            return Vec::new(); // unreadable right now: keep what we have
+        };
         let removed: Vec<String> = devices
             .iter()
             .filter(|d| !on_disk.iter().any(|o| o.id == d.id))
@@ -599,6 +605,18 @@ impl DeviceRegistry {
             registry: Arc::clone(self),
             id: id.to_owned(),
         }
+    }
+}
+
+/// The file's phones; `None` if it exists but can't be read or parsed (a
+/// missing file is an empty list).
+fn read_devices_checked(path: &Path) -> Option<Vec<DeviceRecord>> {
+    match std::fs::read_to_string(path) {
+        Ok(t) => serde_json::from_str::<Vec<DeviceRecord>>(&t)
+            .ok()
+            .map(|v| v.into_iter().filter(|d| valid_device_id(&d.id)).collect()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(Vec::new()),
+        Err(_) => None,
     }
 }
 
@@ -1273,6 +1291,27 @@ mod tests {
         let mut rx = reg.subscribe();
         assert_eq!(reg.reload(), vec![id.clone()]);
         assert_eq!(rx.try_recv().unwrap(), id);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn reload_never_drops_phones_on_an_unreadable_file() {
+        let dir = std::env::temp_dir().join(format!("edge-lan-reg2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("devices.json");
+        let reg = DeviceRegistry::at(&path);
+        let (id, secret) = reg.add("Phone", None, None, 1).unwrap();
+        std::fs::write(&path, b"{ half written").unwrap();
+        let mut rx = reg.subscribe();
+        assert!(
+            reg.reload().is_empty(),
+            "a damaged file is not a revocation"
+        );
+        assert!(rx.try_recv().is_err());
+        assert!(reg.authenticate(&format!("{id}.{secret}")).is_some());
+        // Deleting the file on purpose does remove every phone.
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(reg.reload(), vec![id]);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

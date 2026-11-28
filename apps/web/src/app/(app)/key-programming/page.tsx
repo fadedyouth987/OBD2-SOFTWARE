@@ -306,7 +306,7 @@ export default function KeyProgrammingPage() {
       </ol>
       {error ? <Banner tone="danger">{error}</Banner> : null}
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-[1.6fr_1fr]">
+      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1.6fr_1fr]">
         <div className="space-y-4">
           {step === "vehicle" ? (
             <Card title="1. Vehicle" subtitle="Connect the adapter, read the VIN, and fit a battery maintainer.">

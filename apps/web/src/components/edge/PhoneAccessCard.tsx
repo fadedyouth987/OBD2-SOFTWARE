@@ -6,7 +6,7 @@ import { QrCode } from "@/components/edge/QrCode";
 import { useEdge } from "@/context/edge";
 import { EdgeRequestError } from "@/lib/edge-client";
 import { formatDateTime, relative } from "@/lib/format";
-import { useNativeApp } from "@/lib/native";
+import { nativeApp, useNativeApp } from "@/lib/native";
 import type { LanPairOffer, LanStatus } from "@/types/edge-protocol";
 
 /** "ab12 cd34 ..." groups of four, easier to compare by eye. */
@@ -81,14 +81,23 @@ export function PhoneAccessCard() {
   }, [client]);
 
   useEffect(() => {
-    if (ready && mode === "daemon") void refresh();
+    // Phones can't manage phone access (the daemon refuses); only the PC's browser asks.
+    if (ready && mode === "daemon" && !nativeApp()) void refresh();
   }, [ready, mode, refresh, snapshot.generation]);
 
   useEffect(() => {
-    if (!offer) return;
+    if (!offer || nativeApp()) return;
     const t = setInterval(() => void refresh(), 3000);
     return () => clearInterval(t);
   }, [offer, refresh]);
+
+  // Keep "Connected" and "last seen" current while phone access is on (a local call).
+  const enabled = !!status?.enabled;
+  useEffect(() => {
+    if (!enabled || offer || nativeApp()) return;
+    const t = setInterval(() => void refresh(), 10_000);
+    return () => clearInterval(t);
+  }, [enabled, offer, refresh]);
 
   const expire = useCallback(() => {
     setOffer(null);

@@ -82,7 +82,7 @@ export default function ModulesPage() {
   }
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[1.6fr_1fr]">
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.6fr_1fr]">
       <Card
         title="Modules"
         subtitle={scan ? "Scan results from this visit; identification read on demand." : "Scan from Overview to see each module's codes."}
