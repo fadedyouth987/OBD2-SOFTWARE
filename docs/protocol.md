@@ -2,22 +2,26 @@
 
 # Edge WebSocket protocol reference
 
-Protocol version **1.1.0**. Every message exchanged over the local edge WebSocket (ws://127.0.0.1:8765). Tagged union on `type`. Source of truth for the generated Rust types (typify) and Zod validators (json-schema-to-zod). Edit this file, then run `just codegen`.
+Protocol version **1.2.0**. Every message exchanged over the local edge WebSocket (ws://127.0.0.1:8765). Tagged union on `type`. Source of truth for the generated Rust types (typify) and Zod validators (json-schema-to-zod). Edit this file, then run `just codegen`.
 
 Every message is a JSON object with a `type` field naming one of the messages below. Requests carry a client-generated `request_id`; the response, or an `ErrorResponse`, echoes it. Gated diagnostic services are listed in [`safety_policy.json`](../packages/schemas/safety_policy.json); error hints are in [`error_hints.json`](../packages/schemas/error_hints.json).
 
 ## Requests and responses
 
-| Request                | Response                                   |
-| ---------------------- | ------------------------------------------ |
-| `HelloRequest`         | `HelloResponse` or `ErrorResponse`         |
-| `AdapterListRequest`   | `AdapterListResponse` or `ErrorResponse`   |
-| `ConnectRequest`       | `AdapterStatus` or `ErrorResponse`         |
-| `DisconnectRequest`    | `AdapterStatus` or `ErrorResponse`         |
-| `SafetyConfirmRequest` | `SafetyConfirmResponse` or `ErrorResponse` |
-| `DiagCommandRequest`   | `DiagCommandResponse` or `ErrorResponse`   |
-| `LeaseStatusRequest`   | `LeaseStatus` or `ErrorResponse`           |
-| `LeaseInstallRequest`  | `LeaseStatus` or `ErrorResponse`           |
+| Request                  | Response                                   |
+| ------------------------ | ------------------------------------------ |
+| `HelloRequest`           | `HelloResponse` or `ErrorResponse`         |
+| `AdapterListRequest`     | `AdapterListResponse` or `ErrorResponse`   |
+| `ConnectRequest`         | `AdapterStatus` or `ErrorResponse`         |
+| `DisconnectRequest`      | `AdapterStatus` or `ErrorResponse`         |
+| `SafetyConfirmRequest`   | `SafetyConfirmResponse` or `ErrorResponse` |
+| `DiagCommandRequest`     | `DiagCommandResponse` or `ErrorResponse`   |
+| `LeaseStatusRequest`     | `LeaseStatus` or `ErrorResponse`           |
+| `LeaseInstallRequest`    | `LeaseStatus` or `ErrorResponse`           |
+| `LanStatusRequest`       | `LanStatus` or `ErrorResponse`             |
+| `LanPairOfferRequest`    | `LanPairOffer` or `ErrorResponse`          |
+| `LanDeviceRevokeRequest` | `LanStatus` or `ErrorResponse`             |
+| `LanPairRequest`         | `LanPairResponse` or `ErrorResponse`       |
 
 ## Messages
 
@@ -25,13 +29,13 @@ Every message is a JSON object with a `type` field naming one of the messages be
 
 First message on every connection (Rule 4). Request -> HelloResponse.
 
-| Field              | Type        | Notes                                                                                  |
-| ------------------ | ----------- | -------------------------------------------------------------------------------------- |
-| `request_id`       | `RequestId` |                                                                                        |
-| `client_token`     | string      | Cloud pairing JWT (aud=edge-ws) or 6-digit local pairing code from `edge-daemon pair`. |
-| `client_version`   | `SemVer`    |                                                                                        |
-| `protocol_version` | `SemVer`    |                                                                                        |
-| `policy_version`   | `SemVer`    |                                                                                        |
+| Field              | Type        | Notes                                                                                                                                                 |
+| ------------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `request_id`       | `RequestId` |                                                                                                                                                       |
+| `client_token`     | string      | Cloud pairing JWT (aud=edge-ws) or 6-digit local pairing code from `edge-daemon pair`. Network (phone) connections accept only the cloud pairing JWT. |
+| `client_version`   | `SemVer`    |                                                                                                                                                       |
+| `protocol_version` | `SemVer`    |                                                                                                                                                       |
+| `policy_version`   | `SemVer`    |                                                                                                                                                       |
 
 ### HelloResponse
 
@@ -209,6 +213,84 @@ The lease this connection runs under. Response to LeaseStatusRequest and LeaseIn
 | `immo_expires_at`   | `Rfc3339Utc` or null | When the installed immobilizer lease ends; null when there is none.                                                                     |
 | `cloud_keys_pinned` | boolean              | False when no cloud signing key is pinned, so cloud leases and pairing tokens cannot verify (COMMUNITY tier, local pairing codes only). |
 
+### LanStatusRequest
+
+Phone access over the local network: settings and paired phones. Loopback connections only. Request -> LanStatus.
+
+| Field        | Type        | Notes |
+| ------------ | ----------- | ----- |
+| `request_id` | `RequestId` |       |
+
+### LanStatus
+
+Response to LanStatusRequest and LanDeviceRevokeRequest.
+
+| Field         | Type                 | Notes                                                                            |
+| ------------- | -------------------- | -------------------------------------------------------------------------------- |
+| `request_id`  | `RequestId`          |                                                                                  |
+| `enabled`     | boolean              | True when the network listener is on (it is off until `edge-daemon lan enable`). |
+| `port`        | integer              | TLS port phones connect to.                                                      |
+| `addresses`   | array of string      | This PC's addresses a phone could use, best first; empty when off.               |
+| `fingerprint` | string or null       | Certificate fingerprint; null when off.                                          |
+| `daemon_id`   | string or null       | Null when off.                                                                   |
+| `daemon_name` | string               | Name phones show for this PC.                                                    |
+| `mdns`        | boolean              | True when the PC advertises itself on mDNS.                                      |
+| `devices`     | array of `LanDevice` |                                                                                  |
+
+### LanPairOfferRequest
+
+Creates a one-time pairing QR code for a phone (5 minutes, single use). Loopback connections only. Request -> LanPairOffer.
+
+| Field        | Type           | Notes                                                                 |
+| ------------ | -------------- | --------------------------------------------------------------------- |
+| `request_id` | `RequestId`    |                                                                       |
+| `host`       | string or null | Which of LanStatus.addresses to put in the code; null picks the best. |
+
+### LanPairOffer
+
+A pairing code for a phone. Response to LanPairOfferRequest.
+
+| Field         | Type            | Notes                                                                                                                                                 |
+| ------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `request_id`  | `RequestId`     |                                                                                                                                                       |
+| `pairing_uri` | string          | rootcause://lan-pair link with host, port, fingerprint, one-time token, daemon id and name. Shown as a QR code; it is a secret until used or expired. |
+| `host`        | string          | IP address of this PC on the workshop network (IPv4 dotted, or IPv6 without brackets).                                                                |
+| `port`        | integer         |                                                                                                                                                       |
+| `fingerprint` | string          | SHA-256 of the daemon's network TLS certificate (DER), lowercase hex. The phone pins it.                                                              |
+| `expires_at`  | `Rfc3339Utc`    |                                                                                                                                                       |
+| `qr_rows`     | array of string | The QR code: one string per row, '1' dark and '0' light, no quiet zone.                                                                               |
+
+### LanDeviceRevokeRequest
+
+Removes a paired phone and closes its connections. Loopback connections only. Request -> LanStatus.
+
+| Field        | Type        | Notes                 |
+| ------------ | ----------- | --------------------- |
+| `request_id` | `RequestId` |                       |
+| `device_id`  | string      | Id of a paired phone. |
+
+### LanPairRequest
+
+First and only message on a network pairing connection (Authorization: RootCause-Pair <token>). Request -> LanPairResponse.
+
+| Field            | Type        | Notes                                  |
+| ---------------- | ----------- | -------------------------------------- |
+| `request_id`     | `RequestId` |                                        |
+| `device_name`    | string      | Shown on the PC, e.g. the phone model. |
+| `client_version` | `SemVer`    |                                        |
+
+### LanPairResponse
+
+The phone's credential for later connections (Authorization: Bearer <device_id>.<device_secret>). Sent once; the daemon keeps only its hash. Response to LanPairRequest.
+
+| Field           | Type        | Notes                                                             |
+| --------------- | ----------- | ----------------------------------------------------------------- |
+| `request_id`    | `RequestId` |                                                                   |
+| `device_id`     | string      | Id of a paired phone.                                             |
+| `device_secret` | string      | 32 random bytes, base64url without padding.                       |
+| `daemon_id`     | string      | Stable id of this daemon, in the pairing QR code and mDNS record. |
+| `daemon_name`   | string      |                                                                   |
+
 ## Shared types
 
 - **RequestId**: string matching `^[A-Za-z0-9_-]{1,64}$`. Client-generated id carried by every request and echoed by its response or error.
@@ -226,10 +308,11 @@ The lease this connection runs under. Response to LeaseStatusRequest and LeaseIn
 - **LeaseTier**: `COMMUNITY`, `MOBILE`, `PRO`, `WORKSHOP`, `FLEET`.
 - **Feature**: `J2534`, `UDS_ACTIVE`, `CAN_RE_PRO`, `IMMO_PROGRAM`. Features unlocked by the offline lease (Task 1.4). IMMO_PROGRAM is issued only on a short immobilizer lease or a diagnostic lease when the shop holds the IMMO add-on.
 - **Severity**: `INFO`, `AMBER`, `RED`.
-- **ErrorCode**: `UNAUTHENTICATED`, `ORIGIN_REJECTED`, `SAFETY_BLOCKED`, `TOKEN_INVALID`, `PRECONDITION_UNKNOWN`, `LEASE_REQUIRED`, `ADAPTER_ERROR`, `PROTOCOL_ERROR`, `TIMEOUT`, `VERSION_UNSUPPORTED`. Every code has a one-line fix-it hint in error_hints.json (A-DX-4).
+- **ErrorCode**: `UNAUTHENTICATED`, `ORIGIN_REJECTED`, `SAFETY_BLOCKED`, `TOKEN_INVALID`, `PRECONDITION_UNKNOWN`, `LEASE_REQUIRED`, `ADAPTER_ERROR`, `PROTOCOL_ERROR`, `TIMEOUT`, `VERSION_UNSUPPORTED`, `LAN_UNAVAILABLE`. Every code has a one-line fix-it hint in error_hints.json (A-DX-4).
 - **AdapterInfo**: object: `adapter_id`, `kind`, `display_name`, `path`.
 - **CanFrame**: object: `timestamp_us`, `can_id`, `is_extended`, `dlc`, `data_hex`.
 - **PidSample**: object: `timestamp_us`, `pid`, `name`, `value`, `unit`.
 - **Preconditions**: object: `speed_kmh`, `speed_age_ms`, `rpm`, `battery_v`. Live readings the safety token was issued against. Null means the value could not be read (Rule 5: fail closed).
 - **Nrc**: object: `code`, `name`. Negative response code from the ECU.
 - **LeaseKind**: `DIAGNOSTIC`, `IMMO`. Which lease a LeaseInstallRequest carries: the offline diagnostic lease (lease.jwt) or a short immobilizer lease (immo_lease.jwt).
+- **LanDevice**: object: `device_id`, `name`, `paired_at`, `last_seen_at`, `paired_by`, `connected`. A phone paired for network access (LanStatus.devices).

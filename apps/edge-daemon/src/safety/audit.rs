@@ -31,6 +31,10 @@ pub struct AuditEntry {
     pub user: Option<String>,
     /// Vehicle identity (VIN) when known.
     pub vehicle: Option<String>,
+    /// The client that sent it, when not this PC's browser: a phone paired for
+    /// network access, e.g. `lan:lan_0123456789abcdef (Pixel 8)`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client: Option<String>,
     /// e.g. "UDS 0x7E0/0x7E8".
     pub ecu: String,
     /// e.g. "0x2F InputOutputControlByIdentifier".
@@ -107,6 +111,7 @@ mod tests {
             session_id: "s1".into(),
             user: Some("tech-1".into()),
             vehicle: None,
+            client: None,
             ecu: "UDS 0x7E0/0x7E8".into(),
             service: "0x2F InputOutputControlByIdentifier".into(),
             tier: Some('A'),

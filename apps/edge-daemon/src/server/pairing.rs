@@ -197,16 +197,21 @@ impl PairingStore {
     }
 }
 
+/// Mode for files in the pairing folder (see [`file_mode`]).
+pub fn shared_file_mode(path: &Path) -> u32 {
+    file_mode(path)
+}
+
 /// Owner-only, except in a shared pairing folder (setgid, as the Linux package
 /// makes `/var/lib/obd2-edge/pairing`): there the daemon's user and the
 /// technicians in its group must both read the file, so the group may too.
 #[cfg(not(unix))]
-fn file_mode(_path: &Path) -> u32 {
+pub(crate) fn file_mode(_path: &Path) -> u32 {
     0o600
 }
 
 #[cfg(unix)]
-fn file_mode(path: &Path) -> u32 {
+pub(crate) fn file_mode(path: &Path) -> u32 {
     use std::os::unix::fs::PermissionsExt;
     let shared = path
         .parent()

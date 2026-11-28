@@ -1,0 +1,5 @@
+{
+  "device_id": "lan_0011223344556677",
+  "request_id": "web_11",
+  "type": "LanDeviceRevokeRequest"
+}

@@ -1,0 +1,21 @@
+{
+  "addresses": [],
+  "daemon_id": null,
+  "daemon_name": "RootCause PC",
+  "devices": [
+    {
+      "connected": false,
+      "device_id": "lan_0011223344556677",
+      "last_seen_at": null,
+      "name": "Galaxy Tab",
+      "paired_at": "2026-11-20T01:00:00Z",
+      "paired_by": null
+    }
+  ],
+  "enabled": false,
+  "fingerprint": null,
+  "mdns": false,
+  "port": 8766,
+  "request_id": "web_09",
+  "type": "LanStatus"
+}

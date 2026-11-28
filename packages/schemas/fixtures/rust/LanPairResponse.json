@@ -1,0 +1,8 @@
+{
+  "daemon_id": "rcd_0123456789abcdef",
+  "daemon_name": "Bay 3 PC",
+  "device_id": "lan_fedcba9876543210",
+  "device_secret": "sssssssssssssssssssssssssssssssssssssssssss",
+  "request_id": "req-1",
+  "type": "LanPairResponse"
+}

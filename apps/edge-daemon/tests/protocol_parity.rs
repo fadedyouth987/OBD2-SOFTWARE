@@ -223,6 +223,72 @@ fn rust_messages() -> Vec<EdgeMessage> {
             type_: LeaseStatusType::LeaseStatus,
         }
         .into(),
+        LanStatusRequest {
+            request_id: request_id.clone(),
+            type_: LanStatusRequestType::LanStatusRequest,
+        }
+        .into(),
+        LanStatus {
+            addresses: vec![p("192.168.1.20")],
+            daemon_id: Some(p("rcd_0123456789abcdef")),
+            daemon_name: p("Bay 3 PC"),
+            devices: vec![LanDevice {
+                connected: true,
+                device_id: p("lan_fedcba9876543210"),
+                last_seen_at: Some(p("2026-11-29T01:00:00Z")),
+                name: p("Pixel 8"),
+                paired_at: p("2026-11-28T23:00:00Z"),
+                paired_by: Some(p("u-1")),
+            }],
+            enabled: true,
+            fingerprint: Some(p(&"ab".repeat(32))),
+            mdns: false,
+            port: std::num::NonZeroU16::new(8766).unwrap(),
+            request_id: request_id.clone(),
+            type_: LanStatusType::LanStatus,
+        }
+        .into(),
+        LanPairOfferRequest {
+            host: None,
+            request_id: request_id.clone(),
+            type_: LanPairOfferRequestType::LanPairOfferRequest,
+        }
+        .into(),
+        LanPairOffer {
+            expires_at: p("2026-11-29T01:05:00Z"),
+            fingerprint: p(&"ab".repeat(32)),
+            host: p("192.168.1.20"),
+            pairing_uri: p("rootcause://lan-pair?v=1&h=192.168.1.20&p=8766"),
+            port: std::num::NonZeroU16::new(8766).unwrap(),
+            qr_rows: (0..21)
+                .map(|_| p(&format!("{}1", "10".repeat(10))))
+                .collect(),
+            request_id: request_id.clone(),
+            type_: LanPairOfferType::LanPairOffer,
+        }
+        .into(),
+        LanDeviceRevokeRequest {
+            device_id: p("lan_fedcba9876543210"),
+            request_id: request_id.clone(),
+            type_: LanDeviceRevokeRequestType::LanDeviceRevokeRequest,
+        }
+        .into(),
+        LanPairRequest {
+            client_version: p("0.2.0"),
+            device_name: p("Pixel 8"),
+            request_id: request_id.clone(),
+            type_: LanPairRequestType::LanPairRequest,
+        }
+        .into(),
+        LanPairResponse {
+            daemon_id: p("rcd_0123456789abcdef"),
+            daemon_name: p("Bay 3 PC"),
+            device_id: p("lan_fedcba9876543210"),
+            device_secret: p(&"s".repeat(43)),
+            request_id: request_id.clone(),
+            type_: LanPairResponseType::LanPairResponse,
+        }
+        .into(),
     ]
 }
 

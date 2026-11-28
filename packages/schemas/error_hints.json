@@ -8,5 +8,6 @@
   "ADAPTER_ERROR": "Check the adapter is plugged in and not in use by another program, then reconnect.",
   "PROTOCOL_ERROR": "The vehicle did not answer as expected; try a different protocol or AUTO.",
   "TIMEOUT": "No reply in time; check the ignition is on and the cable is seated, then retry.",
-  "VERSION_UNSUPPORTED": "The app and edge daemon versions are incompatible; update the edge daemon."
+  "VERSION_UNSUPPORTED": "The app and edge daemon versions are incompatible; update the edge daemon.",
+  "LAN_UNAVAILABLE": "Phone access is set up on the PC: run `edge-daemon lan enable`, restart the daemon, then pair the phone from Devices."
 }
