@@ -34,7 +34,7 @@ from app.db.session import tenant_session
 from app.db.vin import model_year, normalize_vin, resolve_secret, vin_hmac
 from app.observability.metrics import daemon_seen, inc
 from app.services.anonymizer import anonymize_case, scrub_text, scrub_value
-from app.services.embeddings import EMBEDDING_MODEL, embed_canonical_text
+from app.services.embeddings import embed
 from app.services.identity import user_profile
 from app.services.permissions import Permission, can, require, require_own_or
 from app.services.vehicle_registry import decode_vin_platform
@@ -425,6 +425,7 @@ def close_job(job_id: str, req: JobClose, principal: RequirePrincipal) -> dict[s
                     scrubbed["symptom_summary"],
                 ]
             )
+            vector, vector_model = embed(canonical)
             case = ResolvedCase(
                 id=uuid4(),
                 wmi_vds=scrubbed["wmi_vds"],
@@ -433,8 +434,8 @@ def close_job(job_id: str, req: JobClose, principal: RequirePrincipal) -> dict[s
                 canonical_summary=scrubbed["symptom_summary"],
                 fix_description=scrubbed["verified_fix"],
                 feature_vector=None,
-                embedding=embed_canonical_text(canonical),
-                embedding_model=EMBEDDING_MODEL,
+                embedding=vector,
+                embedding_model=vector_model,
             )
             store.add(case)
             case_id = str(case.id)
