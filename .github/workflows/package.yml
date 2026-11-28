@@ -30,13 +30,13 @@ jobs:
     env:
       TARGET: x86_64-unknown-linux-gnu
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install pinned Rust toolchain
         run: rustup toolchain install
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: package-linux
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .node-version
       - name: Release build
@@ -99,7 +99,7 @@ jobs:
       - name: Service logs
         if: failure()
         run: sudo journalctl -u obd2-edge-daemon.service --no-pager | tail -n 100
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: edge-daemon-linux
           path: dist/*.tar.gz*
@@ -111,15 +111,15 @@ jobs:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install pinned Rust toolchain with the Windows targets
         run: |
           rustup toolchain install
           rustup target add x86_64-pc-windows-msvc i686-pc-windows-msvc
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: package-windows
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .node-version
       - name: Release builds (daemon x64, J2534 bridge 32-bit)
@@ -202,11 +202,11 @@ jobs:
           if (Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue) { throw "port 8765 still listening" }
       - name: Checksums
         run: Get-ChildItem dist\*.msi | ForEach-Object { "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLower())  $($_.Name)" | Out-File "$_.sha256" -Encoding ascii }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: edge-daemon-windows
           path: dist/*
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: edge-daemon-windows-binaries
           path: |
@@ -222,7 +222,7 @@ jobs:
     runs-on: ubuntu-24.04
     environment: release
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: edge-daemon-linux
           path: dist
@@ -240,7 +240,7 @@ jobs:
               --passphrase-fd 0 --armor --detach-sign "$f"
           done
           rm -rf "$GNUPGHOME"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: edge-daemon-linux-signed
           path: dist/*
@@ -254,8 +254,8 @@ jobs:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: edge-daemon-windows-binaries
           path: target
@@ -286,7 +286,7 @@ jobs:
           & $sign $msi
           Remove-Item "Cert:\CurrentUser\My\$($cert.Thumbprint)"
           Get-ChildItem dist\*.msi | ForEach-Object { "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLower())  $($_.Name)" | Out-File "$_.sha256" -Encoding ascii }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: edge-daemon-windows-signed
           path: dist/*
