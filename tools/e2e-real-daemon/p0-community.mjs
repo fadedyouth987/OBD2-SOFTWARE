@@ -1,4 +1,4 @@
-import { launch, shot, signup, connectAdapter, nav, BASE } from './lib.mjs';
+import { launch, shot, signup, connectAdapter, nav, BASE, fail } from './lib.mjs';
 const { browser, page, errors } = await launch();
 const log = (...a) => console.log('•', ...a);
 try {
@@ -73,7 +73,7 @@ try {
   await shot(page, '13-billing');
   console.log('JOB', jobUrl);
 } catch (e) {
-  console.log('FAIL', e.message.split('\n')[0]);
+  fail(e.message.split('\n')[0]);
   await shot(page, 'zz-fail-community');
 } finally {
   console.log('console errors:', errors.length ? errors.slice(0, 15) : 'none');

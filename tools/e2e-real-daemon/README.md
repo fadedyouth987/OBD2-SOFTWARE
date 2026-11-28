@@ -16,6 +16,9 @@ node a11y.mjs           # axe WCAG 2.1 AA scan of 20 views (signed out, Workshop
 node p2-team.mjs        # seat cap on Community → Fleet → add site → invite → invitee joins (mobile) → single-use link
 ```
 
+Each script exits non-zero when a step fails (and `a11y.mjs` when any view has a
+violation), so they can gate a CI job.
+
 Screenshots go to `./shots` (override with `E2E_SHOTS`). `E2E_WEB`, `E2E_API`
 and `E2E_CHROME` override the defaults. The Workshop run uses the dev-only
 `/api/v1/auth/dev-grant-plan` endpoint, so it only works against a local API.
