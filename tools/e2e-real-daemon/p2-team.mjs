@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { launch, shot, signup, apiCall, nav, BASE, CHROME } from './lib.mjs';
+import { launch, shot, signup, apiCall, nav, BASE, CHROME, fail } from './lib.mjs';
 const { browser, page, errors } = await launch();
 const log = (...a) => console.log('•', ...a);
 try {
@@ -45,12 +45,12 @@ try {
   log('joined; link now single-use');
   await b2.close();
   await page.reload();
-  await page.getByText('Sam Joiner').waitFor({ timeout: 15000 });
+  await page.getByText('Sam Joiner').first().waitFor({ timeout: 15000 });
   await page.waitForTimeout(800);
   await shot(page, '34-team-two-members');
   log('owner sees new member');
 } catch (e) {
-  console.log('FAIL', e.message.split('\n').slice(0,6).join(' | '));
+  fail(e.message.split('\n').slice(0,6).join(' | '));
   await shot(page, 'zz-fail-team');
 } finally {
   console.log('console errors:', errors.length ? errors.slice(0, 15) : 'none');

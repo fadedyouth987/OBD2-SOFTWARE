@@ -1,12 +1,13 @@
 import AxeBuilder from '@axe-core/playwright';
 import { writeFileSync } from 'node:fs';
-import { launch, signup, apiCall, nav, connectAdapter, BASE, SHOTS } from './lib.mjs';
+import { launch, signup, apiCall, nav, connectAdapter, BASE, SHOTS, fail } from './lib.mjs';
 const { browser, page, errors } = await launch();
 const results = {};
 async function audit(name) {
   await page.waitForTimeout(1500);
   const r = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
   results[name] = r.violations.map((v) => ({ id: v.id, impact: v.impact, help: v.help, nodes: v.nodes.length, targets: v.nodes.slice(0, 3).map((n) => n.target.join(' ')) }));
+  if (r.violations.length) process.exitCode = 1; // WCAG violations fail the run (review L4)
   console.log(name.padEnd(28), r.violations.length ? r.violations.map((v) => `${v.id}(${v.nodes.length})`).join(', ') : 'clean');
 }
 try {
@@ -34,7 +35,7 @@ try {
   for (const p of ['/jobs', '/knowledge', '/key-programming', '/workshop', '/workshop/billing']) { await nav(page, p); await audit(p.slice(1).replace('/', '-')); }
   await page.goto(BASE + jobPath.replace('/jobs/', '/report/')); await audit('report');
 } catch (e) {
-  console.log('FAIL', e.message.split('\n').slice(0, 4).join(' | '));
+  fail(e.message.split('\n').slice(0, 4).join(' | '));
 } finally {
   writeFileSync(`${SHOTS}/a11y-report.json`, JSON.stringify(results, null, 2));
   console.log('console errors:', errors.length ? errors.slice(0, 10) : 'none');

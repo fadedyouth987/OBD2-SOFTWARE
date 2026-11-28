@@ -11,9 +11,13 @@ Flow:
    expects), and checks the ID token: RS256 signature against the provider's
    JWKS, ``iss`` == OIDC_ISSUER, ``aud`` == OIDC_CLIENT_ID, ``exp``/``iat``,
    the nonce, and Cognito's ``token_use`` == "id".
-4. The person is found by (iss, sub); failing that an existing account with
-   the same *verified* email is linked; failing that a new account is made
-   (into the invite's workshop when the sign-in came from an invite link).
+4. The person is found by (iss, sub). If not, and an account already uses the
+   token's email, nothing is linked on the provider's word: a pending link
+   request is made (``LinkRequired``) that the account holder confirms either
+   signed in to RootCause (password or an existing session) or through a
+   single-use link emailed to the account's address; the owner is emailed when
+   the link is made. Failing both, a new account is made from a *verified*
+   email (into the invite's workshop when the sign-in came from an invite).
 
 Endpoints come from ``{OIDC_ISSUER}/.well-known/openid-configuration``. Issuers
 must be https, except http://localhost for the dev provider in
@@ -24,6 +28,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import logging
 import secrets
 import threading
 import time
@@ -42,7 +47,10 @@ from app.config import get_settings
 from app.db.session import owner_engine
 from app.observability.metrics import inc
 
+log = logging.getLogger(__name__)
+
 STATE_TTL = timedelta(minutes=10)
+LINK_TTL = timedelta(minutes=30)
 CACHE_TTL_S = 600
 LEEWAY_S = 60
 
@@ -80,6 +88,11 @@ GOOGLE_ISSUER = "https://accounts.google.com"
 def config() -> OidcConfig | None:
     s = get_settings()
     if s.oidc_issuer and s.oidc_client_id and s.oidc_redirect_uri:
+        if s.google_client_id:
+            _warn_once(
+                "GOOGLE_CLIENT_ID is ignored because OIDC_ISSUER is set; one sign-in "
+                "provider is offered at a time (docs/dev/sign-in-oidc.md)"
+            )
         return OidcConfig(
             issuer=s.oidc_issuer.rstrip("/"),
             client_id=s.oidc_client_id,
@@ -101,6 +114,19 @@ def config() -> OidcConfig | None:
             logout_url="",
         )
     return None
+
+
+_warned: set[str] = set()
+
+
+def _warn_once(message: str) -> None:
+    if message not in _warned:
+        _warned.add(message)
+        log.warning(message)
+
+
+# Google documents both spellings of its issuer in ID tokens.
+_ISSUER_ALIASES = {GOOGLE_ISSUER: {GOOGLE_ISSUER, "accounts.google.com"}}
 
 
 def _require() -> OidcConfig:
@@ -302,7 +328,7 @@ def verify_id_token(cfg: OidcConfig, token: str, *, nonce: str) -> dict:
             key=key.key,
             algorithms=["RS256"],
             audience=cfg.client_id,
-            issuer=cfg.issuer,
+            issuer=sorted(_ISSUER_ALIASES.get(cfg.issuer, {cfg.issuer})),
             leeway=LEEWAY_S,
             options={"require": ["exp", "iat", "iss", "aud", "sub"]},
         )
@@ -348,6 +374,7 @@ def finish(*, code: str, state: str) -> SignedIn:
     name = str(claims.get("name") or claims.get("given_name") or "").strip()
     now = datetime.now(UTC)
 
+    link_to: UUID | None = None
     with owner_engine().begin() as conn:
         row = conn.execute(
             text("SELECT id FROM users WHERE oidc_issuer = :i AND oidc_subject = :s"),
@@ -356,29 +383,18 @@ def finish(*, code: str, state: str) -> SignedIn:
         user_id: UUID | None = row[0] if row else None
         if user_id is None and email:
             existing = conn.execute(
-                text("SELECT id, oidc_subject FROM users WHERE email = :e FOR UPDATE"),
+                text("SELECT id, oidc_subject FROM users WHERE email = :e"),
                 {"e": email},
             ).one_or_none()
             if existing is not None:
-                if not _verified(claims):
-                    raise HTTPException(
-                        status_code=403,
-                        detail=(
-                            "An account with this email exists, but the provider hasn't "
-                            "verified the email. Verify it there, then sign in again."
-                        ),
-                    )
                 if existing[1] is not None:
                     raise HTTPException(
                         status_code=409,
                         detail="This email is already linked to a different sign-in account.",
                     )
-                conn.execute(
-                    text("UPDATE users SET oidc_issuer = :i, oidc_subject = :s WHERE id = :id"),
-                    {"i": cfg.issuer, "s": sub, "id": existing[0]},
-                )
-                user_id = existing[0]
-                inc("auth_oidc_linked")
+                # Review H3: never link on the provider's say-so. The account holder
+                # confirms (signed in, or from their mailbox) before anything changes.
+                link_to = existing[0]
         if user_id is not None:
             conn.execute(
                 text(
@@ -387,6 +403,12 @@ def finish(*, code: str, state: str) -> SignedIn:
                 ),
                 {"t": now, "id": user_id},
             )
+
+    if link_to is not None and email:
+        # In its own committed transaction, so the request survives the 409.
+        with owner_engine().begin() as conn:
+            pending = _request_link(conn, cfg, sub, link_to, email, st.get("invite_token"))
+        raise pending
 
     tenant_id: UUID | None = None
     created = False
@@ -407,6 +429,156 @@ def finish(*, code: str, state: str) -> SignedIn:
     return SignedIn(
         user_id=user_id, tenant_id=tenant_id, return_to=st["return_to"], created=created
     )
+
+
+class LinkRequired(Exception):
+    """A provider sign-in matched an existing account by email; it needs confirming."""
+
+    def __init__(self, *, link_token: str, email: str, provider: str, email_sent: bool) -> None:
+        super().__init__("link_required")
+        self.link_token = link_token
+        self.email = email
+        self.provider = provider
+        self.email_sent = email_sent
+
+    def detail(self) -> dict[str, Any]:
+        where = (
+            f"We've also emailed a confirmation link to {mask_email(self.email)}."
+            if self.email_sent
+            else "Sign in with your password to confirm."
+        )
+        return {
+            "code": "link_required",
+            "message": (
+                f"An account with this email already exists. To use {self.provider} for it, "
+                f"sign in to that account to confirm. {where}"
+            ),
+            "link_token": self.link_token,
+            "provider": self.provider,
+            "email_sent": self.email_sent,
+            "email_hint": mask_email(self.email),
+        }
+
+
+def mask_email(email: str) -> str:
+    local, _, domain = email.partition("@")
+    return f"{local[:1]}***@{domain}" if domain else "***"
+
+
+def _request_link(
+    conn, cfg: OidcConfig, sub: str, user_id: UUID, email: str, invite: str | None
+) -> LinkRequired:
+    from app.services import email as mail
+
+    now = datetime.now(UTC)
+    session_token = secrets.token_urlsafe(32)
+    email_token = secrets.token_urlsafe(32)
+    conn.execute(text("DELETE FROM oidc_link_requests WHERE expires_at < :t"), {"t": now})
+    conn.execute(
+        text(
+            "INSERT INTO oidc_link_requests (id, user_id, oidc_issuer, oidc_subject, "
+            "provider_name, session_token_hash, email_token_hash, invite_token, expires_at) "
+            "VALUES (:id, :u, :i, :s, :p, :sh, :eh, :inv, :e)"
+        ),
+        {
+            "id": uuid4(),
+            "u": user_id,
+            "i": cfg.issuer,
+            "s": sub,
+            "p": cfg.provider_name,
+            "sh": _hash(session_token),
+            "eh": _hash(email_token),
+            "inv": invite,
+            "e": now + LINK_TTL,
+        },
+    )
+    base = get_settings().public_app_url.rstrip("/")
+    sent = mail.send_email(
+        mail.link_confirm_email(
+            to=email,
+            provider=cfg.provider_name,
+            url=f"{base}/auth/link?token={email_token}",
+            minutes=int(LINK_TTL.total_seconds() // 60),
+        )
+    ).sent
+    inc("auth_oidc_link_requested")
+    return LinkRequired(
+        link_token=session_token, email=email, provider=cfg.provider_name, email_sent=sent
+    )
+
+
+@dataclass(frozen=True)
+class Linked:
+    user_id: UUID
+    provider: str
+    invite_token: str | None
+
+
+def confirm_link(*, token: str, via: str, user_id: UUID | None = None) -> Linked:
+    """Make a pending link. ``via='session'``: ``token`` is the link token handed to
+    the browser and ``user_id`` the signed-in account, which must be the one the
+    request is for. ``via='email'``: ``token`` came from the emailed link."""
+    column = "session_token_hash" if via == "session" else "email_token_hash"
+    now = datetime.now(UTC)
+    gone = HTTPException(
+        status_code=400,
+        detail=(
+            "That link request has expired or was already used. Sign in with the provider again."
+        ),
+    )
+    with owner_engine().begin() as conn:
+        row = conn.execute(
+            text(
+                f"SELECT id, user_id, oidc_issuer, oidc_subject, provider_name, invite_token "  # noqa: S608 - fixed column
+                f"FROM oidc_link_requests WHERE {column} = :h AND used_at IS NULL "
+                "AND expires_at > :t FOR UPDATE"
+            ),
+            {"h": _hash(token), "t": now},
+        ).one_or_none()
+        if row is None:
+            raise gone
+        if via == "session" and row.user_id != user_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Sign in to the account this request is for, then confirm again.",
+            )
+        taken = conn.execute(
+            text("SELECT 1 FROM users WHERE oidc_issuer = :i AND oidc_subject = :s"),
+            {"i": row.oidc_issuer, "s": row.oidc_subject},
+        ).one_or_none()
+        target = conn.execute(
+            text("SELECT email, oidc_subject FROM users WHERE id = :id FOR UPDATE"),
+            {"id": row.user_id},
+        ).one_or_none()
+        if taken is not None or target is None or target.oidc_subject is not None:
+            conn.execute(
+                text("UPDATE oidc_link_requests SET used_at = :t WHERE id = :id"),
+                {"t": now, "id": row.id},
+            )
+            raise HTTPException(
+                status_code=409, detail="This account or sign-in is already linked elsewhere."
+            )
+        conn.execute(
+            text("UPDATE users SET oidc_issuer = :i, oidc_subject = :s WHERE id = :id"),
+            {"i": row.oidc_issuer, "s": row.oidc_subject, "id": row.user_id},
+        )
+        # Every outstanding request for this account dies with the one used.
+        conn.execute(
+            text(
+                "UPDATE oidc_link_requests SET used_at = :t WHERE user_id = :u AND used_at IS NULL"
+            ),
+            {"t": now, "u": row.user_id},
+        )
+        email_to = target.email
+    from app.services import email as mail
+
+    base = get_settings().public_app_url.rstrip("/")
+    mail.send_email(
+        mail.link_made_email(to=email_to, provider=row.provider_name, url=f"{base}/home")
+    )
+    inc("auth_oidc_linked")
+    log.info("oidc identity linked user=%s provider=%s via=%s", row.user_id, row.provider_name, via)
+    return Linked(user_id=row.user_id, provider=row.provider_name, invite_token=row.invite_token)
 
 
 def _create_user(

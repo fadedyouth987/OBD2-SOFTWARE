@@ -27,7 +27,7 @@ from app.db.session import tenant_session
 from app.observability.metrics import count, inc, observe
 from app.services import can_traces, object_store
 from app.services.anonymizer import anonymize_audit_entry, anonymize_case, anonymize_telemetry_row
-from app.services.embeddings import EMBEDDING_MODEL, cosine_similarity, embed_canonical_text
+from app.services.embeddings import cosine_similarity, embed
 
 router = APIRouter(prefix="/api/v1", tags=["sessions"])
 
@@ -136,7 +136,7 @@ def find_similar_cases(
     wanted = sorted({d.strip().upper() for d in dtcs if d and d.strip()})
     if not wanted:
         return []
-    query_vec = embed_canonical_text(case_query_text(engine_family, wanted))
+    query_vec, query_model = embed(case_query_text(engine_family, wanted))
     family = (engine_family or "").strip().lower()
     with tenant_session(tenant_id, engine) as store:
         store.execute(text("SELECT set_config('hnsw.iterative_scan', 'relaxed_order', true)"))
@@ -154,7 +154,12 @@ def find_similar_cases(
         def rank(row: ResolvedCase) -> tuple:
             shared = len(wanted_set & {str(d).upper() for d in row.dtcs or []})
             same_family = bool(family) and (row.engine_family or "").strip().lower() == family
-            similarity = cosine_similarity(list(row.embedding), query_vec)
+            # Vectors from different models aren't comparable (review M5).
+            similarity = (
+                cosine_similarity(list(row.embedding), query_vec)
+                if row.embedding_model in (query_model, None)
+                else 0.0
+            )
             created = row.created_at.timestamp() if row.created_at else 0.0
             return (-shared, not same_family, -similarity, -created)
 
@@ -241,7 +246,8 @@ def _audit_rows(req: SyncBatchRequest, principal: Any) -> list[tuple[dict[str, A
                     "edge_session_id": req.session_id,
                     "seq": seq,
                     "at": _as_datetime(entry.get("at")),
-                    "user_ref": str(entry.get("user_ref") or principal.user_id),
+                    # Review L8: who did it is the signed-in uploader, never the client's word.
+                    "user_ref": str(principal.user_id),
                     "vehicle_ref": str(entry.get("vehicle_ref") or ""),
                     "ecu": str(entry.get("ecu") or "UNKNOWN")[:64] or "UNKNOWN",
                     "service": str(entry.get("service") or entry.get("action") or "UNKNOWN")[:64],
@@ -481,7 +487,7 @@ def publish_resolved_case(req: PublishCaseRequest, principal: RequirePrincipal) 
             scrubbed.get("symptom_summary") or "",
         ]
     )
-    vector = embed_canonical_text(canonical)
+    vector, vector_model = embed(canonical)
     case_id = uuid4()
     with tenant_session(principal.tenant_id) as store:
         row = ResolvedCase(
@@ -493,7 +499,7 @@ def publish_resolved_case(req: PublishCaseRequest, principal: RequirePrincipal) 
             fix_description=str(scrubbed.get("verified_fix") or ""),
             feature_vector=None,
             embedding=vector,
-            embedding_model=EMBEDDING_MODEL,
+            embedding_model=vector_model,
         )
         store.add(row)
     inc("cases_published")

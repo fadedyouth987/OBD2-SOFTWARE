@@ -141,3 +141,29 @@ def client():
     from app.main import app
 
     return TestClient(app)
+
+
+@pytest.mark.skipif(not migrated_to_012(), reason=NEEDS_012)
+def test_audit_user_is_the_uploader_not_the_clients_claim(client):
+    """Review L8: an edge can't attribute its audit records to someone else."""
+    from app.config import get_settings
+
+    me = _dev_session(client)
+    edge_session = f"sess-user-{uuid.uuid4().hex[:10]}"
+    res = _post(
+        client,
+        _auth(me["access_token"]),
+        edge_session,
+        [{"seq": 1, "action": "0x14", "status": "APPROVED", "user_ref": "someone-else"}],
+    )
+    assert res.status_code == 200, res.text
+    engine = create_engine(get_settings().migration_database_url)
+    try:
+        with engine.connect() as c:
+            who = c.execute(
+                text("SELECT user_ref FROM audit_log WHERE edge_session_id = :s"),
+                {"s": edge_session},
+            ).scalar_one()
+    finally:
+        engine.dispose()
+    assert who == me["user_id"]

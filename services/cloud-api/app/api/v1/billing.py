@@ -32,6 +32,9 @@ from app.services.permissions import Permission, require
 router = APIRouter(prefix="/api/v1/billing", tags=["billing"])
 log = logging.getLogger(__name__)
 
+# Subscription statuses after which a new Checkout is fine; anything else still bills.
+ENDED_SUBSCRIPTION_STATUSES = frozenset({"none", "canceled", "incomplete_expired", "unpaid"})
+
 # Re-exported so existing imports (`from app.api.v1.billing import charge_ai_quota`) keep working.
 __all__ = [
     "router",
@@ -162,6 +165,22 @@ def create_checkout_session(req: CheckoutRequest, principal: RequirePrincipal) -
         tenant = session.get(Tenant, principal.tenant_id)
         if tenant is not None:
             customer_id = tenant.stripe_customer_id
+            # Review M8: a second Checkout would start a second subscription and bill twice.
+            if (
+                tenant.stripe_subscription_id
+                and (tenant.stripe_subscription_status or "none").lower()
+                not in ENDED_SUBSCRIPTION_STATUSES
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "subscription_exists",
+                        "message": (
+                            "This workspace already has a subscription. Change plan, "
+                            "interval or the IMMO add-on in Manage billing."
+                        ),
+                    },
+                )
 
     params: dict[str, Any] = {
         "mode": "subscription",

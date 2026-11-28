@@ -1,4 +1,4 @@
-import { launch, shot, signup, apiCall, nav, connectAdapter, BASE } from './lib.mjs';
+import { launch, shot, signup, apiCall, nav, connectAdapter, BASE, fail } from './lib.mjs';
 const { browser, ctx, page, errors } = await launch();
 const log = (...a) => console.log('•', ...a);
 try {
@@ -43,7 +43,7 @@ try {
   await shot(page, '42-modules-schematics');
   log('dbc saved + decoded; modules shows schematics');
 } catch (e) {
-  console.log('FAIL', e.message.split('\n').slice(0, 6).join(' | '));
+  fail(e.message.split('\n').slice(0, 6).join(' | '));
   await shot(page, 'zz-fail-files');
 } finally {
   console.log('console errors:', errors.length ? errors.slice(0, 15) : 'none');

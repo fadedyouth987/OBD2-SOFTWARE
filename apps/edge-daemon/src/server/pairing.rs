@@ -8,7 +8,11 @@
 //! rest of its data (leases, audit log).
 //!
 //! Guessing is cut off: after [`MAX_MISSES`] wrong codes every outstanding code
-//! is cancelled and none is accepted for [`LOCKOUT`].
+//! is cancelled, so no code ever faces more than [`MAX_MISSES`] guesses (odds of
+//! a hit: 5 in a million). A code issued afterwards works at once: there is no
+//! lockout window, so another local process can't keep everyone from pairing by
+//! sending a few wrong codes every so often (review L3). To block pairing now it
+//! has to cancel each fresh code as it is issued, which is logged every time.
 
 use std::{
     path::{Path, PathBuf},
@@ -21,8 +25,16 @@ use sha2::{Digest, Sha256};
 pub const CODE_TTL: Duration = Duration::from_secs(120);
 /// Wrong codes (from any connection) before every outstanding code is cancelled.
 pub const MAX_MISSES: u32 = 5;
-/// How long no code is accepted after [`MAX_MISSES`] wrong ones.
-pub const LOCKOUT: Duration = Duration::from_secs(30);
+
+/// What happened to a code sent in Hello.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Consumed {
+    Paired,
+    /// Wrong, expired or already used.
+    Refused,
+    /// Wrong, and it was the miss that cancelled every outstanding code.
+    CancelledAll,
+}
 
 /// Where the pairing codes for the data directory `dir` live.
 pub fn pairing_path(dir: &Path) -> PathBuf {
@@ -32,7 +44,6 @@ pub fn pairing_path(dir: &Path) -> PathBuf {
 #[derive(Default)]
 struct Guard {
     misses: u32,
-    locked_until: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -131,38 +142,36 @@ impl PairingStore {
         Ok(code)
     }
 
-    /// Seconds left while codes are refused after too many wrong ones.
-    pub fn locked_for(&self, now: u64) -> Option<u64> {
-        let until = self.guard.lock().expect("pairing guard").locked_until;
-        (until > now).then(|| until - now)
+    /// Consumes `code` if it is outstanding and unexpired. Single use.
+    pub fn consume(&self, code: &str, now: u64) -> bool {
+        self.try_consume(code, now) == Consumed::Paired
     }
 
-    /// Consumes `code` if it is outstanding and unexpired. Single use.
-    /// Refuses every code while locked out after [`MAX_MISSES`] wrong ones.
-    pub fn consume(&self, code: &str, now: u64) -> bool {
-        if !looks_like_code(code) || self.locked_for(now).is_some() {
-            return false;
+    /// Like [`Self::consume`], and says whether this miss cancelled every code.
+    pub fn try_consume(&self, code: &str, now: u64) -> Consumed {
+        if !looks_like_code(code) {
+            return Consumed::Refused;
         }
-        let ok = self.take(code, now);
+        // The guard is held across the check so concurrent guesses can't
+        // overshoot the miss budget.
         let mut g = self.guard.lock().expect("pairing guard");
-        if ok {
+        if self.take(code, now) {
             g.misses = 0;
-            return true;
+            return Consumed::Paired;
         }
         g.misses += 1;
-        if g.misses >= MAX_MISSES {
-            g.misses = 0;
-            g.locked_until = now + LOCKOUT.as_secs();
-            drop(g);
-            tracing::warn!(
-                "{MAX_MISSES} wrong pairing codes: every outstanding code cancelled, none accepted for {} s",
-                LOCKOUT.as_secs()
-            );
-            if let Err(e) = self.save(&[]) {
-                tracing::error!("could not cancel outstanding pairing codes: {e}");
-            }
+        if g.misses < MAX_MISSES {
+            return Consumed::Refused;
         }
-        false
+        g.misses = 0;
+        tracing::warn!(
+            "{MAX_MISSES} wrong pairing codes: every outstanding code cancelled. If this keeps \
+             happening, another program on this computer is guessing codes"
+        );
+        if let Err(e) = self.save(&[]) {
+            tracing::error!("could not cancel outstanding pairing codes: {e}");
+        }
+        Consumed::CancelledAll
     }
 
     fn take(&self, code: &str, now: u64) -> bool {
@@ -251,23 +260,35 @@ mod tests {
     }
 
     #[test]
-    fn five_wrong_codes_cancel_every_code_and_lock_out_for_30_s() {
+    fn five_wrong_codes_cancel_every_code_but_a_fresh_one_works_at_once() {
         let store = PairingStore::in_memory();
         let good = store.issue(1_000).unwrap();
         let wrong = if good == "000000" { "111111" } else { "000000" };
         for _ in 0..MAX_MISSES - 1 {
-            assert!(!store.consume(wrong, 1_001));
+            assert_eq!(store.try_consume(wrong, 1_001), Consumed::Refused);
         }
-        assert!(store.locked_for(1_001).is_none(), "not yet locked");
-        assert!(!store.consume(wrong, 1_001)); // the fifth miss
-        assert_eq!(store.locked_for(1_001), Some(LOCKOUT.as_secs()));
-        // The right code is refused while locked, and stays cancelled after.
-        assert!(!store.consume(&good, 1_010));
-        assert!(!store.consume(&good, 1_001 + LOCKOUT.as_secs()));
-        // A new code works once the lockout ends; a hit resets the count.
-        let fresh = store.issue(1_040).unwrap();
-        assert!(store.consume(&fresh, 1_041));
-        assert!(store.locked_for(1_041).is_none());
+        assert_eq!(store.try_consume(wrong, 1_001), Consumed::CancelledAll);
+        // The code that was live during the guessing is gone for good...
+        assert!(!store.consume(&good, 1_002));
+        // ...but there is no lockout window to sit out (review L3).
+        let fresh = store.issue(1_003).unwrap();
+        assert!(store.consume(&fresh, 1_003));
+    }
+
+    #[test]
+    fn no_code_faces_more_than_max_misses_guesses() {
+        let store = PairingStore::in_memory();
+        let mut guesses_while_live = 0;
+        let code = store.issue(1_000).unwrap();
+        let wrong = if code == "000000" { "111111" } else { "000000" };
+        loop {
+            guesses_while_live += 1;
+            if store.try_consume(wrong, 1_000) == Consumed::CancelledAll {
+                break;
+            }
+        }
+        assert_eq!(guesses_while_live, MAX_MISSES);
+        assert!(!store.consume(&code, 1_000));
     }
 
     #[test]
@@ -281,7 +302,6 @@ mod tests {
             }
             assert!(store.consume(&code, 1_000 + i), "round {i}");
         }
-        assert!(store.locked_for(1_010).is_none());
     }
 
     #[test]
