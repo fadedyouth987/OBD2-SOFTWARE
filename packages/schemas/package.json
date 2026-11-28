@@ -8,7 +8,9 @@
     "./edge_ws.schema.json": "./edge_ws.schema.json",
     "./safety_policy.json": "./safety_policy.json",
     "./safety_policy.schema.json": "./safety_policy.schema.json",
-    "./error_hints.json": "./error_hints.json"
+    "./error_hints.json": "./error_hints.json",
+    "./module_catalog.json": "./module_catalog.json",
+    "./module_catalog.schema.json": "./module_catalog.schema.json"
   },
   "scripts": {
     "codegen": "node scripts/codegen.mjs",

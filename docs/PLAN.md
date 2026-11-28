@@ -348,6 +348,22 @@ Headless background service; a tray app would be its own task.
 
 **Verification gate**: each alert fires in a staging drill and links to its runbook; a support bundle contains no VIN serials, tokens or keys.
 
+### Phase 6: Coverage
+
+#### Task 6.2: Module discovery and the module catalogue
+
+Added 2026-11-29 at Brooke's request: cover every module on every make RootCause supports. Design and gaps: `docs/dev/module-discovery.md`.
+
+**Target paths**: `packages/schemas/module_catalog{,.schema}.json`, `apps/web/src/lib/{module-catalog,module-discovery,scan}.ts`, `apps/web/src/components/job/{DtcCard.tsx,useScanTargets.ts}`, `apps/edge-daemon/src/{protocols/addressing.rs,server/ws.rs}`, `services/cloud-api/app/services/vehicle_registry.py`
+
+**Implementation contract**
+- Real vehicles: the scan finds modules by probing every address in the make family's sweeps with TesterPresent (read-only, not gated), after the registry and catalogue modules; it reads codes from what answers. Registry modules on another network are reported as such, never as "didn't respond". Simulated vehicles keep their fixed lists.
+- Catalogue: per-family module names and addresses, each citing a source; schema-validated.
+- Daemon: ids above 0x7FF open 29-bit channels; at most 32 diagnostic channels per connection (LRU).
+- Registry: every platform names its catalogue family and every module its network; corrections from sources (GM addressing, BMW CAS, Subaru EyeSight, Jeep ABS, Honda 29-bit, Toyota 0x750); Ranger and BT-50 split by generation with VIN model-year decoding; renamed profiles keep resolving.
+
+**Verification gate**: web, cloud-api and daemon tests listed in `docs/dev/module-discovery.md`; the daemon sweep test finds exactly the virtual Falcon's modules; a real-car scan per family confirms catalogue entries (A-ENG-10).
+
 ## Review record
 
 gstack `/autoplan` ran on 2026-11-19 (CEO, design, DX, engineering). Full record: `docs/reviews/2026-11-19-autoplan-review.md`. Accepted amendments are in the table under the operating rules. Gate result (2026-11-19): uc1 approved; uc2 and uc3 declined.

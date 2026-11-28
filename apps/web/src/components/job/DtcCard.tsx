@@ -12,6 +12,7 @@ import { useJob } from "@/context/job";
 import { hexId, udsStatusWords } from "@/lib/diag";
 import { describeDtc } from "@/lib/dtc-library";
 import { formatTime } from "@/lib/format";
+import { buildPlan, discover } from "@/lib/module-discovery";
 import { mergeJobDtcs, scanModule, type ModuleResult, type ScanTarget } from "@/lib/scan";
 import type { JobDtc } from "@/lib/api";
 
@@ -30,16 +31,21 @@ const OUTCOME: Record<ModuleResult["outcome"], [Tone, string]> = {
   refused: ["warn", "Refused"],
   no_response: ["neutral", "No response"],
   error: ["danger", "Error"],
+  other_network: ["info", "Other network"],
 };
+
+type ScanProgress = { phase: "find" | "read"; done: number; total: number; current: string; found: number };
 
 export function DtcCard() {
   const { job, update, scan, setScan, setCleared } = useJob();
   const edge = useEdge();
-  const { targets, unscannable } = useScanTargets(job);
+  const { targets, unscannable, virtual, modules: registryModules, family } = useScanTargets(job);
   const live = useLiveReadings();
   const { run } = useGatedRunner(job);
   const params = useSearchParams();
-  const [scanning, setScanning] = useState<{ done: number; total: number; current: string } | null>(null);
+  const [scanning, setScanning] = useState<ScanProgress | null>(null);
+  const [scanNotes, setScanNotes] = useState<string[]>([]);
+  const stopRef = useRef<AbortController | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [clearOpen, setClearOpen] = useState(false);
@@ -53,19 +59,46 @@ export function DtcCard() {
   const connected = edge.ready && edge.link?.state === "CONNECTED";
   const open = job?.status === "OPEN";
 
+  /**
+   * Scans the vehicle. With no list: virtual adapters scan the simulator's
+   * modules; real vehicles first find every module that answers (discovery),
+   * then read codes from each. With a list (e.g. verifying a clear), only
+   * those modules are read again.
+   */
   const runScan = useCallback(
-    async (list: ScanTarget[] = targets) => {
+    async (given?: ScanTarget[]) => {
       if (!job) return [];
       setScanError(null);
       setSaveError(null);
+      const stop = new AbortController();
+      stopRef.current = stop;
+      let list: ScanTarget[] = given ?? targets;
+      let elsewhere: ModuleResult[] = [];
+      const notes: string[] = [];
+      if (!given && !virtual) {
+        const plan = buildPlan({ family, registryModules, protocol: edge.link?.protocol });
+        elsewhere = plan.elsewhere;
+        notes.push(...plan.notes);
+        const found = await discover((r) => edge.diag(r), plan, {
+          signal: stop.signal,
+          onProgress: (p) => setScanning({ phase: "find", done: p.done, total: p.total, current: p.current, found: p.found }),
+        });
+        list = found.found;
+        notes.push(...found.notes);
+      }
       const results: ModuleResult[] = [];
       for (let i = 0; i < list.length; i += 1) {
-        setScanning({ done: i, total: list.length, current: list[i].module });
+        if (stop.signal.aborted && !given) break;
+        setScanning({ phase: "read", done: i, total: list.length, current: list[i].module, found: list.length });
         results.push(await scanModule((r) => edge.diag(r), list[i]));
       }
+      results.push(...elsewhere);
+      stopRef.current = null;
       setScanning(null);
+      setScanNotes(given ? scanNotes : notes);
       setScan({ at: Date.now(), results });
-      if (results.every((r) => r.outcome === "no_response" || r.outcome === "error")) {
+      const reachable = results.filter((r) => r.outcome !== "other_network");
+      if (reachable.every((r) => r.outcome === "no_response" || r.outcome === "error")) {
         setScanError("No module answered. Check the ignition is on and the adapter is seated, then scan again.");
       }
       const dtcs: JobDtc[] = results.flatMap((r) =>
@@ -87,15 +120,16 @@ export function DtcCard() {
       }
       return results;
     },
-    [job, targets, edge, setScan, update],
+    [job, targets, virtual, family, registryModules, edge, setScan, update, scanNotes],
   );
 
   useEffect(() => {
-    if (autoScanned.current || !connected || !open || !targets.length) return;
+    if (autoScanned.current || !connected || !open || unscannable) return;
+    if (virtual && !targets.length) return;
     if (params.get("scan") !== "1") return;
     autoScanned.current = true;
     void runScan();
-  }, [connected, open, targets, params, runScan]);
+  }, [connected, open, targets, virtual, unscannable, params, runScan]);
 
   const clearSteps: GatedStep[] = useMemo(() => {
     const steps: GatedStep[] = [];
@@ -129,13 +163,14 @@ export function DtcCard() {
       if (!results.some((r) => r.ok)) return;
     }
     setClearOpen(false);
-    // Verify by reading the codes back.
-    const after = await runScan(targets);
+    // Verify by reading the codes back from the modules found by the last scan.
+    const after = await runScan((scan?.results ?? []).filter((r) => r.outcome !== "other_network").map((r) => r.target));
     const remaining = after.flatMap((r) => r.dtcs).filter((d) => d.status !== "history");
     setCleared(failed.length === 0 && remaining.length === 0);
   };
 
   const storedDtcs = job?.dtcs ?? [];
+  const answeredCount = (scan?.results ?? []).filter((r) => r.outcome === "codes" || r.outcome === "clear" || r.outcome === "refused").length;
   const showResults = scan?.results ?? null;
 
   return (
@@ -143,7 +178,7 @@ export function DtcCard() {
       title="Diagnostic trouble codes"
       subtitle={
         scan
-          ? `Scanned ${formatTime(scan.at)} · ${scan.results.length} module${scan.results.length === 1 ? "" : "s"}`
+          ? `Scanned ${formatTime(scan.at)} · ${answeredCount} module${answeredCount === 1 ? "" : "s"} answered`
           : storedDtcs.length
             ? "Saved on this job"
             : "Scan every module for stored, pending and permanent codes."
@@ -155,11 +190,16 @@ export function DtcCard() {
               variant="blue"
               size="sm"
               busy={!!scanning}
-              disabled={!connected || !targets.length}
+              disabled={!connected || unscannable || (virtual && !targets.length)}
               onClick={() => void runScan()}
             >
               {scan ? "Scan again" : "Scan all modules"}
             </Button>
+            {scanning?.phase === "find" ? (
+              <Button size="sm" variant="ghost" onClick={() => stopRef.current?.abort()}>
+                Stop search
+              </Button>
+            ) : null}
             <Button
               variant="danger"
               size="sm"
@@ -184,8 +224,23 @@ export function DtcCard() {
         ) : null}
         {scanning ? (
           <div className="rounded-lg border border-line bg-raised p-3">
-            <Spinner label={`Scanning ${scanning.current} (${scanning.done + 1} of ${scanning.total})…`} />
+            <Spinner
+              label={
+                scanning.phase === "find"
+                  ? `Finding modules: checked ${scanning.done} of ${scanning.total} addresses, ${scanning.found} found so far…`
+                  : `Reading codes from ${scanning.current} (${scanning.done + 1} of ${scanning.total})…`
+              }
+            />
           </div>
+        ) : null}
+        {!scanning && scanNotes.length ? (
+          <Banner tone="info" title="About this scan">
+            <ul className="list-disc space-y-0.5 pl-4">
+              {scanNotes.map((n) => (
+                <li key={n}>{n}</li>
+              ))}
+            </ul>
+          </Banner>
         ) : null}
         {scanError ? <Banner tone="warn">{scanError}</Banner> : null}
         {saveError ? <Banner tone="danger" title="Codes read but not saved">{saveError}</Banner> : null}
@@ -210,12 +265,20 @@ export function DtcCard() {
               return (
                 <li key={`${r.target.module}-${r.target.tx}-${r.target.rx}`} className="rounded-lg border border-line bg-raised p-2.5">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-semibold">{r.target.module}</span>
+                    <span className="min-w-0 text-sm font-semibold">
+                      {r.target.module}
+                      {r.target.name && r.target.name !== r.target.module ? (
+                        <span className="block truncate text-xs font-normal text-muted">{r.target.name}</span>
+                      ) : null}
+                    </span>
                     <Badge tone={tone}>{r.outcome === "codes" ? `${r.dtcs.length} code${r.dtcs.length === 1 ? "" : "s"}` : text}</Badge>
                   </div>
-                  <p className="mt-0.5 font-mono text-[11px] text-faint">
-                    {hexId(r.target.tx)} → {hexId(r.target.rx)} · {[r.target.obd ? "OBD" : null, r.target.protocol].filter(Boolean).join(" + ")}
-                  </p>
+                  {r.outcome === "other_network" && !r.target.tx ? null : (
+                    <p className="mt-0.5 font-mono text-[11px] text-faint">
+                      {hexId(r.target.tx)} → {hexId(r.target.rx)} · {[r.target.obd ? "OBD" : null, r.target.protocol].filter(Boolean).join(" + ")}
+                      {r.target.discovered ? <span className="ml-1 font-sans">· found by address search</span> : null}
+                    </p>
+                  )}
                   {r.outcome !== "codes" && r.outcome !== "clear" ? <p className="mt-1 text-xs text-muted">{r.message}</p> : null}
                 </li>
               );

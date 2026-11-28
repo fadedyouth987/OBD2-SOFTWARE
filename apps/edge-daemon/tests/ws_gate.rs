@@ -588,3 +588,51 @@ async fn streams_the_contract_pids_and_only_supported_ones() {
         "{generic:?}"
     );
 }
+
+/// Task 6.2: a FORScan-style module sweep over the socket. TesterPresent to
+/// every 11-bit address 0x700-0x7F7 finds exactly the modules the virtual
+/// Falcon simulates, absent addresses time out, and the session keeps working
+/// after hundreds of channels (the per-connection channel cap).
+#[tokio::test]
+async fn tester_present_sweep_finds_exactly_the_simulated_modules() {
+    let d = start(|_, _| {}).await;
+    let mut ws = paired(&d).await;
+    send(&mut ws, &json!({"type": "ConnectRequest", "request_id": "c1", "adapter_id": "virtual-ford-falcon-ba", "protocol": "AUTO", "baud_rate": null, "safety_mode": "SILENT"})).await;
+    assert_eq!(reply(&mut ws, "c1").await["state"], "CONNECTED");
+
+    let started = Instant::now();
+    let mut found = Vec::new();
+    for tx in (0x700u32..=0x7F7).filter(|t| *t != 0x7DF) {
+        loop {
+            let id = format!("p{tx:x}");
+            send(&mut ws, &diag(&id, tx, tx + 8, "3E00")).await;
+            let r = reply(&mut ws, &id).await;
+            match (r["type"].as_str(), r["code"].as_str()) {
+                (Some("DiagCommandResponse"), _) => {
+                    found.push(tx);
+                    break;
+                }
+                (Some("ErrorResponse"), Some("TIMEOUT")) => break,
+                (Some("ErrorResponse"), _)
+                    if r["message"]
+                        .as_str()
+                        .is_some_and(|m| m.contains("rate limit")) =>
+                {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                _ => panic!("unexpected reply at {tx:#x}: {r}"),
+            }
+        }
+    }
+    assert_eq!(
+        found,
+        vec![0x720, 0x760, 0x7E0],
+        "IC, ABS and PCM answer; nothing else"
+    );
+    let took = started.elapsed();
+    assert!(took < Duration::from_secs(40), "sweep took {took:?}");
+
+    // The first channels were closed long ago by the cap; reopening one still works.
+    send(&mut ws, &diag("again", 0x7E0, 0x7E8, "3E00")).await;
+    assert_eq!(reply(&mut ws, "again").await["type"], "DiagCommandResponse");
+}

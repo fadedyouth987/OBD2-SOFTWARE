@@ -7,6 +7,8 @@ Single source of truth for wire contracts (eng review decision d3, A-DX-3). Edit
 | `edge_ws.schema.json` | Every message on the local edge WebSocket (tagged union on `type`), plus `x-protocol-version` and `x-request-response` | Generated Rust types, Zod validators, [`docs/protocol.md`](../../docs/protocol.md) |
 | `safety_policy.json` | The only list of gated diagnostic services and their tier preconditions (Rule 3) | Rust `include_str!`, web app import |
 | `safety_policy.schema.json` | Shape of `safety_policy.json` | Generated Rust/Zod types; validated on load |
+| `module_catalog.json` | Module names and diagnostic addresses per make family, the address ranges the scanner sweeps to find unlisted modules, and the source for every entry | Web module discovery (`apps/web/src/lib/module-catalog.ts`), cloud-api registry tests |
+| `module_catalog.schema.json` | Shape of `module_catalog.json` | Validated in web and cloud-api tests |
 | `error_hints.json` | One-line fix-it text for every `ErrorCode` (A-DX-4) | Rust and web `errorHint` |
 | `fixtures/` | Shared parity fixtures (see below) | Rust and TS tests |
 

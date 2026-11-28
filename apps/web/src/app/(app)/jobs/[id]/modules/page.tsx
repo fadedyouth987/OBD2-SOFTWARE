@@ -18,6 +18,7 @@ const OUTCOME: Record<ModuleResult["outcome"], [Tone, string]> = {
   refused: ["warn", "Refused"],
   no_response: ["neutral", "No response"],
   error: ["danger", "Error"],
+  other_network: ["info", "Other network"],
 };
 
 const keyOf = (t: ScanTarget) => `${t.module}-${t.tx}-${t.rx}`;
@@ -33,7 +34,7 @@ export default function ModulesPage() {
   const { job, scan } = useJob();
   const { token } = useAuth();
   const edge = useEdge();
-  const { targets, unscannable, loading } = useScanTargets(job);
+  const { targets: listed, unscannable, loading, virtual } = useScanTargets(job);
   const [platform, setPlatform] = useState<VehiclePlatform | null>(null);
   const [platformState, setPlatformState] = useState<"loading" | "ok" | "none" | "error">("loading");
   const [ident, setIdent] = useState<Record<string, IdentResult | "reading">>({});
@@ -63,12 +64,17 @@ export default function ModulesPage() {
   };
   const readAll = async () => {
     setReadingAll(true);
-    for (const t of targets) await readOne(t);
+    // Modules on another network can't be read on this connection.
+    const away = new Set((scan?.results ?? []).filter((r) => r.outcome === "other_network").map((r) => keyOf(r.target)));
+    for (const t of targets) if (!away.has(keyOf(t))) await readOne(t);
     setReadingAll(false);
   };
 
   if (!job) return null;
   const outcomes = new Map((scan?.results ?? []).map((r) => [keyOf(r.target), r]));
+  // After a scan of a real vehicle, list what the scan found (discovery), not just the registry.
+  const scanned = (scan?.results ?? []).map((r) => r.target);
+  const targets = !virtual && scanned.length ? scanned : listed;
   const buses = new Map<string, ScanTarget[]>();
   for (const t of targets) {
     const b = busOf(t, platform);
@@ -200,9 +206,7 @@ export default function ModulesPage() {
                   {platform.modules.map((m) => (
                     <li key={m.id}>
                       <span className="font-semibold">{m.id}</span> <span className="text-muted">· {m.bus}</span>{" "}
-                      <span className="font-mono text-faint">
-                        {m.tx} → {m.rx}
-                      </span>
+                      <span className="font-mono text-faint">{m.tx ? `${m.tx} → ${m.rx}` : "not on CAN"}</span>
                     </li>
                   ))}
                 </ul>
