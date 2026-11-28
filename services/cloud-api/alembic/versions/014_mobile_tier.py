@@ -5,8 +5,8 @@ only the enum value and its retention row are stored here. Downgrade refuses whi
 any tenant is on MOBILE, then removes the retention row. Postgres can't cheaply drop
 an enum value, so MOBILE stays on the type (as FLEET does in 004).
 
-Revision ID: 013
-Revises: 012
+Revision ID: 014
+Revises: 013
 """
 
 from __future__ import annotations
@@ -15,8 +15,8 @@ from sqlalchemy import text
 
 from alembic import op
 
-revision = "013"
-down_revision = "012"
+revision = "014"
+down_revision = "013"
 branch_labels = None
 depends_on = None
 

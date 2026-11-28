@@ -26,6 +26,7 @@ from app.services.billing import (
     charge_schematic_pages,
     entitlement_for,
     maybe_expire_grace,
+    offered_tiers,
     resolve_event_tenant_id,
 )
 from app.services.permissions import Permission, require
@@ -111,6 +112,11 @@ def create_checkout_session(req: CheckoutRequest, principal: RequirePrincipal) -
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Community is the free default; pick a paid plan to check out",
+        )
+    if req.tier not in offered_tiers():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"The {req.tier.value.title()} plan isn't offered",
         )
     if req.immo_addon and req.tier not in IMMO_ELIGIBLE:
         raise HTTPException(

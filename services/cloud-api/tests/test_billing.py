@@ -151,6 +151,15 @@ def _subscription_event(
     }
 
 
+@pytest.fixture
+def mobile_on(monkeypatch: pytest.MonkeyPatch):
+    """The Mobile plan is off by default (not approved); these tests cover it switched on."""
+    monkeypatch.setenv("PLAN_MOBILE_ENABLED", "true")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 @pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
 def test_catalog_lists_new_prices_and_fleet_and_adelaide_tz(client: TestClient):
     res = client.get("/api/v1/billing/tiers")
@@ -619,7 +628,9 @@ def test_checkout_redirects_only_to_paths_on_this_app():
 
 
 @pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
-def test_mobile_checkout_grants_mobile_with_40_ai_and_no_lease_features(client: TestClient):
+def test_mobile_checkout_grants_mobile_with_40_ai_and_no_lease_features(
+    client: TestClient, mobile_on
+):
     session = _dev_session(client)
     res = _post_event(
         client, _checkout_event(tenant_id=session["tenant_id"], price_ids=[MOBILE_PRICE])
@@ -637,7 +648,9 @@ def test_mobile_checkout_grants_mobile_with_40_ai_and_no_lease_features(client: 
 
 
 @pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
-def test_mobile_to_pro_is_upgrade_and_pro_to_mobile_bumps_lease_version(client: TestClient):
+def test_mobile_to_pro_is_upgrade_and_pro_to_mobile_bumps_lease_version(
+    client: TestClient, mobile_on
+):
     session = _dev_session(client)
     tenant_id = session["tenant_id"]
     customer = f"cus_{uuid.uuid4().hex[:10]}"
@@ -683,7 +696,7 @@ def test_mobile_to_pro_is_upgrade_and_pro_to_mobile_bumps_lease_version(client: 
 
 @pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
 def test_workshop_trial_is_not_offered_to_a_mobile_workspace(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, mobile_on
 ):
     session = _dev_session(client)
     _post_event(client, _checkout_event(tenant_id=session["tenant_id"], price_ids=[MOBILE_PRICE]))
@@ -702,7 +715,7 @@ def test_workshop_trial_is_not_offered_to_a_mobile_workspace(
 
 @pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
 def test_mobile_checkout_refused_clearly_without_its_price(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, mobile_on
 ):
     owner = _dev_session(client)
     monkeypatch.setenv("STRIPE_PRICE_MOBILE_MONTH", "")
@@ -718,3 +731,15 @@ def test_mobile_checkout_refused_clearly_without_its_price(
     finally:
         monkeypatch.setenv("STRIPE_PRICE_MOBILE_MONTH", MOBILE_PRICE)
         get_settings.cache_clear()
+
+
+@pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
+def test_mobile_checkout_refused_while_the_plan_is_off(client: TestClient):
+    owner = _dev_session(client)
+    res = client.post(
+        "/api/v1/billing/checkout-session",
+        json={"tier": "MOBILE", "interval": "month"},
+        headers=_auth(owner["access_token"]),
+    )
+    assert res.status_code == 400, res.text
+    assert "isn't offered" in res.json()["detail"]

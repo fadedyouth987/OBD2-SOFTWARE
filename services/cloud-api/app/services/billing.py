@@ -92,10 +92,20 @@ def period_start_adelaide(day: date | None = None) -> date:
     return d.replace(day=1)
 
 
+def offered_tiers() -> frozenset[SubscriptionTier]:
+    """Tiers a workspace can see and buy. MOBILE only once PLAN_MOBILE_ENABLED is on."""
+    hidden = set() if get_settings().plan_mobile_enabled else {SubscriptionTier.MOBILE}
+    return frozenset(t for t in SubscriptionTier if t not in hidden)
+
+
 def catalog_public() -> dict[str, Any]:
     settings = get_settings()
+    offered = offered_tiers()
+    offered_names = {t.value for t in offered}
     tiers = []
     for tier, q in TIER_QUOTAS.items():
+        if tier not in offered:
+            continue
         tiers.append(
             {
                 "tier": tier.value,
@@ -124,7 +134,10 @@ def catalog_public() -> dict[str, Any]:
         "immo_addon": IMMO_ADDON,
         "plans_version": _PLANS.version,
         "tiers": tiers,
-        "app_features": [dict(f) for f in _PLANS.app_features],
+        "app_features": [
+            {**f, "tiers": [t for t in f.get("tiers") or [] if t in offered_names]}
+            for f in _PLANS.app_features
+        ],
     }
 
 

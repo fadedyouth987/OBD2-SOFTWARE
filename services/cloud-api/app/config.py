@@ -41,6 +41,9 @@ try:
         auth_allow_dev_login: bool = False
         stripe_webhook_secret: str = ""
         stripe_secret_key: str = ""
+        # The Mobile plan ($15/mo, 40 AI) is not approved yet: hidden from the catalog,
+        # refused at Checkout and unmapped from Stripe prices until this is turned on.
+        plan_mobile_enabled: bool = False
         stripe_price_mobile_month: str = ""
         stripe_price_mobile_year: str = ""
         stripe_price_pro_month: str = ""
@@ -112,9 +115,16 @@ try:
             return str(getattr(self, f"stripe_price_immo_{interval.lower()}", "") or "")
 
         def price_catalog(self) -> dict[str, str]:
+            mobile = (
+                {
+                    "MOBILE:month": self.stripe_price_mobile_month,
+                    "MOBILE:year": self.stripe_price_mobile_year,
+                }
+                if self.plan_mobile_enabled
+                else {}
+            )
             return {
-                "MOBILE:month": self.stripe_price_mobile_month,
-                "MOBILE:year": self.stripe_price_mobile_year,
+                **mobile,
                 "PRO:month": self.stripe_price_pro_month,
                 "PRO:year": self.stripe_price_pro_year,
                 "WORKSHOP:month": self.stripe_price_workshop_month,
@@ -147,6 +157,9 @@ except ImportError:
         auth_allow_dev_login: bool = False
         stripe_webhook_secret: str = ""
         stripe_secret_key: str = ""
+        # The Mobile plan ($15/mo, 40 AI) is not approved yet: hidden from the catalog,
+        # refused at Checkout and unmapped from Stripe prices until this is turned on.
+        plan_mobile_enabled: bool = False
         stripe_price_mobile_month: str = ""
         stripe_price_mobile_year: str = ""
         stripe_price_pro_month: str = ""

@@ -70,7 +70,30 @@ def test_mobile_plan():
     assert signing.features_for_tier("MOBILE", immo_entitled=True) == []
 
 
-def test_catalog_lists_mobile_and_app_features():
+@pytest.fixture
+def mobile_on(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("PLAN_MOBILE_ENABLED", "true")
+    billing.get_settings.cache_clear()
+    yield
+    billing.get_settings.cache_clear()
+
+
+def test_mobile_plan_is_off_by_default(monkeypatch: pytest.MonkeyPatch):
+    """Not approved yet: hidden, unbuyable, and no Stripe price maps to it."""
+    monkeypatch.delenv("PLAN_MOBILE_ENABLED", raising=False)
+    monkeypatch.setenv("STRIPE_PRICE_MOBILE_MONTH", "price_unit_mobile_m")
+    billing.get_settings.cache_clear()
+    try:
+        cat = billing.catalog_public()
+        assert [t["tier"] for t in cat["tiers"]] == ["COMMUNITY", "PRO", "WORKSHOP", "FLEET"]
+        assert all("MOBILE" not in f["tiers"] for f in cat["app_features"])
+        assert SubscriptionTier.MOBILE not in billing.offered_tiers()
+        assert billing.map_price_ids(["price_unit_mobile_m"])[0] is None
+    finally:
+        billing.get_settings.cache_clear()
+
+
+def test_catalog_lists_mobile_and_app_features(mobile_on):
     cat = billing.catalog_public()
     assert [t["tier"] for t in cat["tiers"]] == ["COMMUNITY", "MOBILE", "PRO", "WORKSHOP", "FLEET"]
     keys = {f["key"] for f in cat["app_features"]}
@@ -81,7 +104,7 @@ def test_catalog_lists_mobile_and_app_features():
     assert "COMMUNITY" in report["tiers"]  # same as the web report today (D3)
 
 
-def test_mobile_price_maps_to_mobile(monkeypatch: pytest.MonkeyPatch):
+def test_mobile_price_maps_to_mobile(monkeypatch: pytest.MonkeyPatch, mobile_on):
     monkeypatch.setenv("STRIPE_PRICE_MOBILE_MONTH", "price_unit_mobile_m")
     billing.get_settings.cache_clear()
     try:
