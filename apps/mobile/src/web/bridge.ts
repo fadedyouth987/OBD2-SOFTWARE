@@ -7,7 +7,25 @@ export type BridgeMessage =
   | { type: "open-dongle" }
   | { type: "open-external"; url: string }
   | { type: "signed-out" }
-  | { type: "session"; token: string | null };
+  | { type: "session"; token: string | null }
+  | { type: "lan-pair" }
+  | { type: "lan-forget" }
+  | { type: "daemon-open"; id: string }
+  | { type: "daemon-send"; id: string; text: string }
+  | { type: "daemon-close"; id: string };
+
+/** What the web app may know about the paired PC (never the device secret). */
+export interface DaemonInfo {
+  paired: boolean;
+  name?: string;
+  host?: string;
+  port?: number;
+  fingerprint?: string;
+}
+
+const CONN_ID = /^[A-Za-z0-9_-]{1,64}$/;
+/** Daemon frames are small JSON; anything near this is a bug or abuse. */
+const MAX_FRAME = 1_000_000;
 
 const SAFE_PATH = /^\/(?!\/)[^\\\s]*$/;
 
@@ -35,7 +53,16 @@ export function parseBridgeMessage(raw: string, fromUrl: string, appOrigin: stri
     }
     case "open-dongle":
     case "signed-out":
+    case "lan-pair":
+    case "lan-forget":
       return { type: m.type };
+    case "daemon-open":
+    case "daemon-close":
+      return typeof m.id === "string" && CONN_ID.test(m.id) ? { type: m.type, id: m.id } : null;
+    case "daemon-send":
+      return typeof m.id === "string" && CONN_ID.test(m.id) && typeof m.text === "string" && m.text.length <= MAX_FRAME
+        ? { type: "daemon-send", id: m.id, text: m.text }
+        : null;
     case "open-external":
       return typeof m.url === "string" ? { type: "open-external", url: m.url } : null;
     case "session":
@@ -45,11 +72,27 @@ export function parseBridgeMessage(raw: string, fromUrl: string, appOrigin: stri
   }
 }
 
-/** Runs before the web app loads: marks the page as being inside the app. */
-export function bootstrapScript(appVersion: string): string {
-  return `(function(){try{Object.defineProperty(window,"RootCauseNative",{value:Object.freeze({platform:"android",appVersion:${JSON.stringify(
-    appVersion,
-  )}}),configurable:false});}catch(e){}})();true;`;
+/**
+ * Runs before the web app loads: marks the page as being inside the app. With
+ * `daemon` (builds that can reach the workshop PC) it also says which PC is
+ * paired; daemonUpdateScript() changes that later without a reload.
+ */
+export function bootstrapScript(appVersion: string, daemon?: DaemonInfo, devLoopback = false): string {
+  const info = JSON.stringify({ platform: "android", appVersion, ...(devLoopback ? { devLoopback: true } : {}) });
+  if (!daemon) {
+    return `(function(){try{Object.defineProperty(window,"RootCauseNative",{value:Object.freeze(${info}),configurable:false});}catch(e){}})();true;`;
+  }
+  return `(function(){try{var d=Object.freeze(${JSON.stringify(daemon)});var i=${info};Object.defineProperty(i,"daemon",{get:function(){return d;},enumerable:true});Object.defineProperty(window,"RootCauseNative",{value:Object.freeze(i),configurable:false});Object.defineProperty(window,"__rootcauseSetDaemon",{value:function(n){d=Object.freeze(n);window.dispatchEvent(new Event(${JSON.stringify(
+    DAEMON_EVENT,
+  )}));},configurable:false});}catch(e){}})();true;`;
+}
+
+/** The web side listens for this (apps/web/src/lib/native.ts NATIVE_DAEMON_EVENT). */
+export const DAEMON_EVENT = "rootcause-native-daemon";
+
+/** Tells the web app the paired PC changed (it reconnects through the new one). */
+export function daemonUpdateScript(daemon: DaemonInfo): string {
+  return `(function(){if(window.__rootcauseSetDaemon){window.__rootcauseSetDaemon(${JSON.stringify(daemon)});}})();true;`;
 }
 
 /** Asks the web app for its session token (the dongle screens use the same sign-in). */

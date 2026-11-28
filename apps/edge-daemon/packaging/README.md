@@ -28,4 +28,7 @@ Add each technician to the local group "RootCause Technicians"
 (`net localgroup "RootCause Technicians" <user> /add`); members can then run
 `edge-daemon pair` in a new terminal.
 
-Both listen on 127.0.0.1 and [::1] only, port 8765.
+Both listen on 127.0.0.1 and [::1] only, port 8765. Phone access over the
+workshop network is off until an administrator runs `edge-daemon lan enable`,
+restarts the service and allows TCP 8766 on the private network profile; see
+`docs/design/lan-phone-access.md`.

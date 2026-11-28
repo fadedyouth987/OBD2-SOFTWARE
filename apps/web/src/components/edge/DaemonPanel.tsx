@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Badge, Banner, Button, Card, Field, Mono, Spinner, cx } from "@/components/ui";
 import { useEdge } from "@/context/edge";
 import { TIER_LABEL } from "@/lib/entitlements";
+import { postToNative, useNativeApp } from "@/lib/native";
 
 function Countdown({ ms }: { ms: number | null }) {
   const [left, setLeft] = useState(ms ?? 0);
@@ -54,6 +55,7 @@ export function PairCodeForm() {
 export function DaemonPanel({ compact = false }: { compact?: boolean }) {
   const { snapshot, mode, setMode, retry, lease } = useEdge();
   const { phase, failure, hello } = snapshot;
+  const native = useNativeApp();
 
   let body: React.ReactNode;
   if (phase === "ready" && hello) {
@@ -87,6 +89,34 @@ export function DaemonPanel({ compact = false }: { compact?: boolean }) {
     );
   } else if (phase === "connecting" || phase === "handshaking" || phase === "idle") {
     body = <Spinner label={phase === "handshaking" ? "Handshaking with the daemon…" : "Connecting to the edge daemon…"} />;
+  } else if (failure?.kind === "phone") {
+    // The app's link to the workshop PC: say why car changes are unavailable and how to fix it.
+    body = (
+      <div className="space-y-3">
+        <Banner
+          tone={phase === "failed" ? "danger" : "warn"}
+          title={failure.message}
+          action={
+            <>
+              {native ? (
+                <Button size="sm" onClick={() => postToNative({ type: "lan-pair" })}>
+                  Pair with a PC
+                </Button>
+              ) : null}
+              <Button size="sm" onClick={retry}>
+                Retry now
+              </Button>
+            </>
+          }
+        >
+          {failure.hint} {phase === "waiting" ? <Countdown ms={snapshot.retryInMs} /> : null}
+        </Banner>
+        <p className="text-xs text-muted">
+          Reading codes and live data with this phone&apos;s own Bluetooth dongle still works. Clearing codes, service
+          functions and key programming need the PC&apos;s edge daemon.
+        </p>
+      </div>
+    );
   } else if (failure?.needsCode) {
     body = (
       <div className="space-y-3">
@@ -137,7 +167,11 @@ export function DaemonPanel({ compact = false }: { compact?: boolean }) {
   return (
     <Card
       title="Edge daemon"
-      subtitle="The local service on this computer that talks to the adapter."
+      subtitle={
+        native?.daemon
+          ? "The service on the workshop PC that talks to the adapter, reached over the workshop network."
+          : "The local service on this computer that talks to the adapter."
+      }
       actions={
         <div role="radiogroup" aria-label="Data source" className="flex rounded-lg border border-line p-0.5 text-xs">
           {(

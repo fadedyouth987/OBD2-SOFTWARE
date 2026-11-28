@@ -1307,6 +1307,13 @@ pub enum EdgeMessage {
     LeaseStatusRequest(LeaseStatusRequest),
     LeaseInstallRequest(LeaseInstallRequest),
     LeaseStatus(LeaseStatus),
+    LanStatusRequest(LanStatusRequest),
+    LanStatus(LanStatus),
+    LanPairOfferRequest(LanPairOfferRequest),
+    LanPairOffer(LanPairOffer),
+    LanDeviceRevokeRequest(LanDeviceRevokeRequest),
+    LanPairRequest(LanPairRequest),
+    LanPairResponse(LanPairResponse),
 }
 impl ::std::convert::From<HelloRequest> for EdgeMessage {
     fn from(value: HelloRequest) -> Self {
@@ -1398,6 +1405,41 @@ impl ::std::convert::From<LeaseStatus> for EdgeMessage {
         Self::LeaseStatus(value)
     }
 }
+impl ::std::convert::From<LanStatusRequest> for EdgeMessage {
+    fn from(value: LanStatusRequest) -> Self {
+        Self::LanStatusRequest(value)
+    }
+}
+impl ::std::convert::From<LanStatus> for EdgeMessage {
+    fn from(value: LanStatus) -> Self {
+        Self::LanStatus(value)
+    }
+}
+impl ::std::convert::From<LanPairOfferRequest> for EdgeMessage {
+    fn from(value: LanPairOfferRequest) -> Self {
+        Self::LanPairOfferRequest(value)
+    }
+}
+impl ::std::convert::From<LanPairOffer> for EdgeMessage {
+    fn from(value: LanPairOffer) -> Self {
+        Self::LanPairOffer(value)
+    }
+}
+impl ::std::convert::From<LanDeviceRevokeRequest> for EdgeMessage {
+    fn from(value: LanDeviceRevokeRequest) -> Self {
+        Self::LanDeviceRevokeRequest(value)
+    }
+}
+impl ::std::convert::From<LanPairRequest> for EdgeMessage {
+    fn from(value: LanPairRequest) -> Self {
+        Self::LanPairRequest(value)
+    }
+}
+impl ::std::convert::From<LanPairResponse> for EdgeMessage {
+    fn from(value: LanPairResponse) -> Self {
+        Self::LanPairResponse(value)
+    }
+}
 ///Every code has a one-line fix-it hint in error_hints.json (A-DX-4).
 #[derive(
     ::serde::Deserialize,
@@ -1432,6 +1474,8 @@ pub enum ErrorCode {
     Timeout,
     #[serde(rename = "VERSION_UNSUPPORTED")]
     VersionUnsupported,
+    #[serde(rename = "LAN_UNAVAILABLE")]
+    LanUnavailable,
 }
 impl ::std::fmt::Display for ErrorCode {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
@@ -1446,6 +1490,7 @@ impl ::std::fmt::Display for ErrorCode {
             Self::ProtocolError => f.write_str("PROTOCOL_ERROR"),
             Self::Timeout => f.write_str("TIMEOUT"),
             Self::VersionUnsupported => f.write_str("VERSION_UNSUPPORTED"),
+            Self::LanUnavailable => f.write_str("LAN_UNAVAILABLE"),
         }
     }
 }
@@ -1465,6 +1510,7 @@ impl ::std::str::FromStr for ErrorCode {
             "PROTOCOL_ERROR" => Ok(Self::ProtocolError),
             "TIMEOUT" => Ok(Self::Timeout),
             "VERSION_UNSUPPORTED" => Ok(Self::VersionUnsupported),
+            "LAN_UNAVAILABLE" => Ok(Self::LanUnavailable),
             _ => Err("invalid value".into()),
         }
     }
@@ -1733,7 +1779,7 @@ impl ::std::convert::TryFrom<::std::string::String> for Feature {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct HelloRequest {
-    ///Cloud pairing JWT (aud=edge-ws) or 6-digit local pairing code from `edge-daemon pair`.
+    ///Cloud pairing JWT (aud=edge-ws) or 6-digit local pairing code from `edge-daemon pair`. Network (phone) connections accept only the cloud pairing JWT.
     pub client_token: HelloRequestClientToken,
     pub client_version: SemVer,
     pub policy_version: SemVer,
@@ -1742,7 +1788,7 @@ pub struct HelloRequest {
     #[serde(rename = "type")]
     pub type_: HelloRequestType,
 }
-///Cloud pairing JWT (aud=edge-ws) or 6-digit local pairing code from `edge-daemon pair`.
+///Cloud pairing JWT (aud=edge-ws) or 6-digit local pairing code from `edge-daemon pair`. Network (phone) connections accept only the cloud pairing JWT.
 #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[serde(transparent)]
 pub struct HelloRequestClientToken(::std::string::String);
@@ -2260,6 +2306,1530 @@ impl<'de> ::serde::Deserialize<'de> for HexBytes {
             .map_err(|e: self::error::ConversionError| {
                 <D::Error as ::serde::de::Error>::custom(e.to_string())
             })
+    }
+}
+///A phone paired for network access (LanStatus.devices).
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct LanDevice {
+    ///True while the phone has a connection open.
+    pub connected: bool,
+    ///Id of a paired phone.
+    pub device_id: LanDeviceDeviceId,
+    ///Last connection; null if it never connected after pairing.
+    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    pub last_seen_at: ::std::option::Option<Rfc3339Utc>,
+    ///Name the phone gave when it paired.
+    pub name: LanDeviceName,
+    pub paired_at: Rfc3339Utc,
+    ///Cloud user id of the technician who created the pairing code; null when it came from `edge-daemon lan pair`.
+    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    pub paired_by: ::std::option::Option<LanDevicePairedBy>,
+}
+///Id of a paired phone.
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct LanDeviceDeviceId(::std::string::String);
+impl ::std::ops::Deref for LanDeviceDeviceId {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<LanDeviceDeviceId> for ::std::string::String {
+    fn from(value: LanDeviceDeviceId) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for LanDeviceDeviceId {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for LanDeviceDeviceId {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        { ::regress::Regex::with_flags("^lan_[0-9a-f]{16}$", "u").unwrap() });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^lan_[0-9a-f]{16}$\"".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LanDeviceDeviceId {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value.as_str())
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for LanDeviceDeviceId {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
+///Name the phone gave when it paired.
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct LanDeviceName(::std::string::String);
+impl ::std::ops::Deref for LanDeviceName {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<LanDeviceName> for ::std::string::String {
+    fn from(value: LanDeviceName) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for LanDeviceName {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for LanDeviceName {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        if value.chars().count() > 48usize {
+            return Err("longer than 48 characters".into());
+        }
+        if value.chars().count() < 1usize {
+            return Err("shorter than 1 characters".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LanDeviceName {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value.as_str())
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for LanDeviceName {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
+///Cloud user id of the technician who created the pairing code; null when it came from `edge-daemon lan pair`.
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct LanDevicePairedBy(::std::string::String);
+impl ::std::ops::Deref for LanDevicePairedBy {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<LanDevicePairedBy> for ::std::string::String {
+    fn from(value: LanDevicePairedBy) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for LanDevicePairedBy {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for LanDevicePairedBy {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        if value.chars().count() > 64usize {
+            return Err("longer than 64 characters".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LanDevicePairedBy {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value.as_str())
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for LanDevicePairedBy {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
+///Removes a paired phone and closes its connections. Loopback connections only. Request -> LanStatus.
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct LanDeviceRevokeRequest {
+    ///Id of a paired phone.
+    pub device_id: LanDeviceRevokeRequestDeviceId,
+    pub request_id: RequestId,
+    #[serde(rename = "type")]
+    pub type_: LanDeviceRevokeRequestType,
+}
+///Id of a paired phone.
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct LanDeviceRevokeRequestDeviceId(::std::string::String);
+impl ::std::ops::Deref for LanDeviceRevokeRequestDeviceId {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<LanDeviceRevokeRequestDeviceId> for ::std::string::String {
+    fn from(value: LanDeviceRevokeRequestDeviceId) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for LanDeviceRevokeRequestDeviceId {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for LanDeviceRevokeRequestDeviceId {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        { ::regress::Regex::with_flags("^lan_[0-9a-f]{16}$", "u").unwrap() });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^lan_[0-9a-f]{16}$\"".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LanDeviceRevokeRequestDeviceId {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value.as_str())
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for LanDeviceRevokeRequestDeviceId {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
+///`LanDeviceRevokeRequestType`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum LanDeviceRevokeRequestType {
+    LanDeviceRevokeRequest,
+}
+impl ::std::fmt::Display for LanDeviceRevokeRequestType {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::LanDeviceRevokeRequest => f.write_str("LanDeviceRevokeRequest"),
+        }
+    }
+}
+impl ::std::str::FromStr for LanDeviceRevokeRequestType {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "LanDeviceRevokeRequest" => Ok(Self::LanDeviceRevokeRequest),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for LanDeviceRevokeRequestType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LanDeviceRevokeRequestType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+///A pairing code for a phone. Response to LanPairOfferRequest.
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct LanPairOffer {
+    pub expires_at: Rfc3339Utc,
+    ///SHA-256 of the daemon's network TLS certificate (DER), lowercase hex. The phone pins it.
+    pub fingerprint: LanPairOfferFingerprint,
+    ///IP address of this PC on the workshop network (IPv4 dotted, or IPv6 without brackets).
+    pub host: LanPairOfferHost,
+    ///rootcause://lan-pair link with host, port, fingerprint, one-time token, daemon id and name. Shown as a QR code; it is a secret until used or expired.
+    pub pairing_uri: LanPairOfferPairingUri,
+    pub port: ::std::num::NonZeroU16,
+    ///The QR code: one string per row, '1' dark and '0' light, no quiet zone.
+    pub qr_rows: ::std::vec::Vec<LanPairOfferQrRowsItem>,
+    pub request_id: RequestId,
+    #[serde(rename = "type")]
+    pub type_: LanPairOfferType,
+}
+///SHA-256 of the daemon's network TLS certificate (DER), lowercase hex. The phone pins it.
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct LanPairOfferFingerprint(::std::string::String);
+impl ::std::ops::Deref for LanPairOfferFingerprint {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<LanPairOfferFingerprint> for ::std::string::String {
+    fn from(value: LanPairOfferFingerprint) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for LanPairOfferFingerprint {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for LanPairOfferFingerprint {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        { ::regress::Regex::with_flags("^[0-9a-f]{64}$", "u").unwrap() });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^[0-9a-f]{64}$\"".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LanPairOfferFingerprint {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value.as_str())
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for LanPairOfferFingerprint {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
+///IP address of this PC on the workshop network (IPv4 dotted, or IPv6 without brackets).
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct LanPairOfferHost(::std::string::String);
+impl ::std::ops::Deref for LanPairOfferHost {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<LanPairOfferHost> for ::std::string::String {
+    fn from(value: LanPairOfferHost) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for LanPairOfferHost {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for LanPairOfferHost {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        if value.chars().count() > 45usize {
+            return Err("longer than 45 characters".into());
+        }
+        if value.chars().count() < 2usize {
+            return Err("shorter than 2 characters".into());
+        }
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        { ::regress::Regex::with_flags("^[0-9A-Fa-f:.]+$", "u").unwrap() });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^[0-9A-Fa-f:.]+$\"".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LanPairOfferHost {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value.as_str())
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for LanPairOfferHost {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
+///rootcause://lan-pair link with host, port, fingerprint, one-time token, daemon id and name. Shown as a QR code; it is a secret until used or expired.
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct LanPairOfferPairingUri(::std::string::String);
+impl ::std::ops::Deref for LanPairOfferPairingUri {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<LanPairOfferPairingUri> for ::std::string::String {
+    fn from(value: LanPairOfferPairingUri) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for LanPairOfferPairingUri {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for LanPairOfferPairingUri {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        if value.chars().count() > 512usize {
+            return Err("longer than 512 characters".into());
+        }
+        if value.chars().count() < 16usize {
+            return Err("shorter than 16 characters".into());
+        }
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        { ::regress::Regex::with_flags("^rootcause://lan-pair\\?", "u").unwrap() });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^rootcause://lan-pair\\?\"".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LanPairOfferPairingUri {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value.as_str())
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for LanPairOfferPairingUri {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
+///`LanPairOfferQrRowsItem`
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct LanPairOfferQrRowsItem(::std::string::String);
+impl ::std::ops::Deref for LanPairOfferQrRowsItem {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<LanPairOfferQrRowsItem> for ::std::string::String {
+    fn from(value: LanPairOfferQrRowsItem) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for LanPairOfferQrRowsItem {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for LanPairOfferQrRowsItem {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        if value.chars().count() > 177usize {
+            return Err("longer than 177 characters".into());
+        }
+        if value.chars().count() < 21usize {
+            return Err("shorter than 21 characters".into());
+        }
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        { ::regress::Regex::with_flags("^[01]+$", "u").unwrap() });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^[01]+$\"".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LanPairOfferQrRowsItem {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value.as_str())
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for LanPairOfferQrRowsItem {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
+///Creates a one-time pairing QR code for a phone (5 minutes, single use). Loopback connections only. Request -> LanPairOffer.
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct LanPairOfferRequest {
+    ///Which of LanStatus.addresses to put in the code; null picks the best.
+    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    pub host: ::std::option::Option<LanPairOfferRequestHost>,
+    pub request_id: RequestId,
+    #[serde(rename = "type")]
+    pub type_: LanPairOfferRequestType,
+}
+///IP address of this PC on the workshop network (IPv4 dotted, or IPv6 without brackets).
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct LanPairOfferRequestHost(::std::string::String);
+impl ::std::ops::Deref for LanPairOfferRequestHost {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<LanPairOfferRequestHost> for ::std::string::String {
+    fn from(value: LanPairOfferRequestHost) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for LanPairOfferRequestHost {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for LanPairOfferRequestHost {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        if value.chars().count() > 45usize {
+            return Err("longer than 45 characters".into());
+        }
+        if value.chars().count() < 2usize {
+            return Err("shorter than 2 characters".into());
+        }
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        { ::regress::Regex::with_flags("^[0-9A-Fa-f:.]+$", "u").unwrap() });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^[0-9A-Fa-f:.]+$\"".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LanPairOfferRequestHost {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value.as_str())
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for LanPairOfferRequestHost {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
+///`LanPairOfferRequestType`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum LanPairOfferRequestType {
+    LanPairOfferRequest,
+}
+impl ::std::fmt::Display for LanPairOfferRequestType {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::LanPairOfferRequest => f.write_str("LanPairOfferRequest"),
+        }
+    }
+}
+impl ::std::str::FromStr for LanPairOfferRequestType {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "LanPairOfferRequest" => Ok(Self::LanPairOfferRequest),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for LanPairOfferRequestType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LanPairOfferRequestType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+///`LanPairOfferType`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum LanPairOfferType {
+    LanPairOffer,
+}
+impl ::std::fmt::Display for LanPairOfferType {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::LanPairOffer => f.write_str("LanPairOffer"),
+        }
+    }
+}
+impl ::std::str::FromStr for LanPairOfferType {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "LanPairOffer" => Ok(Self::LanPairOffer),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for LanPairOfferType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LanPairOfferType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+///First and only message on a network pairing connection (Authorization: RootCause-Pair <token>). Request -> LanPairResponse.
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct LanPairRequest {
+    pub client_version: SemVer,
+    ///Shown on the PC, e.g. the phone model.
+    pub device_name: LanPairRequestDeviceName,
+    pub request_id: RequestId,
+    #[serde(rename = "type")]
+    pub type_: LanPairRequestType,
+}
+///Shown on the PC, e.g. the phone model.
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct LanPairRequestDeviceName(::std::string::String);
+impl ::std::ops::Deref for LanPairRequestDeviceName {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<LanPairRequestDeviceName> for ::std::string::String {
+    fn from(value: LanPairRequestDeviceName) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for LanPairRequestDeviceName {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for LanPairRequestDeviceName {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        if value.chars().count() > 48usize {
+            return Err("longer than 48 characters".into());
+        }
+        if value.chars().count() < 1usize {
+            return Err("shorter than 1 characters".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LanPairRequestDeviceName {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value.as_str())
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for LanPairRequestDeviceName {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
+///`LanPairRequestType`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum LanPairRequestType {
+    LanPairRequest,
+}
+impl ::std::fmt::Display for LanPairRequestType {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::LanPairRequest => f.write_str("LanPairRequest"),
+        }
+    }
+}
+impl ::std::str::FromStr for LanPairRequestType {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "LanPairRequest" => Ok(Self::LanPairRequest),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for LanPairRequestType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LanPairRequestType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+///The phone's credential for later connections (Authorization: Bearer <device_id>.<device_secret>). Sent once; the daemon keeps only its hash. Response to LanPairRequest.
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct LanPairResponse {
+    ///Stable id of this daemon, in the pairing QR code and mDNS record.
+    pub daemon_id: LanPairResponseDaemonId,
+    pub daemon_name: LanPairResponseDaemonName,
+    ///Id of a paired phone.
+    pub device_id: LanPairResponseDeviceId,
+    ///32 random bytes, base64url without padding.
+    pub device_secret: LanPairResponseDeviceSecret,
+    pub request_id: RequestId,
+    #[serde(rename = "type")]
+    pub type_: LanPairResponseType,
+}
+///Stable id of this daemon, in the pairing QR code and mDNS record.
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct LanPairResponseDaemonId(::std::string::String);
+impl ::std::ops::Deref for LanPairResponseDaemonId {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<LanPairResponseDaemonId> for ::std::string::String {
+    fn from(value: LanPairResponseDaemonId) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for LanPairResponseDaemonId {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for LanPairResponseDaemonId {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        { ::regress::Regex::with_flags("^rcd_[0-9a-f]{16}$", "u").unwrap() });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^rcd_[0-9a-f]{16}$\"".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LanPairResponseDaemonId {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value.as_str())
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for LanPairResponseDaemonId {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
+///`LanPairResponseDaemonName`
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct LanPairResponseDaemonName(::std::string::String);
+impl ::std::ops::Deref for LanPairResponseDaemonName {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<LanPairResponseDaemonName> for ::std::string::String {
+    fn from(value: LanPairResponseDaemonName) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for LanPairResponseDaemonName {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for LanPairResponseDaemonName {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        if value.chars().count() > 48usize {
+            return Err("longer than 48 characters".into());
+        }
+        if value.chars().count() < 1usize {
+            return Err("shorter than 1 characters".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LanPairResponseDaemonName {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value.as_str())
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for LanPairResponseDaemonName {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
+///Id of a paired phone.
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct LanPairResponseDeviceId(::std::string::String);
+impl ::std::ops::Deref for LanPairResponseDeviceId {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<LanPairResponseDeviceId> for ::std::string::String {
+    fn from(value: LanPairResponseDeviceId) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for LanPairResponseDeviceId {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for LanPairResponseDeviceId {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        { ::regress::Regex::with_flags("^lan_[0-9a-f]{16}$", "u").unwrap() });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^lan_[0-9a-f]{16}$\"".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LanPairResponseDeviceId {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value.as_str())
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for LanPairResponseDeviceId {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
+///32 random bytes, base64url without padding.
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct LanPairResponseDeviceSecret(::std::string::String);
+impl ::std::ops::Deref for LanPairResponseDeviceSecret {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<LanPairResponseDeviceSecret> for ::std::string::String {
+    fn from(value: LanPairResponseDeviceSecret) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for LanPairResponseDeviceSecret {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for LanPairResponseDeviceSecret {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        { ::regress::Regex::with_flags("^[A-Za-z0-9_-]{43}$", "u").unwrap() });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^[A-Za-z0-9_-]{43}$\"".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LanPairResponseDeviceSecret {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value.as_str())
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for LanPairResponseDeviceSecret {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
+///`LanPairResponseType`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum LanPairResponseType {
+    LanPairResponse,
+}
+impl ::std::fmt::Display for LanPairResponseType {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::LanPairResponse => f.write_str("LanPairResponse"),
+        }
+    }
+}
+impl ::std::str::FromStr for LanPairResponseType {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "LanPairResponse" => Ok(Self::LanPairResponse),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for LanPairResponseType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LanPairResponseType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+///Response to LanStatusRequest and LanDeviceRevokeRequest.
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct LanStatus {
+    ///This PC's addresses a phone could use, best first; empty when off.
+    pub addresses: ::std::vec::Vec<LanStatusAddressesItem>,
+    ///Null when off.
+    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    pub daemon_id: ::std::option::Option<LanStatusDaemonId>,
+    ///Name phones show for this PC.
+    pub daemon_name: LanStatusDaemonName,
+    pub devices: ::std::vec::Vec<LanDevice>,
+    ///True when the network listener is on (it is off until `edge-daemon lan enable`).
+    pub enabled: bool,
+    ///Certificate fingerprint; null when off.
+    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    pub fingerprint: ::std::option::Option<LanStatusFingerprint>,
+    ///True when the PC advertises itself on mDNS.
+    pub mdns: bool,
+    ///TLS port phones connect to.
+    pub port: ::std::num::NonZeroU16,
+    pub request_id: RequestId,
+    #[serde(rename = "type")]
+    pub type_: LanStatusType,
+}
+///IP address of this PC on the workshop network (IPv4 dotted, or IPv6 without brackets).
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct LanStatusAddressesItem(::std::string::String);
+impl ::std::ops::Deref for LanStatusAddressesItem {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<LanStatusAddressesItem> for ::std::string::String {
+    fn from(value: LanStatusAddressesItem) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for LanStatusAddressesItem {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for LanStatusAddressesItem {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        if value.chars().count() > 45usize {
+            return Err("longer than 45 characters".into());
+        }
+        if value.chars().count() < 2usize {
+            return Err("shorter than 2 characters".into());
+        }
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        { ::regress::Regex::with_flags("^[0-9A-Fa-f:.]+$", "u").unwrap() });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^[0-9A-Fa-f:.]+$\"".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LanStatusAddressesItem {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value.as_str())
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for LanStatusAddressesItem {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
+///Stable id of this daemon, in the pairing QR code and mDNS record.
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct LanStatusDaemonId(::std::string::String);
+impl ::std::ops::Deref for LanStatusDaemonId {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<LanStatusDaemonId> for ::std::string::String {
+    fn from(value: LanStatusDaemonId) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for LanStatusDaemonId {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for LanStatusDaemonId {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        { ::regress::Regex::with_flags("^rcd_[0-9a-f]{16}$", "u").unwrap() });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^rcd_[0-9a-f]{16}$\"".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LanStatusDaemonId {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value.as_str())
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for LanStatusDaemonId {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
+///Name phones show for this PC.
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct LanStatusDaemonName(::std::string::String);
+impl ::std::ops::Deref for LanStatusDaemonName {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<LanStatusDaemonName> for ::std::string::String {
+    fn from(value: LanStatusDaemonName) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for LanStatusDaemonName {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for LanStatusDaemonName {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        if value.chars().count() > 48usize {
+            return Err("longer than 48 characters".into());
+        }
+        if value.chars().count() < 1usize {
+            return Err("shorter than 1 characters".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LanStatusDaemonName {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value.as_str())
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for LanStatusDaemonName {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
+///SHA-256 of the daemon's network TLS certificate (DER), lowercase hex. The phone pins it.
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct LanStatusFingerprint(::std::string::String);
+impl ::std::ops::Deref for LanStatusFingerprint {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<LanStatusFingerprint> for ::std::string::String {
+    fn from(value: LanStatusFingerprint) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for LanStatusFingerprint {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for LanStatusFingerprint {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+        { ::regress::Regex::with_flags("^[0-9a-f]{64}$", "u").unwrap() });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^[0-9a-f]{64}$\"".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LanStatusFingerprint {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value.as_str())
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for LanStatusFingerprint {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::convert::TryFrom::try_from(
+                ::std::string::String::deserialize(deserializer)?,
+            )
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
+///Phone access over the local network: settings and paired phones. Loopback connections only. Request -> LanStatus.
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct LanStatusRequest {
+    pub request_id: RequestId,
+    #[serde(rename = "type")]
+    pub type_: LanStatusRequestType,
+}
+///`LanStatusRequestType`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum LanStatusRequestType {
+    LanStatusRequest,
+}
+impl ::std::fmt::Display for LanStatusRequestType {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::LanStatusRequest => f.write_str("LanStatusRequest"),
+        }
+    }
+}
+impl ::std::str::FromStr for LanStatusRequestType {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "LanStatusRequest" => Ok(Self::LanStatusRequest),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for LanStatusRequestType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LanStatusRequestType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+///`LanStatusType`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum LanStatusType {
+    LanStatus,
+}
+impl ::std::fmt::Display for LanStatusType {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::LanStatus => f.write_str("LanStatus"),
+        }
+    }
+}
+impl ::std::str::FromStr for LanStatusType {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "LanStatus" => Ok(Self::LanStatus),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for LanStatusType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LanStatusType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
     }
 }
 ///Installs a cloud-signed lease (POST /auth/edge-lease, or an immobilizer job token). The daemon verifies it against the pinned cloud keys before saving it. Request -> LeaseStatus.
@@ -3530,7 +5100,7 @@ pub mod error {
 }
 
 /// Wire protocol version, from `x-protocol-version` in edge_ws.schema.json.
-pub const PROTOCOL_VERSION: &str = "1.1.0";
+pub const PROTOCOL_VERSION: &str = "1.2.0";
 
 /// Each request type and the response type it expects (`x-request-response`).
 /// Any request may also be answered with `ErrorResponse`.
@@ -3540,6 +5110,10 @@ pub const REQUEST_RESPONSE: &[(&str, &str)] = &[
     ("DiagCommandRequest", "DiagCommandResponse"),
     ("DisconnectRequest", "AdapterStatus"),
     ("HelloRequest", "HelloResponse"),
+    ("LanDeviceRevokeRequest", "LanStatus"),
+    ("LanPairOfferRequest", "LanPairOffer"),
+    ("LanPairRequest", "LanPairResponse"),
+    ("LanStatusRequest", "LanStatus"),
     ("LeaseInstallRequest", "LeaseStatus"),
     ("LeaseStatusRequest", "LeaseStatus"),
     ("SafetyConfirmRequest", "SafetyConfirmResponse"),

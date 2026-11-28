@@ -5,6 +5,8 @@
 //! edge-daemon pair       print a 6-digit pairing code (single use, 2 minutes)
 //! edge-daemon version    print daemon, protocol and safety-policy versions
 //! edge-daemon diagnostics [file]   write a redacted support bundle (Task 5.2)
+//! edge-daemon lan <status|enable|disable|pair|devices|revoke ID|rotate-cert>
+//!                        phone access over the local network (off by default)
 //! edge-daemon service    run under the Windows service manager (the MSI installs it)
 //! ```
 //!
@@ -36,6 +38,7 @@ use edge_daemon::{
     protocol,
     safety::audit::JsonlAudit,
     server::{
+        lan::{self, LanConfigFile, LanIdentity, LanSettings, LanState},
         pairing::{pairing_path, PairingStore},
         ws::{Server, ServerConfig, DEFAULT_PORT},
     },
@@ -171,6 +174,13 @@ async fn serve(
         let mut live = cfg.live_lease.lock().expect("live lease lock");
         *live = cfg.lease_token.clone();
     }
+    let lan_settings = LanSettings::resolve(&LanConfigFile::load(&dir), &lan::process_env);
+    match LanState::open(&dir, lan_settings) {
+        Ok(state) => cfg.lan = Arc::new(state),
+        Err(e) => {
+            tracing::error!("phone access stays off: could not set up its certificate: {e}");
+        }
+    }
     if cfg.keys.is_empty() {
         tracing::info!("no cloud keys pinned yet: COMMUNITY tier, local pairing codes only");
     }
@@ -218,6 +228,7 @@ async fn serve(
         }
     });
     let origins = cfg.allowed_origins.join(", ");
+    let lan_dir_for_info = dir.clone();
     let server = match Server::bind(cfg).await {
         Ok(s) => s,
         Err(e) => {
@@ -227,6 +238,8 @@ async fn serve(
         }
     };
     tracing::info!(port = server.port(), %origins, data = %dir.display(), "edge-daemon listening on loopback");
+    let lan_state = server.lan_state();
+    let _mdns = publish_lan(&lan_dir_for_info, &lan_state, server.lan_port());
     if origins.contains("localhost") && !cfg!(debug_assertions) {
         tracing::warn!("a release daemon is trusting a localhost origin ({origins})");
     }
@@ -240,6 +253,260 @@ async fn serve(
             tracing::info!("shutting down");
             ExitCode::SUCCESS
         }
+    }
+}
+
+/// Writes `pairing/lan_info.json` for `edge-daemon lan pair`, watches the
+/// phone registry for command-line revocations, and advertises on mDNS when
+/// asked. Returns the mDNS daemon (dropped on shutdown).
+fn publish_lan(
+    dir: &std::path::Path,
+    state: &Arc<LanState>,
+    port: Option<u16>,
+) -> Option<mdns_sd::ServiceDaemon> {
+    let info_path = lan::info_path(dir);
+    let Some((info, port)) = state.info().zip(port) else {
+        let _ = std::fs::remove_file(&info_path);
+        return None;
+    };
+    let mode = edge_daemon::server::pairing::shared_file_mode(&info_path);
+    if let Err(e) = edge_daemon::fsutil::write_atomic(
+        &info_path,
+        &serde_json::to_vec_pretty(&info).expect("serializes"),
+        mode,
+    ) {
+        tracing::warn!(
+            "`edge-daemon lan pair` won't work: could not write {}: {e}",
+            info_path.display()
+        );
+    }
+    let watched = Arc::clone(state);
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(2));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tick.tick().await;
+            watched.registry.reload();
+        }
+    });
+    if !state.settings.mdns {
+        return None;
+    }
+    let mdns = match mdns_sd::ServiceDaemon::new() {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!("mDNS unavailable ({e}); phones use the address in the QR code");
+            return None;
+        }
+    };
+    let addrs: Vec<std::net::IpAddr> = info.addresses.clone();
+    let props = [
+        ("v", "1".to_owned()),
+        ("id", info.daemon_id.clone()),
+        ("fp", info.fingerprint[..16].to_owned()),
+    ];
+    let host = format!("{}.local.", info.daemon_id.replace('_', "-"));
+    match mdns_sd::ServiceInfo::new(
+        lan::MDNS_SERVICE,
+        &info.name,
+        &host,
+        &addrs[..],
+        port,
+        &props[..],
+    )
+    .and_then(|svc| mdns.register(svc))
+    {
+        Ok(()) => {
+            tracing::info!(
+                service = lan::MDNS_SERVICE,
+                "advertising phone access on mDNS"
+            );
+            Some(mdns)
+        }
+        Err(e) => {
+            tracing::warn!("mDNS registration failed ({e}); phones use the address in the QR code");
+            None
+        }
+    }
+}
+
+/// `edge-daemon lan ...`.
+fn lan_command(dir: &std::path::Path, args: &[String]) -> ExitCode {
+    let sub = args.first().map(String::as_str).unwrap_or("status");
+    match sub {
+        "status" => {
+            let file = LanConfigFile::load(dir);
+            let s = LanSettings::resolve(&file, &lan::process_env);
+            println!(
+                "Phone access: {} (port {}, mDNS {})",
+                if s.enabled { "on" } else { "off" },
+                s.port,
+                if s.mdns { "on" } else { "off" }
+            );
+            if let Ok(text) = std::fs::read_to_string(lan::info_path(dir)) {
+                if let Ok(info) = serde_json::from_str::<lan::LanInfo>(&text) {
+                    println!("Running daemon: {} ({})", info.name, info.daemon_id);
+                    println!("Certificate fingerprint (SHA-256): {}", info.fingerprint);
+                    let a: Vec<String> = info.addresses.iter().map(ToString::to_string).collect();
+                    println!("Addresses: {}", a.join(", "));
+                }
+            } else if s.enabled {
+                println!("The daemon hasn't started with phone access yet; restart it.");
+            }
+            lan_devices(dir);
+            ExitCode::SUCCESS
+        }
+        "enable" | "disable" => {
+            let mut file = LanConfigFile::load(dir);
+            file.enabled = sub == "enable";
+            if args.iter().any(|a| a == "--mdns") {
+                file.mdns = true;
+            }
+            if args.iter().any(|a| a == "--no-mdns") {
+                file.mdns = false;
+            }
+            if let Some(p) = args
+                .iter()
+                .position(|a| a == "--port")
+                .and_then(|i| args.get(i + 1))
+                .and_then(|p| p.parse::<u16>().ok())
+            {
+                file.port = Some(p);
+            }
+            if let Err(e) = file.save(dir) {
+                eprintln!("could not save {}: {e}", lan::config_path(dir).display());
+                if e.kind() == std::io::ErrorKind::PermissionDenied {
+                    eprintln!(
+                        "Run this as an administrator (Linux: sudo; Windows: an elevated prompt)."
+                    );
+                }
+                return ExitCode::FAILURE;
+            }
+            let port = file.port.unwrap_or(lan::DEFAULT_LAN_PORT);
+            if file.enabled {
+                println!("Phone access turned on (TLS port {port}). Restart the daemon to apply:");
+                println!("  Linux:   sudo systemctl restart obd2-edge-daemon");
+                println!("  Windows: Restart-Service RootCauseEdgeDaemon   (elevated PowerShell)");
+                println!(
+                    "Allow the port on this PC's firewall for the workshop network only, e.g."
+                );
+                println!("  Windows: New-NetFirewallRule -DisplayName \"RootCause phone access\" -Direction Inbound -Protocol TCP -LocalPort {port} -Profile Private -Action Allow");
+                println!(
+                    "  Linux:   sudo ufw allow from 192.168.0.0/16 to any port {port} proto tcp"
+                );
+                println!("Then pair a phone from Devices in the web app, or with `edge-daemon lan pair`.");
+            } else {
+                println!("Phone access turned off. Restart the daemon to close the network port.");
+                println!("Paired phones are kept; they connect again if you turn it back on.");
+            }
+            ExitCode::SUCCESS
+        }
+        "pair" => {
+            let info: lan::LanInfo = match std::fs::read_to_string(lan::info_path(dir))
+                .ok()
+                .and_then(|t| serde_json::from_str(&t).ok())
+            {
+                Some(i) => i,
+                None => {
+                    eprintln!("Phone access isn't running. Turn it on with `edge-daemon lan enable`, restart the daemon, then try again.");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let host = match args
+                .iter()
+                .position(|a| a == "--host")
+                .and_then(|i| args.get(i + 1))
+            {
+                Some(h) => match h.parse() {
+                    Ok(ip) => Some(ip),
+                    Err(_) => {
+                        eprintln!("--host takes an IP address");
+                        return ExitCode::FAILURE;
+                    }
+                },
+                None => None,
+            };
+            let offers = lan::OfferStore::at(lan::offers_path(dir));
+            match lan::offer_from_info(&info, &offers, host, None, None, unix_now()) {
+                Ok(offer) => {
+                    println!("{}", lan::qr_terminal(&offer.qr_rows));
+                    println!("Scan this with the RootCause app: Devices, then \"Pair with a PC\".");
+                    println!("PC: {} at {}:{}", info.name, offer.host, offer.port);
+                    println!("Certificate fingerprint: {}", offer.fingerprint);
+                    println!("Works once, for 5 minutes. Treat it like a password until then.");
+                    println!("Pairing link (to paste instead of scanning): {}", offer.uri);
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("could not make a pairing code: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        "devices" => {
+            lan_devices(dir);
+            ExitCode::SUCCESS
+        }
+        "revoke" => {
+            let Some(id) = args.get(1).filter(|id| lan::valid_device_id(id)) else {
+                eprintln!(
+                    "usage: edge-daemon lan revoke lan_<16 hex> (see `edge-daemon lan devices`)"
+                );
+                return ExitCode::FAILURE;
+            };
+            let reg = lan::DeviceRegistry::at(lan::lan_dir(dir).join("devices.json"));
+            match reg.revoke(id) {
+                Ok(true) => {
+                    println!("Removed {id}. Its open connections close within a few seconds.");
+                    ExitCode::SUCCESS
+                }
+                Ok(false) => {
+                    eprintln!("no paired phone {id}");
+                    ExitCode::FAILURE
+                }
+                Err(e) => {
+                    eprintln!("could not update the phone list: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        "rotate-cert" => match LanIdentity::rotate(dir) {
+            Ok(()) => {
+                println!("Certificate deleted and every phone unpaired. Restart the daemon; it makes a new certificate.");
+                println!("Pair each phone again.");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("could not rotate: {e}");
+                ExitCode::FAILURE
+            }
+        },
+        other => {
+            eprintln!("unknown lan command {other:?}; use: edge-daemon lan [status|enable [--mdns] [--port N]|disable|pair [--host IP]|devices|revoke ID|rotate-cert]");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn lan_devices(dir: &std::path::Path) {
+    let reg = lan::DeviceRegistry::at(lan::lan_dir(dir).join("devices.json"));
+    let list = reg.list();
+    if list.is_empty() {
+        println!("No phones paired.");
+        return;
+    }
+    println!("Paired phones:");
+    for d in list {
+        let seen = d.last_seen_at.map_or_else(
+            || "never connected".to_owned(),
+            |t| {
+                format!(
+                    "last seen {}",
+                    edge_daemon::safety::rfc3339(std::time::UNIX_EPOCH + Duration::from_secs(t))
+                )
+            },
+        );
+        println!("  {}  {}  ({seen})", d.id, d.name);
     }
 }
 
@@ -268,7 +535,7 @@ fn runtime() -> tokio::runtime::Runtime {
 
 fn main() -> ExitCode {
     let command = std::env::args().nth(1);
-    let dir = if command.as_deref() == Some("pair") {
+    let dir = if matches!(command.as_deref(), Some("pair" | "lan")) {
         pair_dir()
     } else {
         data_dir()
@@ -308,6 +575,10 @@ fn main() -> ExitCode {
         None | Some("serve") => runtime().block_on(serve(dir, console_stop(), || {})),
         Some("service") => service::run(),
         Some("pair") => pair(&dir),
+        Some("lan") => {
+            let args: Vec<String> = std::env::args().skip(2).collect();
+            lan_command(&dir, &args)
+        }
         Some("version" | "--version") => {
             println!(
                 "edge-daemon {} (protocol {}, safety policy {})",
@@ -333,7 +604,7 @@ fn main() -> ExitCode {
         }
         Some(other) => {
             eprintln!(
-                "unknown command {other:?}; use: edge-daemon [serve|pair|version|diagnostics|service]"
+                "unknown command {other:?}; use: edge-daemon [serve|pair|lan|version|diagnostics|service]"
             );
             ExitCode::FAILURE
         }

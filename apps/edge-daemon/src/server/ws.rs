@@ -2,7 +2,9 @@
 //!
 //! The socket can actuate a vehicle, so it is treated as privileged:
 //!
-//! - Binds 127.0.0.1 and [::1] only.
+//! - Binds 127.0.0.1 and [::1]. Phone access over the workshop network is a
+//!   separate, opt-in TLS listener with paired-device credentials
+//!   ([`super::lan`]); it is off unless `edge-daemon lan enable` turned it on.
 //! - Upgrade refused (HTTP 403) unless `Host` is exactly `127.0.0.1:<port>`,
 //!   `localhost:<port>` or `[::1]:<port>` (DNS-rebinding defence), and any
 //!   browser `Origin` is in `EDGE_ALLOWED_ORIGINS`.
@@ -32,11 +34,13 @@ use std::{
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::{
-    net::{TcpListener, TcpStream},
-    sync::mpsc,
+    io::{AsyncRead, AsyncWrite},
+    net::TcpListener,
+    sync::{broadcast, mpsc},
     task::JoinHandle,
     time::Instant,
 };
+use tokio_rustls::TlsAcceptor;
 use tokio_tungstenite::{
     accept_hdr_async_with_config,
     tungstenite::{
@@ -47,7 +51,10 @@ use tokio_tungstenite::{
     },
 };
 
-use super::pairing::{looks_like_code, Consumed, PairingStore};
+use super::{
+    lan::{self, LanState, TenantCheck},
+    pairing::{looks_like_code, Consumed, PairingStore},
+};
 use crate::{
     analytics::{
         did_maps::{self, ModuleAddr},
@@ -142,6 +149,8 @@ pub struct ServerConfig {
     pub max_message_bytes: usize,
     pub diag_per_second: u32,
     pub stream_period: Duration,
+    /// Phone access over the local network (off unless enabled).
+    pub lan: Arc<LanState>,
 }
 
 impl ServerConfig {
@@ -168,6 +177,7 @@ impl ServerConfig {
             max_message_bytes: MAX_MESSAGE_BYTES,
             diag_per_second: DIAG_PER_SECOND,
             stream_period: STREAM_PERIOD,
+            lan: Arc::new(LanState::disabled()),
         }
     }
 
@@ -229,6 +239,8 @@ impl ServerConfig {
 
 pub struct Server {
     listeners: Vec<TcpListener>,
+    /// The network (phone) listener and its TLS acceptor, when enabled.
+    lan: Option<(TcpListener, TlsAcceptor)>,
     cfg: Arc<ServerConfig>,
 }
 
@@ -242,14 +254,67 @@ impl Server {
             Ok(v6) => listeners.push(v6),
             Err(e) => tracing::warn!("IPv6 loopback unavailable ({e}); serving 127.0.0.1 only"),
         }
+        let lan = Self::bind_lan(&mut cfg).await?;
         Ok(Self {
             listeners,
+            lan,
             cfg: Arc::new(cfg),
         })
     }
 
+    /// The opt-in network listener: TLS only, never the loopback port.
+    async fn bind_lan(
+        cfg: &mut ServerConfig,
+    ) -> std::io::Result<Option<(TcpListener, TlsAcceptor)>> {
+        if !cfg.lan.enabled() {
+            return Ok(None);
+        }
+        let settings = cfg.lan.settings.clone();
+        if settings.port != 0 && settings.port == cfg.port {
+            return Err(std::io::Error::other(
+                "the phone (network) port must differ from the loopback port",
+            ));
+        }
+        let identity = cfg
+            .lan
+            .identity
+            .clone()
+            .ok_or_else(|| std::io::Error::other("network certificate missing"))?;
+        let tls = identity.tls_config().map_err(std::io::Error::other)?;
+        let listener = TcpListener::bind((settings.bind, settings.port)).await?;
+        let port = listener.local_addr()?.port();
+        if port != settings.port {
+            // Port 0 (tests): record the port picked.
+            match Arc::get_mut(&mut cfg.lan) {
+                Some(state) => state.settings.port = port,
+                None => {
+                    return Err(std::io::Error::other(
+                        "phone port 0 needs an unshared LanState",
+                    ))
+                }
+            }
+        }
+        tracing::info!(
+            port,
+            bind = %settings.bind,
+            fingerprint = %identity.fingerprint,
+            "phone access on: TLS listener on the local network"
+        );
+        Ok(Some((listener, TlsAcceptor::from(Arc::new(tls)))))
+    }
+
     pub fn port(&self) -> u16 {
         self.cfg.port
+    }
+
+    /// The phone (network) port, when that listener is on.
+    pub fn lan_port(&self) -> Option<u16> {
+        self.lan.as_ref().map(|_| self.cfg.lan.settings.port)
+    }
+
+    /// Phone access state shared with the running server (registry, guard).
+    pub fn lan_state(&self) -> Arc<LanState> {
+        Arc::clone(&self.cfg.lan)
     }
 
     /// Signal open sessions that the lease has changed; they must reconnect.
@@ -267,12 +332,19 @@ impl Server {
                     match listener.accept().await {
                         Ok((stream, peer)) => {
                             tracing::debug!(%peer, "connection");
-                            tokio::spawn(handle(Arc::clone(&cfg), stream));
+                            tokio::spawn(handle(Arc::clone(&cfg), stream, Via::Loopback));
                         }
                         Err(e) => tracing::warn!("accept failed: {e}"),
                     }
                 }
             }));
+        }
+        if let Some((listener, acceptor)) = self.lan {
+            accept_loops.push(tokio::spawn(lan_accept_loop(
+                Arc::clone(&self.cfg),
+                listener,
+                acceptor,
+            )));
         }
         for l in accept_loops {
             let _ = l.await;
@@ -292,9 +364,134 @@ fn valid_user_id(user: &str) -> bool {
 }
 
 fn reject(why: &str) -> ErrorResponse {
+    reject_with(why, StatusCode::FORBIDDEN)
+}
+
+fn reject_with(why: &str, status: StatusCode) -> ErrorResponse {
     let mut resp = ErrorResponse::new(Some(why.to_owned()));
-    *resp.status_mut() = StatusCode::FORBIDDEN;
+    *resp.status_mut() = status;
     resp
+}
+
+/// Which listener a connection came in on.
+#[derive(Clone, Copy, Debug)]
+enum Via {
+    Loopback,
+    /// The phone listener, after TLS; the peer's address for rate limiting.
+    Lan(std::net::IpAddr),
+}
+
+/// How a network connection identified itself in the upgrade request.
+#[derive(Clone)]
+enum LanAuth {
+    /// A paired phone (`Authorization: Bearer <device_id>.<secret>`).
+    Device(lan::DeviceRecord),
+    /// A phone pairing now (`Authorization: RootCause-Pair <token>`); the
+    /// token is burnt when its `LanPairRequest` arrives.
+    Pair(String),
+}
+
+/// Accepts phone connections: rate limit, then TLS (5 s), then the same
+/// WebSocket handling as loopback with the network rules on top.
+async fn lan_accept_loop(cfg: Arc<ServerConfig>, listener: TcpListener, acceptor: TlsAcceptor) {
+    loop {
+        let (stream, peer) = match listener.accept().await {
+            Ok(x) => x,
+            Err(e) => {
+                tracing::warn!("network accept failed: {e}");
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
+            }
+        };
+        let ip = peer.ip();
+        let slot = match cfg.lan.guard.admit(ip, std::time::Instant::now()) {
+            Ok(slot) => slot,
+            Err(why) => {
+                tracing::info!(%ip, ?why, "network connection refused");
+                drop(stream);
+                continue;
+            }
+        };
+        let cfg = Arc::clone(&cfg);
+        let acceptor = acceptor.clone();
+        tokio::spawn(async move {
+            let _slot = slot;
+            let _ = stream.set_nodelay(true);
+            match tokio::time::timeout(lan::TLS_HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await {
+                Ok(Ok(tls)) => handle(cfg, tls, Via::Lan(ip)).await,
+                // A phone pinned to another certificate aborts here; nothing to count.
+                Ok(Err(e)) => tracing::info!(%ip, "TLS handshake failed: {e}"),
+                Err(_) => tracing::info!(%ip, "TLS handshake timed out"),
+            }
+        });
+    }
+}
+
+/// Checks a network upgrade request: Host, Origin and the phone's credential.
+#[allow(clippy::result_large_err)]
+fn check_lan_upgrade(
+    cfg: &ServerConfig,
+    ip: std::net::IpAddr,
+    req: &Request,
+) -> Result<(String, LanAuth), ErrorResponse> {
+    let header = |name| {
+        req.headers()
+            .get(name)
+            .and_then(|v: &tokio_tungstenite::tungstenite::http::HeaderValue| v.to_str().ok())
+            .unwrap_or("")
+    };
+    if !lan::lan_host_ok(header(header::HOST), cfg.lan.settings.port) {
+        return Err(reject("host not allowed"));
+    }
+    let origin = header(header::ORIGIN);
+    if origin.is_empty() || !cfg.allowed_origins.iter().any(|a| a == origin) {
+        return Err(reject("origin not allowed"));
+    }
+    let auth = header(header::AUTHORIZATION);
+    let found = if let Some(cred) = auth.strip_prefix("Bearer ") {
+        cfg.lan
+            .registry
+            .authenticate(cred.trim())
+            .map(LanAuth::Device)
+    } else if let Some(token) = auth.strip_prefix("RootCause-Pair ") {
+        let token = token.trim();
+        lan::valid_offer_token(token).then(|| LanAuth::Pair(token.to_owned()))
+    } else {
+        None
+    };
+    match found {
+        Some(a) => Ok((origin.to_owned(), a)),
+        None => {
+            cfg.lan.guard.record_failure(ip, std::time::Instant::now());
+            Err(reject_with(
+                "this phone isn't paired with this PC (or was removed); pair it again from Devices on the PC",
+                StatusCode::UNAUTHORIZED,
+            ))
+        }
+    }
+}
+
+/// Resolves when this connection's phone is revoked; never for other clients.
+async fn revoked(
+    rx: &mut Option<broadcast::Receiver<String>>,
+    cfg: &ServerConfig,
+    mine: Option<&str>,
+) {
+    let (Some(rx), Some(mine)) = (rx.as_mut(), mine) else {
+        return std::future::pending().await;
+    };
+    loop {
+        match rx.recv().await {
+            Ok(id) if id == mine => return,
+            Ok(_) => {}
+            Err(broadcast::error::RecvError::Lagged(_)) => {
+                if cfg.lan.registry.get(mine).is_none() {
+                    return;
+                }
+            }
+            Err(broadcast::error::RecvError::Closed) => return std::future::pending().await,
+        }
+    }
 }
 
 enum Outbound {
@@ -328,11 +525,22 @@ fn random_session_id() -> String {
 
 // The handshake callback's error type is fixed by tungstenite.
 #[allow(clippy::result_large_err)]
-async fn handle(cfg: Arc<ServerConfig>, stream: TcpStream) {
+async fn handle<S>(cfg: Arc<ServerConfig>, stream: S, via: Via)
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
     let origin_slot: Arc<Mutex<Option<String>>> = Arc::default();
+    let lan_slot: Arc<Mutex<Option<LanAuth>>> = Arc::default();
     let slot = Arc::clone(&origin_slot);
+    let lan_auth_slot = Arc::clone(&lan_slot);
     let check_cfg = Arc::clone(&cfg);
     let callback = move |req: &Request, resp: Response| -> Result<Response, ErrorResponse> {
+        if let Via::Lan(ip) = via {
+            let (origin, auth) = check_lan_upgrade(&check_cfg, ip, req)?;
+            *slot.lock().expect("origin lock") = Some(origin);
+            *lan_auth_slot.lock().expect("lan lock") = Some(auth);
+            return Ok(resp);
+        }
         let host = req
             .headers()
             .get(header::HOST)
@@ -361,6 +569,7 @@ async fn handle(cfg: Arc<ServerConfig>, stream: TcpStream) {
         }
     };
     let origin = origin_slot.lock().expect("origin lock").clone();
+    let lan_auth = lan_slot.lock().expect("lan lock").clone();
     let (mut sink, mut source) = ws.split();
     let (tx, mut rx) = mpsc::channel::<Outbound>(256);
     let writer = tokio::spawn(async move {
@@ -378,6 +587,25 @@ async fn handle(cfg: Arc<ServerConfig>, stream: TcpStream) {
         }
     });
 
+    // A phone pairing now: one LanPairRequest, one answer, then close.
+    if let (Via::Lan(ip), Some(LanAuth::Pair(token))) = (via, lan_auth.as_ref()) {
+        let first = tokio::time::timeout(cfg.hello_timeout, next_text(&mut source)).await;
+        if let Ok(Some(text)) = first {
+            let reply = lan_pair(&cfg, ip, token, &text);
+            let _ = tx.send(Outbound::Msg(reply)).await;
+        }
+        let _ = tx.send(Outbound::Close).await;
+        drop(tx);
+        let _ = writer.await;
+        return;
+    }
+    let device = match lan_auth {
+        Some(LanAuth::Device(d)) => Some(d),
+        _ => None,
+    };
+    let mut revoked_rx = device.as_ref().map(|_| cfg.lan.registry.subscribe());
+    let _connected = device.as_ref().map(|d| cfg.lan.registry.connected(&d.id));
+
     // Rule 4: nothing but HelloRequest until authenticated.
     let first = tokio::time::timeout(cfg.hello_timeout, next_text(&mut source)).await;
     let session = match first {
@@ -391,7 +619,7 @@ async fn handle(cfg: Arc<ServerConfig>, stream: TcpStream) {
             let _ = writer.await;
             return;
         }
-        Ok(Some(text)) => authenticate(&cfg, origin.as_deref(), &text, tx.clone()),
+        Ok(Some(text)) => authenticate(&cfg, origin.as_deref(), &text, tx.clone(), device.as_ref()),
     };
     let mut session = match session {
         Ok((session, hello)) => {
@@ -407,9 +635,31 @@ async fn handle(cfg: Arc<ServerConfig>, stream: TcpStream) {
         }
     };
 
+    if let (Via::Lan(ip), Some(d)) = (via, device.as_ref()) {
+        cfg.lan.guard.record_success(ip);
+        cfg.lan.registry.touch(&d.id, unix_now());
+    }
+    let my_device = device.as_ref().map(|d| d.id.clone());
     let mut my_epoch = cfg.lease_epoch.load(Ordering::SeqCst);
     let mut my_user_epoch = cfg.user_epoch(session.user.as_deref());
-    while let Some(text) = next_text(&mut source).await {
+    loop {
+        let text = tokio::select! {
+            t = next_text(&mut source) => match t {
+                Some(t) => t,
+                None => break,
+            },
+            () = revoked(&mut revoked_rx, &cfg, my_device.as_deref()) => {
+                let _ = tx
+                    .send(Outbound::Msg(err(
+                        None,
+                        ErrorCode::Unauthenticated,
+                        "this phone was removed from the PC; pair it again from Devices on the PC",
+                    )))
+                    .await;
+                let _ = tx.send(Outbound::Close).await;
+                break;
+            }
+        };
         if cfg.lease_epoch.load(Ordering::SeqCst) != my_epoch
             || cfg.user_epoch(session.user.as_deref()) != my_user_epoch
         {
@@ -467,6 +717,7 @@ fn authenticate(
     origin: Option<&str>,
     text: &str,
     tx: mpsc::Sender<Outbound>,
+    device: Option<&lan::DeviceRecord>,
 ) -> Result<(Session, EdgeMessage), EdgeMessage> {
     let hello = match protocol::parse_message(text) {
         Ok(EdgeMessage::HelloRequest(h)) => h,
@@ -501,6 +752,16 @@ fn authenticate(
     }
     let now = unix_now();
     let token = hello.client_token.as_str();
+    if device.is_some() && looks_like_code(token) {
+        // A code works once from anywhere it can be typed; over the network
+        // it would hand the machine lease to whoever guessed it.
+        return Err(err(
+            rid,
+            ErrorCode::Unauthenticated,
+            "phones sign in with a RootCause account; local pairing codes only work on this PC",
+        ));
+    }
+    let mut tenant = None;
     let user = if looks_like_code(token) {
         match cfg.pairing.try_consume(token, now) {
             Consumed::Paired => {}
@@ -528,7 +789,10 @@ fn authenticate(
         ));
     } else {
         match lease::verify_pairing(token, &cfg.keys, origin, now) {
-            Ok(p) => Some(p.user_id),
+            Ok(p) => {
+                tenant = Some(p.tenant_id);
+                Some(p.user_id)
+            }
             Err(e) => {
                 return Err(err(
                     rid,
@@ -538,6 +802,25 @@ fn authenticate(
             }
         }
     };
+    if let (Some(d), Some(t)) = (device, tenant.as_deref()) {
+        match cfg.lan.registry.check_tenant(&d.id, t) {
+            TenantCheck::Ok => {}
+            TenantCheck::Mismatch => {
+                return Err(err(
+                    rid,
+                    ErrorCode::Unauthenticated,
+                    "this phone is paired for another workshop; sign in to that workshop, or pair the phone again",
+                ))
+            }
+            TenantCheck::Unknown => {
+                return Err(err(
+                    rid,
+                    ErrorCode::Unauthenticated,
+                    "this phone was removed from the PC; pair it again from Devices on the PC",
+                ))
+            }
+        }
+    }
     let (lease, immo_lease) = leases_for(cfg, user.as_deref(), now);
     let session_id = random_session_id();
     let interlock = Arc::new(SafetyInterlock::new(
@@ -546,6 +829,7 @@ fn authenticate(
     ));
     interlock.set_immo_registry(cfg.immo_registry.clone());
     interlock.set_identity(user.clone(), None);
+    interlock.set_client(device.map(|d| format!("lan:{} ({})", d.id, d.name)));
     let hello_resp = m::HelloResponse {
         daemon_version: env!("CARGO_PKG_VERSION")
             .try_into()
@@ -565,7 +849,12 @@ fn authenticate(
             .expect("session id within limits"),
         type_: m::HelloResponseType::HelloResponse,
     };
-    tracing::info!(%session_id, tier = %lease.tier, "client authenticated");
+    match device {
+        Some(d) => {
+            tracing::info!(%session_id, tier = %lease.tier, device = %d.id, "phone authenticated")
+        }
+        None => tracing::info!(%session_id, tier = %lease.tier, "client authenticated"),
+    }
     let session = Session {
         lease,
         immo_lease,
@@ -578,8 +867,135 @@ fn authenticate(
         adopted_epoch: None,
         adopted_user_epoch: None,
         user,
+        tenant,
+        lan_device: device.map(|d| d.id.clone()),
     };
     Ok((session, hello_resp.into()))
+}
+
+fn rfc3339_at(secs: u64) -> Option<m::Rfc3339Utc> {
+    m::Rfc3339Utc::try_from(crate::safety::rfc3339(UNIX_EPOCH + Duration::from_secs(secs)).as_str())
+        .ok()
+}
+
+/// Phone access settings and paired phones.
+fn lan_status_message(cfg: &ServerConfig, request_id: RequestId) -> EdgeMessage {
+    let state = &cfg.lan;
+    let on = state.enabled();
+    let devices = state
+        .registry
+        .list()
+        .into_iter()
+        .filter_map(|d| {
+            Some(m::LanDevice {
+                connected: state.registry.connected_count(&d.id) > 0,
+                device_id: d.id.as_str().try_into().ok()?,
+                last_seen_at: d.last_seen_at.and_then(rfc3339_at),
+                name: d.name.as_str().try_into().ok()?,
+                paired_at: rfc3339_at(d.paired_at)?,
+                paired_by: d.paired_by.as_deref().and_then(|p| p.try_into().ok()),
+            })
+        })
+        .collect();
+    let identity = state.identity.as_ref().filter(|_| on);
+    m::LanStatus {
+        addresses: if on {
+            state
+                .addresses()
+                .iter()
+                .filter_map(|a| a.to_string().as_str().try_into().ok())
+                .collect()
+        } else {
+            Vec::new()
+        },
+        daemon_id: identity.and_then(|i| i.daemon_id.as_str().try_into().ok()),
+        daemon_name: state
+            .settings
+            .name
+            .as_str()
+            .try_into()
+            .unwrap_or_else(|_| "RootCause PC".try_into().expect("valid name")),
+        devices,
+        enabled: on,
+        fingerprint: identity.and_then(|i| i.fingerprint.as_str().try_into().ok()),
+        mdns: on && state.settings.mdns,
+        port: std::num::NonZeroU16::new(state.settings.port)
+            .unwrap_or(std::num::NonZeroU16::new(lan::DEFAULT_LAN_PORT).expect("non-zero")),
+        request_id,
+        type_: m::LanStatusType::LanStatus,
+    }
+    .into()
+}
+
+/// The one message of a pairing connection: burns the code, registers the
+/// phone and hands it its credential.
+fn lan_pair(cfg: &ServerConfig, ip: std::net::IpAddr, token: &str, text: &str) -> EdgeMessage {
+    let req = match protocol::parse_message(text) {
+        Ok(EdgeMessage::LanPairRequest(r)) => r,
+        _ => {
+            return err(
+                request_id_of(text),
+                ErrorCode::Unauthenticated,
+                "a pairing connection's only message is LanPairRequest",
+            )
+        }
+    };
+    let rid = Some(req.request_id.clone());
+    let now = unix_now();
+    let Some(offer) = cfg.lan.offers.consume(token, now) else {
+        cfg.lan.guard.record_failure(ip, std::time::Instant::now());
+        return err(
+            rid,
+            ErrorCode::Unauthenticated,
+            "that pairing code is wrong, expired or already used; make a new one on the PC",
+        );
+    };
+    let Some(identity) = cfg.lan.identity.as_ref() else {
+        return err(
+            rid,
+            ErrorCode::LanUnavailable,
+            "phone access is off on this PC",
+        );
+    };
+    let (id, secret) = match cfg.lan.registry.add(
+        req.device_name.as_str(),
+        offer.paired_by.clone(),
+        offer.tenant_id.clone(),
+        now,
+    ) {
+        Ok(x) => x,
+        Err(e) => {
+            tracing::error!("could not save the paired phone: {e}");
+            return err(
+                rid,
+                ErrorCode::ProtocolError,
+                "the PC could not save the pairing",
+            );
+        }
+    };
+    cfg.lan.guard.record_success(ip);
+    tracing::info!(device = %id, %ip, name = %req.device_name.as_str(), "phone paired");
+    let built = (|| -> Option<m::LanPairResponse> {
+        Some(m::LanPairResponse {
+            daemon_id: identity.daemon_id.as_str().try_into().ok()?,
+            daemon_name: cfg.lan.settings.name.as_str().try_into().ok()?,
+            device_id: id.as_str().try_into().ok()?,
+            device_secret: secret.as_str().try_into().ok()?,
+            request_id: req.request_id.clone(),
+            type_: m::LanPairResponseType::LanPairResponse,
+        })
+    })();
+    match built {
+        Some(r) => r.into(),
+        None => {
+            let _ = cfg.lan.registry.revoke(&id);
+            err(
+                rid,
+                ErrorCode::ProtocolError,
+                "could not build the pairing answer",
+            )
+        }
+    }
 }
 
 /// The leases a new connection runs under.
@@ -743,6 +1159,10 @@ struct Session {
     adopted_user_epoch: Option<u64>,
     /// Pairing user for browser sessions; None for native, code-paired clients.
     user: Option<String>,
+    /// The pairing user's workshop.
+    tenant: Option<String>,
+    /// The paired phone, for connections over the network.
+    lan_device: Option<String>,
 }
 
 /// A diagnostic channel on its own port of the virtual or shared physical bus.
@@ -843,12 +1263,122 @@ impl Session {
             EdgeMessage::DiagCommandRequest(r) => self.diag(r).await,
             EdgeMessage::LeaseStatusRequest(r) => self.lease_status(r.request_id),
             EdgeMessage::LeaseInstallRequest(r) => self.install_lease(r),
+            EdgeMessage::LanStatusRequest(r) => self.lan_status(r.request_id),
+            EdgeMessage::LanPairOfferRequest(r) => self.lan_offer(r),
+            EdgeMessage::LanDeviceRevokeRequest(r) => self.lan_revoke(r),
+            EdgeMessage::LanPairRequest(r) => err(
+                Some(r.request_id),
+                ErrorCode::ProtocolError,
+                "LanPairRequest is only sent on a phone's pairing connection",
+            ),
             _ => err(
                 request_id_of(text),
                 ErrorCode::ProtocolError,
                 "that message type is sent by the daemon, not the app",
             ),
         }
+    }
+
+    /// Phone access is managed only from this PC, never from a phone.
+    fn lan_manage_refusal(&self, request_id: &RequestId) -> Option<EdgeMessage> {
+        self.lan_device.as_ref().map(|_| {
+            err(
+                Some(request_id.clone()),
+                ErrorCode::LanUnavailable,
+                "phones can't pair or remove phones; do that on the PC's Devices page",
+            )
+        })
+    }
+
+    fn lan_status(&self, request_id: RequestId) -> EdgeMessage {
+        if let Some(refusal) = self.lan_manage_refusal(&request_id) {
+            return refusal;
+        }
+        lan_status_message(&self.cfg, request_id)
+    }
+
+    fn lan_offer(&self, r: m::LanPairOfferRequest) -> EdgeMessage {
+        if let Some(refusal) = self.lan_manage_refusal(&r.request_id) {
+            return refusal;
+        }
+        let rid = Some(r.request_id.clone());
+        let host = match r
+            .host
+            .as_ref()
+            .map(|h| h.as_str().parse::<std::net::IpAddr>())
+        {
+            None => None,
+            Some(Ok(ip)) => Some(ip),
+            Some(Err(_)) => return err(rid, ErrorCode::ProtocolError, "host is not an IP address"),
+        };
+        let offer =
+            match self
+                .cfg
+                .lan
+                .issue_offer(host, self.user.clone(), self.tenant.clone(), unix_now())
+            {
+                Ok(o) => o,
+                Err(e @ (lan::OfferError::Disabled | lan::OfferError::NoAddress)) => {
+                    return err(rid, ErrorCode::LanUnavailable, &e.to_string())
+                }
+                Err(e) => return err(rid, ErrorCode::ProtocolError, &e.to_string()),
+            };
+        tracing::info!(host = %offer.host, by = ?self.user, "phone pairing code issued");
+        let built = (|| -> Option<m::LanPairOffer> {
+            Some(m::LanPairOffer {
+                expires_at: rfc3339_at(offer.expires_at)?,
+                fingerprint: offer.fingerprint.as_str().try_into().ok()?,
+                host: offer.host.to_string().as_str().try_into().ok()?,
+                pairing_uri: offer.uri.as_str().try_into().ok()?,
+                port: std::num::NonZeroU16::new(offer.port)?,
+                qr_rows: offer
+                    .qr_rows
+                    .iter()
+                    .map(|r| r.as_str().try_into().ok())
+                    .collect::<Option<Vec<_>>>()?,
+                request_id: r.request_id.clone(),
+                type_: m::LanPairOfferType::LanPairOffer,
+            })
+        })();
+        match built {
+            Some(o) => o.into(),
+            None => err(
+                rid,
+                ErrorCode::ProtocolError,
+                "could not build the pairing code",
+            ),
+        }
+    }
+
+    fn lan_revoke(&self, r: m::LanDeviceRevokeRequest) -> EdgeMessage {
+        if let Some(refusal) = self.lan_manage_refusal(&r.request_id) {
+            return refusal;
+        }
+        let rid = Some(r.request_id.clone());
+        let id = r.device_id.as_str();
+        let Some(device) = self.cfg.lan.registry.get(id) else {
+            return err(rid, ErrorCode::ProtocolError, "no paired phone has that id");
+        };
+        // A browser user may remove phones of their own workshop (or not yet
+        // bound to one); a code-paired client at this PC may remove any.
+        let allowed = self.user.is_none()
+            || device.tenant_id.is_none()
+            || device.tenant_id.as_deref() == self.tenant.as_deref();
+        if !allowed {
+            return err(
+                rid,
+                ErrorCode::Unauthenticated,
+                "that phone belongs to another workshop",
+            );
+        }
+        if let Err(e) = self.cfg.lan.registry.revoke(id) {
+            return err(
+                rid,
+                ErrorCode::ProtocolError,
+                &format!("could not remove the phone: {e}"),
+            );
+        }
+        lan_status_message(&self.cfg, r.request_id)
     }
 
     fn lease_status(&self, request_id: RequestId) -> EdgeMessage {
@@ -1281,7 +1811,9 @@ impl Session {
         let battery = bus.with_vehicle(|v| v.battery_v);
         let vin = bus.with_vehicle(|v| v.vin.clone());
         self.interlock.update_battery(battery);
-        self.interlock.set_identity(None, Some(vin.clone()));
+        // Keep the technician: the audit log names who did it as well as the car.
+        self.interlock
+            .set_identity(self.user.clone(), Some(vin.clone()));
         if let Some(immo) = self.immo_lease.clone() {
             if let Err(refusal) =
                 self.interlock

@@ -47,6 +47,6 @@ describe("the bridge", () => {
     expect(adoptSessionScript(evil, "/home")).toContain(JSON.stringify(evil));
     expect(adoptSessionScript("t", "https://evil.com")).toContain('location.replace("/home")');
     expect(pendingLinkScript({ link_token: "x" })).toContain("/signin?link=1");
-    expect(bootstrapScript("1.2.3")).toContain('appVersion:"1.2.3"');
+    expect(bootstrapScript("1.2.3")).toContain('"appVersion":"1.2.3"');
   });
 });

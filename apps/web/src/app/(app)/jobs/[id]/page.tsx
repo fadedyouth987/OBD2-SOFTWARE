@@ -8,7 +8,7 @@ import { DtcCard } from "@/components/job/DtcCard";
 
 export default function JobOverviewPage() {
   return (
-    <div className="grid gap-4 xl:grid-cols-[1.6fr_1fr]">
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.6fr_1fr]">
       <div className="space-y-4">
         <Suspense>
           <DtcCard />

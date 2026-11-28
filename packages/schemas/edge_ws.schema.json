@@ -3,7 +3,7 @@
   "$id": "https://obd2-diag.local/schemas/edge_ws.schema.json",
   "title": "EdgeMessage",
   "description": "Every message exchanged over the local edge WebSocket (ws://127.0.0.1:8765). Tagged union on `type`. Source of truth for the generated Rust types (typify) and Zod validators (json-schema-to-zod). Edit this file, then run `just codegen`.",
-  "x-protocol-version": "1.1.0",
+  "x-protocol-version": "1.2.0",
   "x-request-response": {
     "HelloRequest": "HelloResponse",
     "AdapterListRequest": "AdapterListResponse",
@@ -12,7 +12,11 @@
     "SafetyConfirmRequest": "SafetyConfirmResponse",
     "DiagCommandRequest": "DiagCommandResponse",
     "LeaseStatusRequest": "LeaseStatus",
-    "LeaseInstallRequest": "LeaseStatus"
+    "LeaseInstallRequest": "LeaseStatus",
+    "LanStatusRequest": "LanStatus",
+    "LanPairOfferRequest": "LanPairOffer",
+    "LanDeviceRevokeRequest": "LanStatus",
+    "LanPairRequest": "LanPairResponse"
   },
   "oneOf": [
     { "$ref": "#/definitions/HelloRequest" },
@@ -32,7 +36,14 @@
     { "$ref": "#/definitions/ErrorResponse" },
     { "$ref": "#/definitions/LeaseStatusRequest" },
     { "$ref": "#/definitions/LeaseInstallRequest" },
-    { "$ref": "#/definitions/LeaseStatus" }
+    { "$ref": "#/definitions/LeaseStatus" },
+    { "$ref": "#/definitions/LanStatusRequest" },
+    { "$ref": "#/definitions/LanStatus" },
+    { "$ref": "#/definitions/LanPairOfferRequest" },
+    { "$ref": "#/definitions/LanPairOffer" },
+    { "$ref": "#/definitions/LanDeviceRevokeRequest" },
+    { "$ref": "#/definitions/LanPairRequest" },
+    { "$ref": "#/definitions/LanPairResponse" }
   ],
   "definitions": {
     "RequestId": {
@@ -138,7 +149,8 @@
         "ADAPTER_ERROR",
         "PROTOCOL_ERROR",
         "TIMEOUT",
-        "VERSION_UNSUPPORTED"
+        "VERSION_UNSUPPORTED",
+        "LAN_UNAVAILABLE"
       ]
     },
     "AdapterInfo": {
@@ -211,7 +223,7 @@
         "type": { "type": "string", "enum": ["HelloRequest"] },
         "request_id": { "$ref": "#/definitions/RequestId" },
         "client_token": {
-          "description": "Cloud pairing JWT (aud=edge-ws) or 6-digit local pairing code from `edge-daemon pair`.",
+          "description": "Cloud pairing JWT (aud=edge-ws) or 6-digit local pairing code from `edge-daemon pair`. Network (phone) connections accept only the cloud pairing JWT.",
           "type": "string",
           "minLength": 1,
           "maxLength": 8192
@@ -494,6 +506,222 @@
           "description": "False when no cloud signing key is pinned, so cloud leases and pairing tokens cannot verify (COMMUNITY tier, local pairing codes only).",
           "type": "boolean"
         }
+      }
+    },
+    "LanDevice": {
+      "description": "A phone paired for network access (LanStatus.devices).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device_id", "name", "paired_at", "last_seen_at", "paired_by", "connected"],
+      "properties": {
+        "device_id": { "description": "Id of a paired phone.", "type": "string", "pattern": "^lan_[0-9a-f]{16}$" },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 48,
+          "description": "Name the phone gave when it paired."
+        },
+        "paired_at": { "$ref": "#/definitions/Rfc3339Utc" },
+        "last_seen_at": {
+          "anyOf": [{"$ref": "#/definitions/Rfc3339Utc"}, {"type": "null"}],
+          "description": "Last connection; null if it never connected after pairing."
+        },
+        "paired_by": {
+          "description": "Cloud user id of the technician who created the pairing code; null when it came from `edge-daemon lan pair`.",
+          "type": ["string", "null"],
+          "maxLength": 64
+        },
+        "connected": { "description": "True while the phone has a connection open.", "type": "boolean" }
+      }
+    },
+    "LanStatusRequest": {
+      "description": "Phone access over the local network: settings and paired phones. Loopback connections only. Request -> LanStatus.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "request_id"],
+      "properties": {
+        "type": { "type": "string", "enum": ["LanStatusRequest"]},
+        "request_id": { "$ref": "#/definitions/RequestId" }
+      }
+    },
+    "LanStatus": {
+      "description": "Response to LanStatusRequest and LanDeviceRevokeRequest.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "request_id",
+        "enabled",
+        "port",
+        "addresses",
+        "fingerprint",
+        "daemon_id",
+        "daemon_name",
+        "mdns",
+        "devices"
+      ],
+      "properties": {
+        "type": { "type": "string", "enum": ["LanStatus"]},
+        "request_id": { "$ref": "#/definitions/RequestId" },
+        "enabled": {
+          "description": "True when the network listener is on (it is off until `edge-daemon lan enable`).",
+          "type": "boolean"
+        },
+        "port": {
+          "description": "TLS port phones connect to.",
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "addresses": {
+          "description": "This PC's addresses a phone could use, best first; empty when off.",
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "description": "IP address of this PC on the workshop network (IPv4 dotted, or IPv6 without brackets).",
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 45,
+            "pattern": "^[0-9A-Fa-f:.]+$"
+          }
+        },
+        "fingerprint": {
+          "anyOf": [
+            {
+              "description": "SHA-256 of the daemon's network TLS certificate (DER), lowercase hex. The phone pins it.",
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            { "type": "null" }
+          ],
+          "description": "Certificate fingerprint; null when off."
+        },
+        "daemon_id": {
+          "anyOf": [
+            {
+              "description": "Stable id of this daemon, in the pairing QR code and mDNS record.",
+              "type": "string",
+              "pattern": "^rcd_[0-9a-f]{16}$"
+            },
+            { "type": "null" }
+          ],
+          "description": "Null when off."
+        },
+        "daemon_name": { "type": "string", "minLength": 1, "maxLength": 48, "description": "Name phones show for this PC." },
+        "mdns": { "description": "True when the PC advertises itself on mDNS.", "type": "boolean" },
+        "devices": { "type": "array", "maxItems": 32, "items": { "$ref": "#/definitions/LanDevice" }}
+      }
+    },
+    "LanPairOfferRequest": {
+      "description": "Creates a one-time pairing QR code for a phone (5 minutes, single use). Loopback connections only. Request -> LanPairOffer.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "request_id", "host"],
+      "properties": {
+        "type": { "type": "string", "enum": ["LanPairOfferRequest"]},
+        "request_id": { "$ref": "#/definitions/RequestId" },
+        "host": {
+          "anyOf": [
+            {
+              "description": "IP address of this PC on the workshop network (IPv4 dotted, or IPv6 without brackets).",
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 45,
+              "pattern": "^[0-9A-Fa-f:.]+$"
+            },
+            { "type": "null" }
+          ],
+          "description": "Which of LanStatus.addresses to put in the code; null picks the best."
+        }
+      }
+    },
+    "LanPairOffer": {
+      "description": "A pairing code for a phone. Response to LanPairOfferRequest.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "request_id", "pairing_uri", "host", "port", "fingerprint", "expires_at", "qr_rows"],
+      "properties": {
+        "type": { "type": "string", "enum": ["LanPairOffer"]},
+        "request_id": { "$ref": "#/definitions/RequestId" },
+        "pairing_uri": {
+          "description": "rootcause://lan-pair link with host, port, fingerprint, one-time token, daemon id and name. Shown as a QR code; it is a secret until used or expired.",
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 512,
+          "pattern": "^rootcause://lan-pair\\?"
+        },
+        "host": {
+          "description": "IP address of this PC on the workshop network (IPv4 dotted, or IPv6 without brackets).",
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 45,
+          "pattern": "^[0-9A-Fa-f:.]+$"
+        },
+        "port": { "type": "integer", "format": "uint16", "minimum": 1, "maximum": 65535},
+        "fingerprint": {
+          "description": "SHA-256 of the daemon's network TLS certificate (DER), lowercase hex. The phone pins it.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "expires_at": { "$ref": "#/definitions/Rfc3339Utc" },
+        "qr_rows": {
+          "description": "The QR code: one string per row, '1' dark and '0' light, no quiet zone.",
+          "type": "array",
+          "minItems": 21,
+          "maxItems": 177,
+          "items": { "type": "string", "minLength": 21, "maxLength": 177, "pattern": "^[01]+$" }
+        }
+      }
+    },
+    "LanDeviceRevokeRequest": {
+      "description": "Removes a paired phone and closes its connections. Loopback connections only. Request -> LanStatus.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "request_id", "device_id"],
+      "properties": {
+        "type": { "type": "string", "enum": ["LanDeviceRevokeRequest"]},
+        "request_id": { "$ref": "#/definitions/RequestId" },
+        "device_id": { "description": "Id of a paired phone.", "type": "string", "pattern": "^lan_[0-9a-f]{16}$" }
+      }
+    },
+    "LanPairRequest": {
+      "description": "First and only message on a network pairing connection (Authorization: RootCause-Pair <token>). Request -> LanPairResponse.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "request_id", "device_name", "client_version"],
+      "properties": {
+        "type": { "type": "string", "enum": ["LanPairRequest"]},
+        "request_id": { "$ref": "#/definitions/RequestId" },
+        "device_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 48,
+          "description": "Shown on the PC, e.g. the phone model."
+        },
+        "client_version": { "$ref": "#/definitions/SemVer" }
+      }
+    },
+    "LanPairResponse": {
+      "description": "The phone's credential for later connections (Authorization: Bearer <device_id>.<device_secret>). Sent once; the daemon keeps only its hash. Response to LanPairRequest.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "request_id", "device_id", "device_secret", "daemon_id", "daemon_name"],
+      "properties": {
+        "type": { "type": "string", "enum": ["LanPairResponse"]},
+        "request_id": { "$ref": "#/definitions/RequestId" },
+        "device_id": { "description": "Id of a paired phone.", "type": "string", "pattern": "^lan_[0-9a-f]{16}$" },
+        "device_secret": {
+          "description": "32 random bytes, base64url without padding.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$"
+        },
+        "daemon_id": {
+          "description": "Stable id of this daemon, in the pairing QR code and mDNS record.",
+          "type": "string",
+          "pattern": "^rcd_[0-9a-f]{16}$"
+        },
+        "daemon_name": { "type": "string", "minLength": 1, "maxLength": 48}
       }
     }
   }

@@ -146,7 +146,17 @@ function DeviceChip() {
     }
   } else if (snapshot.phase === "failed") {
     tone = "bg-danger";
-    text = snapshot.failure?.needsCode ? "Pairing needed" : "Daemon problem";
+    text =
+      snapshot.failure?.kind === "phone"
+        ? "PC not connected"
+        : snapshot.failure?.needsCode
+          ? "Pairing needed"
+          : "Daemon problem";
+    if (snapshot.failure?.kind === "phone") sub = "can't change the car";
+  } else if (snapshot.phase === "waiting" && snapshot.failure?.kind === "phone") {
+    tone = "bg-danger";
+    text = "PC offline";
+    sub = "retrying";
   } else if (snapshot.phase === "waiting") {
     tone = "bg-danger";
     text = "Daemon offline";
@@ -158,7 +168,7 @@ function DeviceChip() {
   return (
     <Link
       href="/devices"
-      className="flex min-h-[44px] max-w-[220px] items-center gap-2 rounded-lg border border-line bg-raised px-2.5 text-xs hover:border-muted"
+      className="flex min-h-[44px] min-w-0 max-w-[220px] items-center gap-2 rounded-lg border border-line bg-raised px-2.5 text-xs hover:border-muted"
     >
       <span aria-hidden className={cx("h-2.5 w-2.5 shrink-0 rounded-full", tone)} />
       <span className="flex min-w-0 flex-col leading-tight">
@@ -384,11 +394,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
       <div className="min-w-0">
         <header className="no-print sticky top-0 z-30 border-b border-line bg-bg/95 backdrop-blur">
-          <div className="flex items-center gap-2 px-3 py-2 sm:px-4">
+          <div className="flex min-w-0 items-center gap-2 px-3 py-2 sm:px-4">
             <MobileNav />
             <WorkshopSwitcher />
             <VehicleChip />
-            <div className="ml-auto flex items-center gap-2">
+            <div className="ml-auto flex min-w-0 items-center gap-2">
               <DeviceChip />
               <LeaseChip />
               <SafetyBadge />

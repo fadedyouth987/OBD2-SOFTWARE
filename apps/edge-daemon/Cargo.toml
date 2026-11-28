@@ -45,6 +45,15 @@ regress = "0.12"
 # Validates every incoming message against edge_ws.schema.json before serde,
 # so Rust enforces the same bounds as the Zod validators.
 jsonschema = { version = "0.61", default-features = false }
+# Phone access over the workshop network (off by default; server/lan.rs): TLS with
+# a per-daemon self-signed certificate the phone pins, the pairing QR code,
+# local addresses and optional mDNS. ring builds on Windows and Linux alike.
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
+qrcode = { version = "0.15.0", default-features = false }
+if-addrs = "0.15.0"
+mdns-sd = "0.22.0"
 
 # Runs under the Windows service manager (`edge-daemon service`, Task 5.1).
 [target.'cfg(windows)'.dependencies]

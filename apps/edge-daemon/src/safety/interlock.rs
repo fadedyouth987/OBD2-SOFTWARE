@@ -149,6 +149,8 @@ struct State {
     bench_mode: bool,
     user: Option<String>,
     vehicle: Option<String>,
+    /// Who sent the requests when it isn't this PC's browser (a paired phone).
+    client: Option<String>,
     speed: Option<Reading>,
     rpm: Option<Reading>,
     battery: Option<Reading>,
@@ -183,6 +185,7 @@ impl SafetyInterlock {
                 bench_mode: false,
                 user: None,
                 vehicle: None,
+                client: None,
                 speed: None,
                 rpm: None,
                 battery: None,
@@ -220,6 +223,11 @@ impl SafetyInterlock {
         let mut s = self.lock();
         s.user = user;
         s.vehicle = vehicle;
+    }
+
+    /// Names the client in every audit record of this session (a paired phone).
+    pub fn set_client(&self, client: Option<String>) {
+        self.lock().client = client;
     }
 
     /// Bench mode replaces the vehicle-speed check only. It needs its own
@@ -427,11 +435,11 @@ impl SafetyInterlock {
         state: Option<&State>,
         detail: String,
     ) {
-        let (user, vehicle) = match state {
-            Some(s) => (s.user.clone(), s.vehicle.clone()),
+        let (user, vehicle, client) = match state {
+            Some(s) => (s.user.clone(), s.vehicle.clone(), s.client.clone()),
             None => {
                 let s = self.lock();
-                (s.user.clone(), s.vehicle.clone())
+                (s.user.clone(), s.vehicle.clone(), s.client.clone())
             }
         };
         self.audit.record(AuditEntry {
@@ -439,6 +447,7 @@ impl SafetyInterlock {
             session_id: self.session_id.clone(),
             user,
             vehicle,
+            client,
             ecu: ecu.to_owned(),
             service: service.to_owned(),
             tier,

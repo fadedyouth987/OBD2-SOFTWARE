@@ -10,12 +10,36 @@ export type NativeMessage =
   | { type: "sso-start"; returnTo?: string; inviteToken?: string }
   | { type: "open-dongle" }
   | { type: "open-external"; url: string }
-  | { type: "signed-out" };
+  | { type: "signed-out" }
+  // Phone access to the workshop PC's edge daemon (see lib/native-daemon.ts).
+  | { type: "lan-pair" }
+  | { type: "lan-forget" }
+  | { type: "daemon-open"; id: string }
+  | { type: "daemon-send"; id: string; text: string }
+  | { type: "daemon-close"; id: string };
 
-interface NativeInfo {
+/** The workshop PC this phone is paired with, as the app reports it. */
+export interface NativeDaemonInfo {
+  paired: boolean;
+  /** PC name from the pairing, e.g. "Bay 3 PC". */
+  name?: string;
+  host?: string;
+  port?: number;
+  /** First 16 hex digits of the pinned certificate fingerprint, for display. */
+  fingerprint?: string;
+}
+
+export interface NativeInfo {
   platform: "android";
   appVersion: string;
+  /** Present in app versions that can reach the PC over the workshop network. */
+  daemon?: NativeDaemonInfo;
+  /** Dev builds: no PC paired falls back to loopback (adb reverse tcp:8765). */
+  devLoopback?: boolean;
 }
+
+/** Fired on window when the app pairs with or forgets a PC. */
+export const NATIVE_DAEMON_EVENT = "rootcause-native-daemon";
 
 declare global {
   interface Window {
@@ -54,4 +78,25 @@ export function useNativeApp(): NativeInfo | null {
   const [info, setInfo] = useState<NativeInfo | null>(null);
   useEffect(() => setInfo(nativeApp()), []);
   return info;
+}
+
+/** The paired PC, kept current as the app pairs or forgets; null outside the app. */
+export function useNativeDaemon(): NativeDaemonInfo | null {
+  const [info, setInfo] = useState<NativeDaemonInfo | null>(null);
+  useEffect(() => {
+    const read = () => {
+      const app = nativeApp();
+      setInfo(app ? { ...(app.daemon ?? { paired: false }) } : null);
+    };
+    read();
+    window.addEventListener(NATIVE_DAEMON_EVENT, read);
+    return () => window.removeEventListener(NATIVE_DAEMON_EVENT, read);
+  }, []);
+  return info;
+}
+
+/** A stable key for the paired PC, so the daemon connection restarts when it changes. */
+export function nativeDaemonKey(info: NativeDaemonInfo | null | undefined): string {
+  if (!info) return "browser";
+  return info.paired ? `phone:${info.host ?? ""}:${info.port ?? ""}:${info.fingerprint ?? ""}` : "phone:unpaired";
 }

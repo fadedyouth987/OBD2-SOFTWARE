@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import os
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as OrmSession
 
@@ -53,10 +54,28 @@ class LeaseRequest(BaseModel):
     aasra_verified: bool | None = None
 
 
+# A web origin: scheme, host and optional port, nothing else. The edge daemon
+# compares the token's origin with the connection's Origin header byte for byte,
+# so a path, query or odd casing would only make a token that never works.
+_ORIGIN = re.compile(
+    r"https?://(\[[0-9a-f:.]+\]|[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?)(:(?P<port>[0-9]{1,5}))?"
+)
+
+
 class PairingRequest(BaseModel):
-    origin: str
+    origin: str = Field(max_length=270)
     tenant_id: str | None = None
     user_id: str | None = None
+
+    @field_validator("origin")
+    @classmethod
+    def _web_origin(cls, value: str) -> str:
+        m = _ORIGIN.fullmatch(value)
+        if not m:
+            raise ValueError("origin must be a web origin such as https://app.example.com")
+        if m.group("port") is not None and not 0 < int(m.group("port")) < 65536:
+            raise ValueError("origin port is out of range")
+        return value
 
 
 class DevSessionRequest(BaseModel):

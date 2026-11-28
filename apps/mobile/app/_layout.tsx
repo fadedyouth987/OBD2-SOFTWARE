@@ -26,6 +26,7 @@ export default function Layout() {
           <Stack.Screen name="dongle/scan" options={{ title: "Scan" }} />
           <Stack.Screen name="dongle/live" options={{ title: "Live data" }} />
           <Stack.Screen name="dongle/plan" options={{ title: "What your plan includes" }} />
+          <Stack.Screen name="lan/pair" options={{ title: "Pair with a PC" }} />
         </Stack>
       </AppProvider>
     </SafeAreaProvider>

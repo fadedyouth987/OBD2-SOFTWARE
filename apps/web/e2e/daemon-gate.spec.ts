@@ -7,9 +7,10 @@
 // edge-daemon`). The cloud API is stood in, but the pairing and lease tokens it
 // hands the browser are real: issued by signing.py with a throwaway key that
 // this run pins in the daemon.
-import type { Page } from "@playwright/test";
+import type { BrowserContext, Page } from "@playwright/test";
 import { CloudSigner, DAEMON_PORT, Daemon, daemonAvailable, wireVersions } from "./daemon";
 import { expect, test, useStandIns } from "./fixtures";
+import { openPinned, type PinnedSocket } from "./pinned-ws";
 
 const ORIGIN = `http://127.0.0.1:${Number(process.env.E2E_PORT ?? 3100)}`;
 
@@ -51,7 +52,10 @@ async function pairAndConnect(page: Page, vehicle: RegExp) {
   await expect(page.getByText("Paired by")).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText("your sign-in")).toBeVisible();
   // The daemon can verify cloud leases, so the app installs the plan's lease.
-  await expect(page.getByText("Lease: Workshop").first()).toBeVisible({ timeout: 20_000 });
+  // (The header chip on a computer; the daemon card's Lease row on a phone-sized screen.)
+  await expect(
+    page.getByText("Lease: Workshop").filter({ visible: true }).or(page.getByRole("definition").filter({ hasText: /^Workshop$/ })).first(),
+  ).toBeVisible({ timeout: 20_000 });
   const active = page.getByRole("checkbox", { name: "Allow confirmed actions (Active mode)" });
   await expect(active).toBeEnabled();
   await active.check();
@@ -61,7 +65,10 @@ async function pairAndConnect(page: Page, vehicle: RegExp) {
 
 /** In-app navigation to the job (a reload would drop the adapter connection). */
 async function openJob(page: Page) {
-  await page.getByRole("link", { name: /vehicles & jobs/i }).first().click();
+  // Phone-sized screens keep the navigation in the menu.
+  const menu = page.getByRole("button", { name: "Open menu" });
+  if (await menu.isVisible()) await menu.click();
+  await page.getByRole("link", { name: /vehicles & jobs/i }).filter({ visible: true }).first().click();
   await page.getByRole("link", { name: /2008 BMW 320i/ }).first().click();
   await expect(page.getByRole("heading", { level: 1, name: "2008 BMW 320i (E90)" })).toBeVisible();
 }
@@ -190,6 +197,167 @@ test("unknown vehicle speed shows PRECONDITION_UNKNOWN and confirming stays bloc
     expect(String(reply.message)).toMatch(/vehicle speed.*has not been read/);
     expect(daemon.audit().at(-1)).toMatchObject({ outcome: "token_refused", code: "PRECONDITION_UNKNOWN" });
   });
+});
+
+/**
+ * The Android app, stood in: the web app in a phone-sized page with the app's
+ * bridge (window.RootCauseNative + ReactNativeWebView), and the app's native
+ * pinned-TLS link done in Node (./pinned-ws, as modules/daemon-link does).
+ */
+async function phoneApp(context: BrowserContext, pc: { name: string; host: string; port: number; fingerprint: string } | null, creds: () => string | null) {
+  const sockets = new Map<string, PinnedSocket>();
+  let page: Page | null = null;
+  const deliver = (events: unknown[]) => {
+    return void page?.evaluate((ev) => window.RootCauseNativeDaemon?.deliver(ev as never), events).catch(() => undefined);
+  };
+  await context.exposeBinding("__phoneBridge", (_src, raw: string) => {
+    const m = JSON.parse(raw) as { type: string; id?: string; text?: string };
+    if (m.type === "daemon-open" && m.id) {
+      const id = m.id;
+      const auth = creds();
+      if (!pc || !auth) return deliver([{ id, kind: "close", wasOpen: false, reason: "unpaired" }]);
+      sockets.set(
+        id,
+        openPinned({
+          host: pc.host,
+          port: pc.port,
+          pin: pc.fingerprint,
+          authorization: auth,
+          origin: ORIGIN,
+          onOpen: () => deliver([{ id, kind: "open" }]),
+          onMessage: (text) => deliver([{ id, kind: "message", text }]),
+          onClose: (wasOpen, reason, detail) => {
+            sockets.delete(id);
+            deliver([{ id, kind: "close", wasOpen, reason, detail }]);
+          },
+        }),
+      );
+    } else if (m.type === "daemon-send" && m.id) sockets.get(m.id)?.send(m.text ?? "");
+    else if (m.type === "daemon-close" && m.id) {
+      sockets.get(m.id)?.close();
+      sockets.delete(m.id);
+    }
+  });
+  await context.addInitScript((daemon) => {
+    Object.defineProperty(window, "RootCauseNative", {
+      value: Object.freeze({ platform: "android", appVersion: "0.2.0", daemon: Object.freeze(daemon) }),
+    });
+    Object.defineProperty(window, "ReactNativeWebView", {
+      value: { postMessage: (m: string) => (window as unknown as { __phoneBridge(m: string): void }).__phoneBridge(m) },
+    });
+  }, pc ? { paired: true, name: pc.name, host: pc.host, port: pc.port, fingerprint: pc.fingerprint.slice(0, 16) } : { paired: false });
+  page = await context.newPage();
+  return { page, close: () => sockets.forEach((s) => s.close()) };
+}
+
+/** What the app does with a scanned code: one pinned connection, LanPairRequest, keep the credential. */
+function pairPhone(link: string): Promise<{ pc: { name: string; host: string; port: number; fingerprint: string }; auth: string }> {
+  const q = new URLSearchParams(link.slice("rootcause://lan-pair?".length));
+  const pc = { name: q.get("n")!, host: q.get("h")!, port: Number(q.get("p")), fingerprint: q.get("fp")! };
+  return new Promise((ok, fail) => {
+    const s = openPinned({
+      ...pc,
+      pin: pc.fingerprint,
+      authorization: `RootCause-Pair ${q.get("t")}`,
+      origin: ORIGIN,
+      onOpen: () => s.send(JSON.stringify({ type: "LanPairRequest", request_id: "pair_1", device_name: "Pixel 8", client_version: "0.2.0" })),
+      onMessage: (text) => {
+        const m = JSON.parse(text);
+        s.close();
+        if (m.type === "LanPairResponse") ok({ pc: { ...pc, name: m.daemon_name }, auth: `Bearer ${m.device_id}.${m.device_secret}` });
+        else fail(new Error(text));
+      },
+      onClose: (_open, reason, detail) => fail(new Error(`pairing closed: ${reason} ${detail ?? ""}`)),
+    });
+  });
+}
+
+test("a phone pairs by QR code and clears codes through the PC's safety interlock over TLS", async ({ page, context, browser }) => {
+  test.setTimeout(120_000);
+  await daemon.kill();
+  await daemon.start({ EDGE_LAN: "on", EDGE_LAN_BIND: "127.0.0.1", EDGE_LAN_HOST: "127.0.0.1", EDGE_LAN_PORT: "8766", EDGE_LAN_NAME: "Bay 3 PC" });
+  await useStandIns(context, { edgeMode: "daemon", edge: signer });
+  const phoneSize = { viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: false };
+
+  await test.step("an unpaired phone says why it can't change the car", async () => {
+    const ctx = await browser.newContext({ ...phoneSize, baseURL: ORIGIN });
+    await useStandIns(ctx, { edgeMode: "daemon", edge: signer });
+    const phone = await phoneApp(ctx, null, () => null);
+    await phone.page.goto("/devices");
+    await expect(phone.page.getByText(/isn't paired with a workshop PC/).first()).toBeVisible({ timeout: 20_000 });
+    await expect(phone.page.getByRole("button", { name: "Pair with a PC" }).first()).toBeVisible();
+    await ctx.close();
+  });
+
+  let link = "";
+  await test.step("the PC shows a single-use pairing code", async () => {
+    await page.goto("/devices");
+    const card = page.locator("#phones");
+    await expect(card.getByText("Bay 3 PC")).toBeVisible({ timeout: 20_000 });
+    await card.getByRole("button", { name: "Pair a phone" }).click();
+    await expect(card.getByRole("img", { name: /Pairing code for Bay 3 PC at 127.0.0.1:8766/ })).toBeVisible();
+    await card.getByText("Can't scan? Show the pairing link").click();
+    link = (await card.getByText(/^rootcause:\/\/lan-pair\?/).textContent()) ?? "";
+    expect(link).toMatch(/^rootcause:\/\/lan-pair\?v=1&h=127\.0\.0\.1&p=8766&fp=[0-9a-f]{64}&t=/);
+  });
+
+  const paired = await pairPhone(link);
+  await test.step("the code works once, and the PC lists the phone", async () => {
+    await expect(pairPhone(link)).rejects.toThrow(/already used/);
+    await expect(page.locator("#phones").getByText("Pixel 8 is paired")).toBeVisible({ timeout: 10_000 });
+  });
+
+  const ctx = await browser.newContext({ ...phoneSize, baseURL: ORIGIN });
+  await useStandIns(ctx, { edgeMode: "daemon", edge: signer });
+  const phone = await phoneApp(ctx, paired.pc, () => paired.auth);
+  const p = phone.page;
+  // A missing control fails fast with its name instead of eating the whole budget.
+  p.setDefaultTimeout(20_000);
+  page.setDefaultTimeout(20_000);
+  try {
+    await test.step("the phone connects through the PC with the technician's own lease", async () => {
+      await p.goto("/devices");
+      await expect(p.getByText("Workshop PC", { exact: true })).toBeVisible({ timeout: 20_000 });
+      await expect(p.getByText("Bay 3 PC").first()).toBeVisible();
+      await pairAndConnect(p, /Virtual: Ford Falcon BA/);
+      // The PC's list shows the phone connected (it refreshes every 10 s).
+      await expect(page.locator("#phones").getByText(/^\W*Connected$/)).toBeVisible({ timeout: 15_000 });
+    });
+
+    await test.step("clearing codes from the phone goes through the hold-to-confirm and the daemon's audit", async () => {
+      await openJob(p);
+      await p.getByRole("button", { name: /scan all modules|scan again/i }).click();
+      await expect(p.getByText(/^Scanned /)).toBeVisible({ timeout: 30_000 });
+      await p.getByRole("button", { name: "Clear codes" }).click();
+      const dialog = p.getByRole("alertdialog");
+      await expect(dialog).toBeVisible();
+      await tickChecklist(p);
+      await expect(dialog.getByRole("button", { name: /^hold to clear/i })).toBeEnabled({ timeout: 10_000 });
+      const before = daemon.audit().length;
+      await hold(p, 2_000);
+      await expect(p.getByText("Codes cleared")).toBeVisible({ timeout: 20_000 });
+      const entries = daemon.audit().slice(before);
+      expect(entries.map((e) => e.outcome)).toEqual(expect.arrayContaining(["token_issued", "allowed"]));
+      for (const e of entries) {
+        expect(e.client, JSON.stringify(e)).toMatch(/^lan:lan_[0-9a-f]{16} \(Pixel 8\)$/);
+        expect(e.user).toBe("u1");
+      }
+    });
+
+    await test.step("removing the phone on the PC cuts it off at once", async () => {
+      const row = page.locator("#phones").getByRole("listitem").filter({ hasText: "Pixel 8" });
+      await row.getByRole("button", { name: "Remove Pixel 8" }).click();
+      await row.getByRole("button", { name: "Remove", exact: true }).click();
+      await expect(page.locator("#phones").getByText("No phones paired yet.")).toBeVisible();
+      // The phone's top bar says at once that it can't change the car; Devices says why.
+      await expect(p.getByRole("link", { name: /PC not connected/ })).toBeVisible({ timeout: 20_000 });
+      await p.getByRole("link", { name: /PC not connected/ }).click();
+      await expect(p.getByText(/Bay 3 PC no longer accepts this phone/).first()).toBeVisible();
+    });
+  } finally {
+    phone.close();
+    await ctx.close();
+  }
 });
 
 test("a killed daemon shows not running, with the fix", async ({ page, context }) => {

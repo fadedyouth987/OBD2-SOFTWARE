@@ -242,6 +242,7 @@ export const ErrorCode = z
     "PROTOCOL_ERROR",
     "TIMEOUT",
     "VERSION_UNSUPPORTED",
+    "LAN_UNAVAILABLE",
   ])
   .describe("Every code has a one-line fix-it hint in error_hints.json (A-DX-4).");
 export type ErrorCode = z.infer<typeof ErrorCode>;
@@ -290,7 +291,7 @@ export const HelloRequest = z
       .min(1)
       .max(8192)
       .describe(
-        "Cloud pairing JWT (aud=edge-ws) or 6-digit local pairing code from `edge-daemon pair`.",
+        "Cloud pairing JWT (aud=edge-ws) or 6-digit local pairing code from `edge-daemon pair`. Network (phone) connections accept only the cloud pairing JWT.",
       ),
     client_version: SemVer,
     protocol_version: SemVer,
@@ -338,6 +339,217 @@ export const HeuristicAlert = z
   .describe("Pushed by the daemon.");
 export type HeuristicAlert = z.infer<typeof HeuristicAlert>;
 
+/** RFC 3339 timestamp in UTC, e.g. 2026-11-19T06:15:58Z. */
+export const Rfc3339Utc = z
+  .string()
+  .regex(new RegExp("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"))
+  .describe("RFC 3339 timestamp in UTC, e.g. 2026-11-19T06:15:58Z.");
+export type Rfc3339Utc = z.infer<typeof Rfc3339Utc>;
+
+/** A phone paired for network access (LanStatus.devices). */
+export const LanDevice = z
+  .object({
+    device_id: z.string().regex(new RegExp("^lan_[0-9a-f]{16}$")).describe("Id of a paired phone."),
+    name: z.string().min(1).max(48).describe("Name the phone gave when it paired."),
+    paired_at: Rfc3339Utc,
+    last_seen_at: z
+      .union([Rfc3339Utc, z.null()])
+      .describe("Last connection; null if it never connected after pairing."),
+    paired_by: z
+      .union([
+        z
+          .string()
+          .max(64)
+          .describe(
+            "Cloud user id of the technician who created the pairing code; null when it came from `edge-daemon lan pair`.",
+          ),
+        z
+          .null()
+          .describe(
+            "Cloud user id of the technician who created the pairing code; null when it came from `edge-daemon lan pair`.",
+          ),
+      ])
+      .describe(
+        "Cloud user id of the technician who created the pairing code; null when it came from `edge-daemon lan pair`.",
+      ),
+    connected: z.boolean().describe("True while the phone has a connection open."),
+  })
+  .strict()
+  .describe("A phone paired for network access (LanStatus.devices).");
+export type LanDevice = z.infer<typeof LanDevice>;
+
+/** Removes a paired phone and closes its connections. Loopback connections only. Request -> LanStatus. */
+export const LanDeviceRevokeRequest = z
+  .object({
+    type: z.literal("LanDeviceRevokeRequest"),
+    request_id: RequestId,
+    device_id: z.string().regex(new RegExp("^lan_[0-9a-f]{16}$")).describe("Id of a paired phone."),
+  })
+  .strict()
+  .describe(
+    "Removes a paired phone and closes its connections. Loopback connections only. Request -> LanStatus.",
+  );
+export type LanDeviceRevokeRequest = z.infer<typeof LanDeviceRevokeRequest>;
+
+/** A pairing code for a phone. Response to LanPairOfferRequest. */
+export const LanPairOffer = z
+  .object({
+    type: z.literal("LanPairOffer"),
+    request_id: RequestId,
+    pairing_uri: z
+      .string()
+      .regex(new RegExp("^rootcause://lan-pair\\?"))
+      .min(16)
+      .max(512)
+      .describe(
+        "rootcause://lan-pair link with host, port, fingerprint, one-time token, daemon id and name. Shown as a QR code; it is a secret until used or expired.",
+      ),
+    host: z
+      .string()
+      .regex(new RegExp("^[0-9A-Fa-f:.]+$"))
+      .min(2)
+      .max(45)
+      .describe(
+        "IP address of this PC on the workshop network (IPv4 dotted, or IPv6 without brackets).",
+      ),
+    port: z.number().int().gte(1).lte(65535),
+    fingerprint: z
+      .string()
+      .regex(new RegExp("^[0-9a-f]{64}$"))
+      .describe(
+        "SHA-256 of the daemon's network TLS certificate (DER), lowercase hex. The phone pins it.",
+      ),
+    expires_at: Rfc3339Utc,
+    qr_rows: z
+      .array(z.string().regex(new RegExp("^[01]+$")).min(21).max(177))
+      .min(21)
+      .max(177)
+      .describe("The QR code: one string per row, '1' dark and '0' light, no quiet zone."),
+  })
+  .strict()
+  .describe("A pairing code for a phone. Response to LanPairOfferRequest.");
+export type LanPairOffer = z.infer<typeof LanPairOffer>;
+
+/** Creates a one-time pairing QR code for a phone (5 minutes, single use). Loopback connections only. Request -> LanPairOffer. */
+export const LanPairOfferRequest = z
+  .object({
+    type: z.literal("LanPairOfferRequest"),
+    request_id: RequestId,
+    host: z
+      .union([
+        z
+          .string()
+          .regex(new RegExp("^[0-9A-Fa-f:.]+$"))
+          .min(2)
+          .max(45)
+          .describe(
+            "IP address of this PC on the workshop network (IPv4 dotted, or IPv6 without brackets).",
+          ),
+        z.null(),
+      ])
+      .describe("Which of LanStatus.addresses to put in the code; null picks the best."),
+  })
+  .strict()
+  .describe(
+    "Creates a one-time pairing QR code for a phone (5 minutes, single use). Loopback connections only. Request -> LanPairOffer.",
+  );
+export type LanPairOfferRequest = z.infer<typeof LanPairOfferRequest>;
+
+/** First and only message on a network pairing connection (Authorization: RootCause-Pair <token>). Request -> LanPairResponse. */
+export const LanPairRequest = z
+  .object({
+    type: z.literal("LanPairRequest"),
+    request_id: RequestId,
+    device_name: z.string().min(1).max(48).describe("Shown on the PC, e.g. the phone model."),
+    client_version: SemVer,
+  })
+  .strict()
+  .describe(
+    "First and only message on a network pairing connection (Authorization: RootCause-Pair <token>). Request -> LanPairResponse.",
+  );
+export type LanPairRequest = z.infer<typeof LanPairRequest>;
+
+/** The phone's credential for later connections (Authorization: Bearer <device_id>.<device_secret>). Sent once; the daemon keeps only its hash. Response to LanPairRequest. */
+export const LanPairResponse = z
+  .object({
+    type: z.literal("LanPairResponse"),
+    request_id: RequestId,
+    device_id: z.string().regex(new RegExp("^lan_[0-9a-f]{16}$")).describe("Id of a paired phone."),
+    device_secret: z
+      .string()
+      .regex(new RegExp("^[A-Za-z0-9_-]{43}$"))
+      .describe("32 random bytes, base64url without padding."),
+    daemon_id: z
+      .string()
+      .regex(new RegExp("^rcd_[0-9a-f]{16}$"))
+      .describe("Stable id of this daemon, in the pairing QR code and mDNS record."),
+    daemon_name: z.string().min(1).max(48),
+  })
+  .strict()
+  .describe(
+    "The phone's credential for later connections (Authorization: Bearer <device_id>.<device_secret>). Sent once; the daemon keeps only its hash. Response to LanPairRequest.",
+  );
+export type LanPairResponse = z.infer<typeof LanPairResponse>;
+
+/** Response to LanStatusRequest and LanDeviceRevokeRequest. */
+export const LanStatus = z
+  .object({
+    type: z.literal("LanStatus"),
+    request_id: RequestId,
+    enabled: z
+      .boolean()
+      .describe("True when the network listener is on (it is off until `edge-daemon lan enable`)."),
+    port: z.number().int().gte(1).lte(65535).describe("TLS port phones connect to."),
+    addresses: z
+      .array(
+        z
+          .string()
+          .regex(new RegExp("^[0-9A-Fa-f:.]+$"))
+          .min(2)
+          .max(45)
+          .describe(
+            "IP address of this PC on the workshop network (IPv4 dotted, or IPv6 without brackets).",
+          ),
+      )
+      .max(16)
+      .describe("This PC's addresses a phone could use, best first; empty when off."),
+    fingerprint: z
+      .union([
+        z
+          .string()
+          .regex(new RegExp("^[0-9a-f]{64}$"))
+          .describe(
+            "SHA-256 of the daemon's network TLS certificate (DER), lowercase hex. The phone pins it.",
+          ),
+        z.null(),
+      ])
+      .describe("Certificate fingerprint; null when off."),
+    daemon_id: z
+      .union([
+        z
+          .string()
+          .regex(new RegExp("^rcd_[0-9a-f]{16}$"))
+          .describe("Stable id of this daemon, in the pairing QR code and mDNS record."),
+        z.null(),
+      ])
+      .describe("Null when off."),
+    daemon_name: z.string().min(1).max(48).describe("Name phones show for this PC."),
+    mdns: z.boolean().describe("True when the PC advertises itself on mDNS."),
+    devices: z.array(LanDevice).max(32),
+  })
+  .strict()
+  .describe("Response to LanStatusRequest and LanDeviceRevokeRequest.");
+export type LanStatus = z.infer<typeof LanStatus>;
+
+/** Phone access over the local network: settings and paired phones. Loopback connections only. Request -> LanStatus. */
+export const LanStatusRequest = z
+  .object({ type: z.literal("LanStatusRequest"), request_id: RequestId })
+  .strict()
+  .describe(
+    "Phone access over the local network: settings and paired phones. Loopback connections only. Request -> LanStatus.",
+  );
+export type LanStatusRequest = z.infer<typeof LanStatusRequest>;
+
 /** Which lease a LeaseInstallRequest carries: the offline diagnostic lease (lease.jwt) or a short immobilizer lease (immo_lease.jwt). */
 export const LeaseKind = z
   .enum(["DIAGNOSTIC", "IMMO"])
@@ -359,13 +571,6 @@ export const LeaseInstallRequest = z
     "Installs a cloud-signed lease (POST /auth/edge-lease, or an immobilizer job token). The daemon verifies it against the pinned cloud keys before saving it. Request -> LeaseStatus.",
   );
 export type LeaseInstallRequest = z.infer<typeof LeaseInstallRequest>;
-
-/** RFC 3339 timestamp in UTC, e.g. 2026-11-19T06:15:58Z. */
-export const Rfc3339Utc = z
-  .string()
-  .regex(new RegExp("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"))
-  .describe("RFC 3339 timestamp in UTC, e.g. 2026-11-19T06:15:58Z.");
-export type Rfc3339Utc = z.infer<typeof Rfc3339Utc>;
 
 /** The lease this connection runs under. Response to LeaseStatusRequest and LeaseInstallRequest. */
 export const LeaseStatus = z
@@ -488,10 +693,17 @@ export const EdgeMessage = z.discriminatedUnion("type", [
   LeaseStatusRequest,
   LeaseInstallRequest,
   LeaseStatus,
+  LanStatusRequest,
+  LanStatus,
+  LanPairOfferRequest,
+  LanPairOffer,
+  LanDeviceRevokeRequest,
+  LanPairRequest,
+  LanPairResponse,
 ]);
 export type EdgeMessage = z.infer<typeof EdgeMessage>;
 /** Wire protocol version, from `x-protocol-version` in edge_ws.schema.json. */
-export const PROTOCOL_VERSION = "1.1.0";
+export const PROTOCOL_VERSION = "1.2.0";
 
 /** Every message type in the envelope. */
 export const MESSAGE_TYPES = [
@@ -513,6 +725,13 @@ export const MESSAGE_TYPES = [
   "LeaseStatusRequest",
   "LeaseInstallRequest",
   "LeaseStatus",
+  "LanStatusRequest",
+  "LanStatus",
+  "LanPairOfferRequest",
+  "LanPairOffer",
+  "LanDeviceRevokeRequest",
+  "LanPairRequest",
+  "LanPairResponse",
 ] as const;
 export type MessageType = (typeof MESSAGE_TYPES)[number];
 
@@ -526,4 +745,8 @@ export const REQUEST_RESPONSE = {
   DiagCommandRequest: "DiagCommandResponse",
   LeaseStatusRequest: "LeaseStatus",
   LeaseInstallRequest: "LeaseStatus",
+  LanStatusRequest: "LanStatus",
+  LanPairOfferRequest: "LanPairOffer",
+  LanDeviceRevokeRequest: "LanStatus",
+  LanPairRequest: "LanPairResponse",
 } as const satisfies Partial<Record<MessageType, MessageType>>;

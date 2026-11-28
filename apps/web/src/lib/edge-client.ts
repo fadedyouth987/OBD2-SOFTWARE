@@ -31,7 +31,8 @@ export type PushType = "AdapterStatus" | "CanFrameBatch" | "ObdPidStream" | "Heu
 
 export type EdgeMode = "daemon" | "browser-sim";
 export type EdgePhase = "idle" | "connecting" | "handshaking" | "ready" | "waiting" | "failed";
-export type EdgeFailureKind = "unreachable" | "blocked" | "auth" | "version" | "origin" | "protocol";
+/** `phone`: the Android app's link to the workshop PC (pairing, network, identity). */
+export type EdgeFailureKind = "unreachable" | "blocked" | "auth" | "version" | "origin" | "protocol" | "phone";
 export type AuthMethod = "cloud" | "code" | "sim";
 
 export interface EdgeFailure {
@@ -87,11 +88,18 @@ export class EdgeRequestError extends Error {
   }
 }
 
+/** A transport that knows why it closed (the app's link to the PC) says so. */
+export interface TransportCloseDetail {
+  failure: EdgeFailure;
+  /** Worth retrying by itself (network), or needs the technician (pairing, identity). */
+  retry: boolean;
+}
+
 export interface TransportHandlers {
   onOpen: () => void;
   onMessage: (text: string) => void;
   /** `blocked`: the browser refused to open the socket at all (SecurityError). */
-  onClose: (wasOpen: boolean, blocked?: boolean) => void;
+  onClose: (wasOpen: boolean, blocked?: boolean, detail?: TransportCloseDetail) => void;
 }
 
 export interface Transport {
@@ -149,6 +157,8 @@ export interface EdgeClientOptions {
    * only when the socket never opened.
    */
   localAccessBlocked?: () => Promise<boolean>;
+  /** The Android app reaching the workshop PC over the network (no pairing codes there). */
+  phone?: boolean;
 }
 
 /** Shown when the browser, not the daemon, stopped the connection. */
@@ -212,7 +222,23 @@ function newId(): string {
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function failureFor(code: ErrorCode, message: string, hint: string, method: AuthMethod | null): EdgeFailure {
+function failureFor(
+  code: ErrorCode,
+  message: string,
+  hint: string,
+  method: AuthMethod | null,
+  phone = false,
+): EdgeFailure {
+  if (phone && (code === "UNAUTHENTICATED" || code === "LAN_UNAVAILABLE")) {
+    // The PC said why (removed, other workshop, signed out); codes don't apply to phones.
+    return {
+      kind: "phone",
+      code,
+      needsCode: false,
+      message: `The workshop PC refused this phone: ${message}`,
+      hint: "Sign in again in the app, or pair the phone again: Devices on the PC, Pair a phone; then Pair with a PC here.",
+    };
+  }
   switch (code) {
     case "UNAUTHENTICATED":
       return {
@@ -421,9 +447,9 @@ export class EdgeClient {
         if (epoch !== this.epoch) return;
         this.handle(text);
       },
-      onClose: (wasOpen, blocked) => {
+      onClose: (wasOpen, blocked, detail) => {
         if (epoch !== this.epoch) return;
-        this.onClosed(wasOpen, blocked ?? false);
+        this.onClosed(wasOpen, blocked ?? false, detail);
       },
     });
   }
@@ -476,12 +502,18 @@ export class EdgeClient {
     });
   }
 
-  private onClosed(wasOpen: boolean, blocked: boolean): void {
+  private onClosed(wasOpen: boolean, blocked: boolean, detail?: TransportCloseDetail): void {
     const was = this.snap.phase;
     this.clearTimers();
     this.transport = null;
     this.rejectAll("The connection to the daemon dropped.");
     if (this.stopped) return;
+    if (detail) {
+      // The transport knows the cause (the app's link to the PC).
+      if (detail.retry) this.scheduleRetry(detail.failure);
+      else this.update({ phase: "failed", failure: detail.failure, hello: null, retryInMs: null });
+      return;
+    }
     if (!wasOpen && this.snap.mode === "daemon") {
       // A SecurityError (mixed content, CSP) won't clear without a page change: stop and say how to fix it.
       if (blocked) {
@@ -578,7 +610,7 @@ export class EdgeClient {
         return;
       }
       if (m.type === "ErrorResponse") {
-        const f = failureFor(m.code, m.message, m.hint || errorHint(m.code), this.method);
+        const f = failureFor(m.code, m.message, m.hint || errorHint(m.code), this.method, this.opts.phone);
         // Auth and version problems won't fix themselves: stop and ask.
         this.fail(f, f.kind === "protocol");
         return;

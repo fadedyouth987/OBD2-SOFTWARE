@@ -108,7 +108,7 @@ export default function CloseoutPage() {
   };
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[1.6fr_1fr]">
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.6fr_1fr]">
       <Card title="Close out the job" subtitle="Records the repair and finishes the job. The customer report is generated from this.">
         <form
           className="space-y-3"

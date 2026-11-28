@@ -3,15 +3,18 @@
 // reading the same /auth/me entitlements and daemon lease). The app adds:
 //  - provider sign-in in the phone's browser (Google refuses embedded web views),
 //  - the phone's own Bluetooth dongle, read-only (Devices → "Use a dongle with this phone"),
-//  - no purchases in the app: Stripe pages never load here (Google Play rules).
-// Anything that changes a car still needs the edge daemon and its safety interlock.
+//  - no purchases in the app: Stripe pages never load here (Google Play rules),
+//  - a pinned TLS link to the workshop PC's edge daemon (Devices → Pair with a PC),
+//    so the web app's daemon connection works from the phone (src/lan).
+// Anything that changes a car still goes through the edge daemon and its safety
+// interlock, hold-to-confirm and audit log, exactly as from the PC's browser.
 
 import * as Crypto from "expo-crypto";
 import { router } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, BackHandler, Linking, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, BackHandler, Linking, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView as RNWebView, type WebViewMessageEvent, type WebViewNavigation } from "react-native-webview";
 import type { AndroidWebViewProps } from "react-native-webview/lib/WebViewTypes";
@@ -25,11 +28,16 @@ interface WebViewHandle {
 const WebView = RNWebView as unknown as React.ComponentType<AndroidWebViewProps & React.RefAttributes<WebViewHandle>>;
 import { runSso } from "../src/auth/sso";
 import { API_URL, APP_URL, APP_VERSION, CONFIG_ERROR } from "../src/config";
+import { DaemonLink } from "../modules/daemon-link";
+import { DaemonRelay } from "../src/lan/relay";
+import { hasDaemonLink, pcStore } from "../src/lan/pc";
+import { publicInfo, type PairedPc } from "../src/lan/store";
 import { useApp } from "../src/state";
 import { Banner, Button, color } from "../src/ui/kit";
 import {
   adoptSessionScript,
   bootstrapScript,
+  daemonUpdateScript,
   parseBridgeMessage,
   pendingLinkScript,
   READ_SESSION_SCRIPT,
@@ -45,6 +53,34 @@ export default function WebApp() {
   const [notice, setNotice] = useState<string | null>(null);
   const [ssoBusy, setSsoBusy] = useState(false);
   const wantDongle = useRef(false);
+
+  // The paired workshop PC (undefined until secure storage has been read).
+  const [pc, setPc] = useState<PairedPc | null | undefined>(pcStore.current());
+  const relay = useRef<DaemonRelay | null>(null);
+  useEffect(() => {
+    if (!hasDaemonLink) {
+      setPc(null);
+      return;
+    }
+    relay.current = new DaemonRelay({
+      native: DaemonLink,
+      inject: (script) => web.current?.injectJavaScript(script),
+      pc: () => pcStore.current(),
+      origin: new URL(APP_URL).origin,
+    });
+    void pcStore.load().then(setPc);
+    const unsub = pcStore.subscribe((next) => {
+      // A different (or no) PC: drop connections to the old one, then tell the web app.
+      relay.current?.closeAll(null);
+      setPc(next);
+      web.current?.injectJavaScript(daemonUpdateScript(publicInfo(next)));
+    });
+    return () => {
+      unsub();
+      relay.current?.dispose();
+      relay.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
@@ -98,6 +134,20 @@ export default function WebApp() {
       else if (msg.type === "open-external") {
         const d = decideNavigation(msg.url, APP_URL);
         if (d.action === "external") void Linking.openURL(d.url);
+      } else if (msg.type === "daemon-open") relay.current?.openConnection(msg.id);
+      else if (msg.type === "daemon-send") relay.current?.send(msg.id, msg.text);
+      else if (msg.type === "daemon-close") relay.current?.closeConnection(msg.id);
+      else if (msg.type === "lan-pair") {
+        if (hasDaemonLink) router.push("/lan/pair");
+      } else if (msg.type === "lan-forget") {
+        Alert.alert(
+          "Forget this PC?",
+          "This phone stops connecting to it. Also remove the phone on the PC (Devices → Phone access) so its pairing can't be used again.",
+          [
+            { text: "Keep", style: "cancel" },
+            { text: "Forget", style: "destructive", onPress: () => void pcStore.forget() },
+          ],
+        );
       }
     },
     [adoptToken, sso],
@@ -118,6 +168,13 @@ export default function WebApp() {
         <Banner tone="danger" title="This build isn't set up">
           {CONFIG_ERROR}
         </Banner>
+      </SafeAreaView>
+    );
+  }
+  if (pc === undefined) {
+    return (
+      <SafeAreaView style={s.center}>
+        <ActivityIndicator color={color.accent} />
       </SafeAreaView>
     );
   }
@@ -153,7 +210,8 @@ export default function WebApp() {
         source={{ uri: `${APP_URL}/home` }}
         style={{ backgroundColor: color.bg }}
         originWhitelist={[APP_URL]}
-        injectedJavaScriptBeforeContentLoaded={bootstrapScript(APP_VERSION)}
+        injectedJavaScriptBeforeContentLoaded={bootstrapScript(APP_VERSION, hasDaemonLink ? publicInfo(pc) : undefined, __DEV__)}
+        onLoadStart={() => relay.current?.closeAll(null)}
         onMessage={onMessage}
         onShouldStartLoadWithRequest={onShouldStart}
         onNavigationStateChange={(n) => setCanGoBack(n.canGoBack)}
