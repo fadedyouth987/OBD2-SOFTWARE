@@ -228,7 +228,7 @@ Open:
 - Linux: the package assumes a `dialout` group (Arch uses `uucp`).
 - Stopping or upgrading the service ends a live session without returning control to the ECU first; another local user can bind port 8765 while the service is stopped.
 
-## Whole-site debug pass (2026-11-28)
+## Whole-site debug pass (2026-11-27)
 
 Every route was loaded against the real local stack (Postgres, API, daemon, web in dev mode) signed out, signed in, and walked in-app with the virtual Falcon connected (scan, identify, live data, service functions, copilot, close-out, report), recording console errors, page errors and failed requests. No page crashed and no API call failed. Fixed:
 

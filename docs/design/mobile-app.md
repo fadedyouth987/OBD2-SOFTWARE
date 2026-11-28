@@ -1,6 +1,10 @@
 # RootCause Mobile: phone app and Mobile plan
 
-Status: **draft for approval** (2026-11-27). Nothing in this plan is built yet.
+Status: **approved and partly built** (2026-11-28). The engineering review below recorded the owner's answers (D1-D8).
+- Built: the Mobile plan and plan table (6.1), `packages/core` (6.2), the app shell, Bluetooth and ELM327 (6.3, 6.4), and the read features (6.5). A debug APK comes from CI (`mobile.yml`).
+- Still to do: app refresh tokens and the OIDC app redirect, screen-off recording (foreground service), the Play release (6.6), and a real-dongle field test.
+- Open decisions 1 to 5 in section 7 are still open.
+- Progress is tracked in `docs/status.md`.
 
 ## What the owner asked for
 

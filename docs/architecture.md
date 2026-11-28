@@ -1,6 +1,6 @@
 # Architecture
 
-Status: Task 0.1 (scaffold). Diagrams come from the 2026-11-19 gstack plan review and describe the target system; components are filled in task by task.
+Status: Release 1 (Tasks 0.1 to 5.1) built, plus the Android app (Phase 6, in progress). The desktop diagram comes from the 2026-11-19 gstack plan review; the phone diagram from docs/design/mobile-app.md.
 
 ## System
 
@@ -22,6 +22,22 @@ Status: Task 0.1 (scaffold). Diagrams come from the 2026-11-19 gstack plan revie
                  │ OBD-II / K-line / CAN                     └─────────────────┘
                Vehicle
 ```
+
+The Android app (`apps/mobile`, read-only in release 1) talks to the car directly, without the daemon:
+
+```
+ Phone (Expo app)                                      AWS ap-southeast-2
+ ┌──────────────────────────────────────────┐ HTTPS   ┌──────────────────────────────┐
+ │ screens ─ plan access (plan_features)    │────────▶│ cloud-api: auth/me, jobs,    │
+ │ send guard: allow-list + safety_policy   │         │ diagnose, report data        │
+ │ ELM327 driver ─ frame parser ─ reads     │         └──────────────────────────────┘
+ │ transports: BLE │ classic SPP │ demo car │
+ └───────────────┬──────────────────────────┘
+                 │ Bluetooth ─ ELM327 dongle ─ OBD-II
+               Vehicle
+```
+
+Plans and what each unlocks live in `packages/schemas/plan_features.json`; `billing.py`, `signing.py`, the web billing page and the app all read it. Design and review: `docs/design/mobile-app.md`.
 
 ## Safety token lifecycle
 

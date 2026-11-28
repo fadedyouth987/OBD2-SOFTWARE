@@ -42,9 +42,12 @@ Settings: `EDGE_ALLOWED_ORIGINS` (default `http://localhost:3000`), `EDGE_PORT`,
 | `apps/edge-daemon/` | Vehicle adapters, diagnostic protocols, safety interlock, loopback WebSocket | Rust 1.97 |
 | `apps/j2534-bridge/` | 32-bit process that loads J2534 vendor DLLs for the daemon (A-ENG-1) | Rust 1.97 |
 | `apps/web/` | Technician web app | Next.js 15, TypeScript, Tailwind 4 |
+| `apps/mobile/` | Android app for a phone and Bluetooth OBD dongle, read-only ([README](apps/mobile/README.md), [plan](docs/design/mobile-app.md)) | Expo SDK 58, React Native, TypeScript |
+| `apps/android/` | Early Kotlin tablet prototype with demo data; superseded by `apps/mobile`, not built in CI | Kotlin, Compose |
 | `services/cloud-api/` | Leases, pairing, session sync, diagnosis, billing | Python 3.12, FastAPI, Alembic |
 | `services/ai-worker/` | Schematic ingestion and ML jobs | Python 3.12, Celery |
-| `packages/schemas/` | Shared wire schemas, safety policy and error hints; source for generated Rust/Zod types (`just codegen`) | JSON Schema |
+| `packages/schemas/` | Shared wire schemas, safety policy, error hints and the plan table (`plan_features.json`, read by API, web and app); source for generated Rust/Zod types (`just codegen`) | JSON Schema |
+| `packages/core/` | Plain TypeScript shared by web and mobile: DTC and VIN parsing, OBD-II PID decoding | TypeScript |
 | `infra/` | Local infrastructure | Docker Compose |
 | `tools/codegen/` | Generates Rust protocol types from `packages/schemas` | Rust 1.97 |
 
