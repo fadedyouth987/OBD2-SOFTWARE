@@ -21,7 +21,13 @@ export default function WorkshopPage() {
 
   return (
     <>
-      <PageHeader title="Workshop" subtitle={me.workspace.name} actions={<ButtonLink href="/workshop/billing">Plan & billing</ButtonLink>} />
+      <PageHeader title="Workshop" subtitle={me.workspace.name} actions={
+          <>
+            <ButtonLink href="/workshop/licences">Licences & access</ButtonLink>
+            <ButtonLink href="/workshop/billing">Plan & billing</ButtonLink>
+          </>
+        }
+      />
       <div className="grid gap-4 lg:grid-cols-2">
         <Card title="This workshop">
           <dl className="grid grid-cols-[160px_1fr] gap-y-2 text-sm">

@@ -58,6 +58,22 @@ def _app_url(path: str | None, default: str) -> str:
     return f"{base}{path}"
 
 
+def _tax_params(*, has_customer: bool) -> dict[str, Any]:
+    """Checkout settings for Stripe Tax: GST on the invoice and the workshop's ABN.
+
+    Stripe Tax needs the billing address, and an existing customer's address and
+    name must be allowed to update from what they enter, or Checkout refuses.
+    """
+    params: dict[str, Any] = {
+        "automatic_tax": {"enabled": True},
+        "tax_id_collection": {"enabled": True},
+        "billing_address_collection": "required",
+    }
+    if has_customer:
+        params["customer_update"] = {"address": "auto", "name": "auto"}
+    return params
+
+
 class CheckoutRequest(BaseModel):
     tier: SubscriptionTier
     interval: str = Field(pattern="^(month|year)$")
@@ -182,6 +198,8 @@ def create_checkout_session(req: CheckoutRequest, principal: RequirePrincipal) -
         params["customer"] = customer_id
     else:
         params["customer_creation"] = "always"
+    if settings.stripe_automatic_tax:
+        params.update(_tax_params(has_customer=bool(customer_id)))
 
     try:
         stripe.api_key = settings.stripe_secret_key

@@ -156,6 +156,13 @@ class EdgeWsClient(
         return reqId
     }
 
+    /** Sends the workshop's plan licence to the daemon; it answers with LeaseStatus. */
+    fun installLease(leaseToken: String): String {
+        val reqId = newRequestId("lease_install")
+        socket?.send(EdgeCodec.encode(LeaseInstallRequest(requestId = reqId, leaseToken = leaseToken)))
+        return reqId
+    }
+
     fun close() {
         socket?.close(1000, "session closed")
         socket = null

@@ -54,6 +54,9 @@ try:
         stripe_price_ai_overage: str = ""
         stripe_ai_overage_enabled: bool = False
         stripe_past_due_grace_days: int = 7
+        # Stripe Tax: charge GST and collect the workshop's ABN at checkout. Turn on only
+        # after Stripe Tax is set up (AU registration) in the Stripe dashboard.
+        stripe_automatic_tax: bool = False
         public_app_url: str = "http://localhost:3000"
         immo_feature_enabled: bool = False
         # Connection pools: one engine per role for the whole process.
@@ -156,6 +159,9 @@ except ImportError:
         stripe_price_ai_overage: str = ""
         stripe_ai_overage_enabled: bool = False
         stripe_past_due_grace_days: int = 7
+        # Stripe Tax: charge GST and collect the workshop's ABN at checkout. Turn on only
+        # after Stripe Tax is set up (AU registration) in the Stripe dashboard.
+        stripe_automatic_tax: bool = False
         public_app_url: str = "http://localhost:3000"
         immo_feature_enabled: bool = False
         # Connection pools: one engine per role for the whole process.

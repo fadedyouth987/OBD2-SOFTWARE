@@ -72,6 +72,10 @@ function route(method: string, path: string, mode: ApiMode): unknown {
   }
   if (p === "/api/v1/dbc") return { items: [] };
   if (p === "/api/v1/schematics") return { items: [] };
+  if (p === "/api/v1/accreditation") {
+    const none = { state: "not_submitted", current: null, pending: null, latest: null };
+    return { technician: none, workshop: none, evidence_rules: { max_files: 5, max_bytes: 10485760, types: ["application/pdf"] }, reminder_days: [30, 7], dev_auto_approve: false };
+  }
   if (p === "/api/v1/sessions/sync") return { status: "accepted" };
   if (method !== "GET") return {};
   return null;

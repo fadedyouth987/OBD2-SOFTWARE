@@ -348,6 +348,21 @@ Headless background service; a tray app would be its own task.
 
 **Verification gate**: each alert fires in a staging drill and links to its runbook; a support bundle contains no VIN serials, tokens or keys.
 
+### Phase 6: Licensing across the website and the Android app
+
+#### Task 6.1: Licences page, Stripe Tax, and the Android plan licence
+
+Added 2026-11-28 at Brooke's request, after Phases 0–5. Setup steps: `docs/runbooks/licensing-setup.md`.
+
+**Target paths**: `apps/web/src/app/(app)/workshop/licences/`, `apps/web/src/lib/licences.ts`, `services/cloud-api/app/api/v1/billing.py`, `apps/android/app/src/main/java/au/com/rootcauseobd/fleet/{data/Licence.kt, data/CloudAccount.kt, data/CloudKeys.kt, ui/screens/AccountScreen.kt}`, `scripts/export_cloud_keys.py`
+
+**Implementation contract**
+- Website: a "Licences & access" page listing what the plan includes and what is bought elsewhere (workshop AASRA membership, technician security accreditation, carmaker repair information, AutoAuth secure gateways), with live status from `/api/v1/accreditation` and actions only for roles allowed to take them. Secure gateway access shows as not available until RootCause is a certified AutoAuth tool.
+- Stripe Tax behind `STRIPE_AUTOMATIC_TAX` (default off): Checkout adds GST, requires the billing address, collects the ABN, and lets an existing customer's address update.
+- Android: email/password sign-in; fetches `POST /api/v1/auth/edge-lease` and verifies it offline with the daemon's rules (Ed25519, pinned keys, `aud=edge-daemon`, ≤ 72 h, 5 min skew, immobilizer tokens refused). Release builds trust only pinned keys (`CloudKeys.kt`, empty by default → Community); debug builds also trust the configured server's JWKS. Clearing codes over Bluetooth requires `UDS_ACTIVE`; after pairing with a daemon the app installs the licence there. No purchasing, prices or purchase links in the app (Google Play consumption-only).
+
+**Verification gate**: web unit tests for the checklist; cloud-api tests for the tax parameters; Android `LicenceVerifierTest` accepts and rejects the same shared signing fixture as the daemon; `./gradlew test` and `assembleDebug` pass.
+
 ## Review record
 
 gstack `/autoplan` ran on 2026-11-19 (CEO, design, DX, engineering). Full record: `docs/reviews/2026-11-19-autoplan-review.md`. Accepted amendments are in the table under the operating rules. Gate result (2026-11-19): uc1 approved; uc2 and uc3 declined.
