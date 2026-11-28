@@ -8,9 +8,13 @@ malicious file can neither exhaust the host nor reach the internet.
 from __future__ import annotations
 
 import os
-import resource
 import socket
 from urllib.parse import urlparse
+
+try:
+    import resource
+except ImportError:  # Windows has no POSIX resource module
+    resource = None  # type: ignore[assignment]
 
 _real_create_connection = socket.create_connection
 _real_connect = socket.socket.connect
@@ -22,7 +26,7 @@ def broker_hosts(broker_url: str) -> set[str]:
 
 
 def apply_memory_cap(megabytes: int) -> None:
-    if megabytes <= 0:
+    if megabytes <= 0 or resource is None:
         return
     limit = megabytes * 1024 * 1024
     soft, hard = resource.getrlimit(resource.RLIMIT_AS)

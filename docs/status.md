@@ -4,13 +4,18 @@ Progress through [`PLAN.md`](PLAN.md), in Rule 1 order. A task is done when its 
 
 | Task | Status | Evidence |
 | --- | --- | --- |
-| 0.1 Scaffold and local infrastructure | Done | `just infra-gate` passed on 2026-11-19 (Docker in the agent sandbox): Postgres with timescaledb 2.32.0 and vector 0.8.7, Neo4j with APOC, Redis, S3 bucket. The run caught a real bug, fixed in the same change: the Neo4j image turned the health-check `NEO4J_PASSWORD` variable into an unknown config setting and refused to start. The `quickstart` CI job still has not run (GitHub Actions is not starting jobs on this account). |
+| 0.1 Scaffold and local infrastructure | Done | `just infra-gate` passed on 2026-11-19 (Docker in the agent sandbox): Postgres with timescaledb 2.32.0 and vector 0.8.7, Neo4j with APOC, Redis, S3 bucket. The run caught a real bug, fixed in the same change: the Neo4j image turned the health-check `NEO4J_PASSWORD` variable into an unknown config setting and refused to start. GitHub Actions has run `quickstart` and `package` on every push and PR since PR #11. They were red from `8c1ec9f` to `ecb38de` (WiX error, a reload e2e failure, then `ruff format`); the 2026-11-28 review fixes make them pass again. |
 | 0.2 Wire schemas and safety policy | Done | 52 parity tests (Rust + vitest), `just codegen-check` drift gate. |
 | 1.1 HAL and virtual vehicles | Done, with hardware items open | See below. |
 | 1.2 Transports, clients, safety interlock | Done | See below. |
 | 1.3 Edge heuristics, CAN RE, ring buffer | Done | See below. |
 | 1.4 Secured WebSocket server, lease verifier | Done | See below. Phase 1 complete. |
 | 2.1 Multi-tenant schema with RLS | Done | See below. |
+| 2.2 Control plane, lease/pairing issuer, session sync | Done | PR #9–#10: Ed25519 signing (`cryptography`), fail-closed key loading, gzipped batch sync + outbox, password & OIDC/Cognito auth. |
+| 2.3 Subscription metering & Australian gateway compliance | Done | PR #9–#10: Stripe Checkout + webhook idempotency, FLEET tier, AASRA accreditation workflow + admin review, immo gateway hooks. |
+| 3.1–3.3 Neo4j topology, schematic ingest & KG-guided RAG | Done | PR #10–#11: `TopologyRepository` isolation gate, hybrid schematic pipeline, Bedrock LLM + free rules fallback with quota refund. |
+| 4.1–4.3 Web app, CAN RE Studio, Copilot & E2E | Done | PR #10–#13: Real daemon/API wiring, safety confirmation, CAN Studio + DBC storage, team/site management, Playwright E2E + WCAG AA. |
+| 5.1–5.2 Native installers, CI, observability & runbooks | Done | PR #11–#12: Linux/Windows installers + service runner, Prometheus metrics, alerts, runbooks, A-ENG-10 HIL checklist. |
 
 ## Task 1.1 detail
 
@@ -22,7 +27,7 @@ Gate (`cargo test --package edge-daemon hal::`, 38 tests):
 
 Also covered: the four virtual profiles (timing, NRC 0x78, SecurityAccess lockout, BMW D-CAN extended addressing, single K-line session per A-ENG-2, S3/P3 timeouts), K+DCAN fast and 5-baud init with echo checking, SocketCAN frame and filter conversion, adapter discovery.
 
-A-ENG-1 (J2534 through a separate 32-bit bridge): `apps/j2534-bridge`. The daemon's `J2534Adapter` drives the real bridge binary in `j2534-bridge/tests/round_trip.rs` (loopback device). The Windows PassThru backend type-checks and passes clippy for `i686-pc-windows-msvc`; the `j2534-bridge-windows` CI job runs the round trip as 32-bit once Actions works.
+A-ENG-1 (J2534 through a separate 32-bit bridge): `apps/j2534-bridge`. The daemon's `J2534Adapter` drives the real bridge binary in `j2534-bridge/tests/round_trip.rs` (loopback device). The Windows PassThru backend type-checks and passes clippy for `i686-pc-windows-msvc`; the `j2534-bridge-windows` CI job (in `quickstart.yml`) runs the round trip as 32-bit.
 
 Open items (need hardware or access this sandbox does not have):
 
@@ -33,7 +38,6 @@ Open items (need hardware or access this sandbox does not have):
 | MS-CAN switching on STN returns `Unsupported` | The plan requires verifying the `STP` numbers against the STN reference before coding them | Verify against the STN command reference, then implement |
 | J2534 against a real vendor DLL | Needs Windows and a PassThru device | `J2534_TEST_DLL=... cargo test -p j2534-bridge -- --ignored` on the A-ENG-10 bench |
 | SocketCAN on a live interface | No `vcan` in the sandbox | `cargo test -p edge-daemon -- --ignored socketcan` |
-| Windows CI job | GitHub Actions is not starting jobs on this account | Fix Actions (billing or repo Actions settings) |
 
 ## Task 1.2 detail
 
@@ -122,6 +126,27 @@ Deviations from the Task 1.1 target paths, on purpose:
 - The Windows `j2534` dependency lives in `apps/j2534-bridge` (as the maintained fork `j2534-mrw`; `j2534` 0.3.1 no longer compiles), because A-ENG-1 moves DLL loading out of the daemon. `hal/j2534_win.rs` is the daemon's bridge client and builds on every OS.
 - `serialport` is built without libudev, so the daemon needs no system packages; USB details for discovery may be missing on Linux.
 
+## Repo review fixes (2026-11-28)
+
+Findings from [`reviews/2026-11-28-repo-review.md`](reviews/2026-11-28-repo-review.md), fixed on `fix/review-findings`:
+
+| Finding | Fix | Evidence |
+| --- | --- | --- |
+| H1/H2 CI red, Windows MSI unbuildable | WiX `edge-daemon.wxs` fixes and the reload-disconnect fix (from PR #14), `ruff format` | `quickstart` and `package` on the PR |
+| H3 Provider sign-in linked existing accounts by email | No automatic linking. The holder confirms signed in or from an emailed one-time link; the account is emailed when a link is made (migration 013) | `tests/test_oidc.py`, `tests/test_oidc_google.py`, `apps/web/tests/sso-link.test.ts`; [`dev/sign-in-oidc.md`](dev/sign-in-oidc.md) |
+| L1 Google edge cases | `accounts.google.com` issuer accepted; warning when `OIDC_ISSUER` overrides Google | `tests/test_oidc_google.py` |
+| M5 Embeddings | Vectors labelled with the model that made them; https and ap-southeast-2 checks; hash fallback, logged and counted | `tests/test_embeddings.py` |
+| M6 Schematic page timeout | Each page parses in a forked child that is SIGKILLed at the deadline (spawned process on Windows) | `services/ai-worker/tests/test_sandbox_and_limits.py` |
+| M7 503 handler | Logged with the request ID; neutral reply; dev hint only with dev login on | `tests/test_observability.py` |
+| M8 Second subscription | Checkout refuses with 409 while a subscription is live | `tests/test_billing.py` |
+| L3 Pairing lockout | No lockout window; misses still cancel codes | `pairing::tests` |
+| L4 e2e scripts | Exit non-zero on a failed step or a11y violation | `tools/e2e-real-daemon` |
+| L6 Workflows | Actions pinned to SHAs; Dependabot for actions | `.github/` |
+| L8 Audit actor | Synced audit rows record the uploader | `tests/test_sync_resend.py` |
+| SGW unlock | Answers `not_available` instead of "unlocked" with a plain lease | `tests/test_security.py` |
+
+M1–M4, L2 (the Kotlin `apps/android`), M9 and L5 are handled with the Expo app in `apps/mobile` (its own PR). L7 (Kickstarter media in history) and branch protection are owner decisions.
+
 ## Remediation Update (Tasks 2.2–5.2 Scaffold & Core Modules Added)
 
 | Task | Status | Notes |
@@ -132,7 +157,7 @@ Deviations from the Task 1.1 target paths, on purpose:
 | 3.3 KG-guided RAG localizer | Implemented | `services/cloud-api/app/services/{embeddings,ai_diagnostic_agent}.py`, `api/v1/diagnose.py` (A-CEO-1 fallback, A-DES-4 bands). |
 | 4.1 Edge client, pairing, live dashboard | Done, gate verified | Verification Gate run against the real daemon on 2026-11-27; see "Task 4.1 gate verification" below. |
 | 4.2–4.3 CAN studio, copilot + `DESIGN.md` | Implemented | `DESIGN.md`, `edge-client.ts`, `SafetyConfirmModal.tsx` (1.5s hold), `BitFlipMatrix.tsx` (29-bit), `WiringTopologyViewer.tsx`, `/live`, `/can-studio`, `/copilot/[sessionId]`. |
-| 5.1 Native installers and CI | Gate verified in CI; A-ENG-10 bench run and signing certificates open | `package.yml` and `quickstart.yml` green (release builds, install, post-install tests, upgrade, uninstall on Linux and Windows). See "Task 5.1 gate verification" below. |
+| 5.1 Native installers and CI | Gate verified in CI (PR #12); A-ENG-10 bench run and signing certificates open | `package.yml` and `quickstart.yml` passed on PR #12 (release builds, install, post-install tests, upgrade, uninstall on Linux and Windows). The Windows MSI then failed to build on main from `8c1ec9f` (`WIX0004` in `edge-daemon.wxs`) until the 2026-11-28 review fixes. Branch protection requiring both jobs is not on yet. See "Task 5.1 gate verification" below. |
 | 5.2 Telemetry, runbooks | Implemented | `apps/edge-daemon/src/telemetry/`, `infra/monitoring/prometheus.yml`, `infra/monitoring/alerts.yml`, `docs/runbooks/`. Gate needs a staging drill (see below). |
 
 Remaining verification requiring local host/hardware: `cargo test --workspace`, `pnpm --filter web build`, live Postgres/Neo4j integration tests, and physical `A-ENG-10` vehicle captures.
@@ -213,7 +238,7 @@ The row above was marked from the files existing. Checked against the contract, 
 | Windows installer | MSI installs the `RootCauseEdgeDaemon` service (`edge-daemon service`) under its own virtual account `NT SERVICE\RootCauseEdgeDaemon`, restarted by the service manager after a failure, reporting Running only once the port is bound. Data in `C:\ProgramData\RootCauseOBD` for SYSTEM, Administrators and the service only; its `pairing\` subfolder is writable by the local group "RootCause Technicians" (created at install). Origin and data folder in the service's Environment; `edge-daemon` on PATH |
 | Production `EDGE_ALLOWED_ORIGINS` | `https://app.rootcauseobd.com.au` only in both installers (D3) |
 | Post-install smoke test | `scripts/smoke-installed-daemon.mjs`, run against the installed service on both runners: listens on loopback only, refuses a non-loopback address, refuses a client that skips Hello and a wrong code, accepts a code a technician made with `edge-daemon pair`, refuses WebSocket handshakes from `localhost:3000`, `127.0.0.1:3000` and another site while accepting the production origin, and started with exactly that origin. Also in CI: a technician (Linux: `obd2-edge` member with no profile environment; Windows: a standard user in "RootCause Technicians") pairs, a non-member can't, and neither can read or write the rest of the data folder; upgrade keeps the edited origin file; uninstall keeps data, `--purge` removes it; the Windows service restarts on request |
-| Pairing in a shared install | Codes live in `<data dir>/pairing/pairing.json`, group-readable only in a setgid folder; `edge-daemon pair` finds the installed service's folder even without `EDGE_DATA_DIR`, says which folder it used, never opens the service's log file (`tests/cli_pair.rs`), and writes through unpredictable `O_EXCL` temp files (`fsutil`). After 5 wrong codes every outstanding code is cancelled and none is accepted for 30 s (`pairing::tests`) |
+| Pairing in a shared install | Codes live in `<data dir>/pairing/pairing.json`, group-readable only in a setgid folder; `edge-daemon pair` finds the installed service's folder even without `EDGE_DATA_DIR`, says which folder it used, never opens the service's log file (`tests/cli_pair.rs`), and writes through unpredictable `O_EXCL` temp files (`fsutil`). After 5 wrong codes every outstanding code is cancelled, so no code faces more than 5 guesses; a fresh code works at once, so another local process can't lock pairing out (`pairing::tests`, review L3) |
 | Code signing | `sign-linux` and `sign-windows` jobs run only for `v*` tags, in the protected `release` environment, and fail if its secrets (`LINUX_SIGNING_KEY`/`LINUX_SIGNING_KEY_PASSPHRASE`, `WINDOWS_CERT_PFX`/`WINDOWS_CERT_PASSWORD`) are missing. Build jobs hold no secrets and have read-only repository access; the GPG passphrase goes through a pipe and the PFX into the job's certificate store, never onto a command line. Not yet run: no tag, no certificates (D4) |
 | CI across Rust, Python, TypeScript | `quickstart.yml` (contract names `ci.yml`): `cargo test`, pytest against Postgres and Neo4j, `next build`, Playwright including the Task 4.1 daemon gate, schema and token fixture tests |
 

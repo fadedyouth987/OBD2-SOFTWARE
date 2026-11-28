@@ -7,10 +7,52 @@ import { AuthCard } from "@/components/AuthCard";
 import { OrDivider, SsoButton } from "@/components/SsoButton";
 import { Banner, Button, Field, Skeleton } from "@/components/ui";
 import { useAuth } from "@/context/auth";
-import { useAuthConfig } from "@/lib/sso";
+import { api } from "@/lib/api";
+import { clearPendingLink, readPendingLink, useAuthConfig, type PendingLink } from "@/lib/sso";
 
 function safeNext(next: string | null): string {
   return next && next.startsWith("/") && !next.startsWith("//") ? next : "/home";
+}
+
+/** Shown once the account holder is signed in: they choose whether to link the provider. */
+function ConfirmLink({ link, next }: { link: PendingLink; next: string }) {
+  const { token, me } = useAuth();
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const done = (to: string) => {
+    clearPendingLink();
+    router.replace(to);
+  };
+  const confirm = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api("/api/v1/auth/oidc/link/confirm", { body: { token: link.link_token }, token });
+      done(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Linking didn't complete.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <AuthCard
+      title={`Link ${link.provider}?`}
+      subtitle={`After this you can sign in to ${me?.user.email ?? "this account"} with ${link.provider} as well as your password.`}
+    >
+      <div className="space-y-4">
+        {error ? <Banner tone="danger">{error}</Banner> : null}
+        <Banner tone="info">We&apos;ll email the account&apos;s address to say it was linked.</Banner>
+        <Button variant="primary" className="w-full" busy={busy} onClick={confirm}>
+          Link {link.provider}
+        </Button>
+        <Button variant="secondary" className="w-full" disabled={busy} onClick={() => done(next)}>
+          Not now
+        </Button>
+      </div>
+    </AuthCard>
+  );
 }
 
 function SignInForm() {
@@ -23,10 +65,16 @@ function SignInForm() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const config = useAuthConfig();
+  const [link, setLink] = useState<PendingLink | null>(null);
+  const linking = params.get("link") === "1";
 
   useEffect(() => {
-    if (status === "signed_in") router.replace(next);
-  }, [status, router, next]);
+    if (linking) setLink(readPendingLink());
+  }, [linking]);
+
+  useEffect(() => {
+    if (status === "signed_in" && !link) router.replace(next);
+  }, [status, router, next, link]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,6 +88,8 @@ function SignInForm() {
       setBusy(false);
     }
   };
+
+  if (link && status === "signed_in") return <ConfirmLink link={link} next={next} />;
 
   if (!config) {
     return (
@@ -59,9 +109,16 @@ function SignInForm() {
   return (
     <AuthCard title="Sign in" subtitle={subtitle}>
       <div className="space-y-4">
-        {sessionError && !error ? <Banner tone="info">{sessionError}</Banner> : null}
-        <SsoButton config={config} returnTo={next} primary={!passwords} />
-        {sso && passwords ? <OrDivider /> : null}
+        {sessionError && !error && !link ? <Banner tone="info">{sessionError}</Banner> : null}
+        {link ? (
+          <Banner tone="info" title={`You already have an account`}>
+            To use {link.provider} with it, sign in with your password once and confirm.
+            {link.email_sent ? ` Or use the link we just emailed to ${link.email_hint}.` : ""} Nothing has been linked yet.
+          </Banner>
+        ) : (
+          <SsoButton config={config} returnTo={next} primary={!passwords} />
+        )}
+        {sso && passwords && !link ? <OrDivider /> : null}
         {passwords ? (
           <form onSubmit={submit} className="space-y-4" noValidate>
             {error ? <Banner tone="danger">{error}</Banner> : null}

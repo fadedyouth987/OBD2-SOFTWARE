@@ -450,7 +450,8 @@ def record_event(
 
 def _subscription_status(obj: dict[str, Any], default: str = "active") -> str:
     status = obj.get("status")
-    if isinstance(status, str) and status:
+    # A Checkout Session's own status ("complete", "open") isn't the subscription's.
+    if isinstance(status, str) and status and obj.get("object") != "checkout.session":
         return status
     sub = obj.get("subscription")
     if isinstance(sub, dict) and isinstance(sub.get("status"), str):

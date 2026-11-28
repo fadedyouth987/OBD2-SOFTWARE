@@ -265,6 +265,32 @@ def test_checkout_creates_session_for_owner(client: TestClient, monkeypatch: pyt
 
 
 @pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
+def test_checkout_refuses_a_second_subscription(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+):
+    """Review M8: a workspace already paying goes to the portal, not a second Checkout."""
+    owner = _dev_session(client)
+    ev = _checkout_event(
+        tenant_id=owner["tenant_id"],
+        price_ids=[WORKSHOP_PRICE],
+        customer=f"cus_{uuid.uuid4().hex[:10]}",
+        subscription=f"sub_{uuid.uuid4().hex[:10]}",
+        metadata_tier="WORKSHOP",
+    )
+    assert _post_event(client, ev).status_code == 200
+    called: list = []
+    monkeypatch.setattr("stripe.checkout.Session.create", lambda **kw: called.append(kw))
+    res = client.post(
+        "/api/v1/billing/checkout-session",
+        json={"tier": "FLEET", "interval": "month"},
+        headers=_auth(owner["access_token"]),
+    )
+    assert res.status_code == 409, res.text
+    assert res.json()["detail"]["code"] == "subscription_exists"
+    assert called == []
+
+
+@pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
 def test_portal_requires_existing_customer(client: TestClient):
     owner = _dev_session(client)
     res = client.post(

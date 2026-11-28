@@ -358,3 +358,56 @@ def accreditation_lapsed_email(*, to: str, subject_label: str, url: str) -> Outg
         html=_layout(f"{subject_label} lapsed", [_e(x) for x in lines], ("Renew", url)),
         tags={"kind": "accreditation_lapsed"},
     )
+
+
+def link_confirm_email(*, to: str, provider: str, url: str, minutes: int) -> OutgoingEmail:
+    """Sent when a provider sign-in matches this account's email (review H3)."""
+    text = (
+        f"Someone just signed in with {provider} using {to}, the email on your RootCause "
+        "OBD account. Nothing has been linked.\n\n"
+        f"If it was you, link {provider} to your account: {url}\n\n"
+        f"The link works once and expires in {minutes} minutes. If it wasn't you, ignore "
+        "this email; your account is unchanged."
+    )
+    page = _layout(
+        f"Link {provider} to your account?",
+        [
+            f"Someone just signed in with {_e(provider)} using {_e(to)}, the email on your "
+            "RootCause OBD account. Nothing has been linked.",
+            f"The link works once and expires in {minutes} minutes. If it wasn't you, "
+            "ignore this email; your account is unchanged.",
+        ],
+        (f"Link {provider}", url),
+    )
+    return OutgoingEmail(
+        to=to,
+        subject=f"Confirm signing in to RootCause OBD with {provider}",
+        text=text,
+        html=page,
+        tags={"kind": "oidc_link_confirm"},
+    )
+
+
+def link_made_email(*, to: str, provider: str, url: str) -> OutgoingEmail:
+    """Sent to the account's address whenever a sign-in provider is linked."""
+    text = (
+        f"{provider} sign-in was linked to your RootCause OBD account ({to}). You can now "
+        f"sign in with {provider}.\n\nIf this wasn't you, reset your password and contact "
+        f"your workshop owner straight away: {url}"
+    )
+    page = _layout(
+        f"{provider} sign-in linked",
+        [
+            f"{_e(provider)} sign-in was linked to your RootCause OBD account ({_e(to)}).",
+            "If this wasn't you, reset your password and contact your workshop owner "
+            "straight away.",
+        ],
+        ("Review your account", url),
+    )
+    return OutgoingEmail(
+        to=to,
+        subject=f"{provider} sign-in was linked to your RootCause OBD account",
+        text=text,
+        html=page,
+        tags={"kind": "oidc_linked"},
+    )

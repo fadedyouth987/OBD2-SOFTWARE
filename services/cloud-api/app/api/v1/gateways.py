@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 from app.api.deps import RequirePrincipal
 from app.observability.metrics import inc
 from app.services.aasra import default_verifier
-from app.services.signing import SigningKeyError, issue_edge_lease
 
 router = APIRouter(prefix="/api/v1/gateways", tags=["gateways"])
 
@@ -62,22 +61,16 @@ def unlock_sgw_gateway(req: SgwUnlockRequest, principal: RequirePrincipal) -> di
             status_code=status.HTTP_403_FORBIDDEN,
             detail="SGW unlock requires a verified AASRA workshop on this tenant",
         )
-    inc("gateway_sgw_unlocked")
-    try:
-        lease = issue_edge_lease(
-            tenant_id=str(principal.tenant_id),
-            user_id=str(principal.user_id),
-            tier=principal.tier.value,
-            ttl_s=900,
-            aasra_verified=True,
-        )
-    except SigningKeyError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
-        ) from exc
+    # No OEM secure-gateway service (e.g. FCA AutoAuth) is integrated, so nothing is
+    # unlocked. This used to answer "unlocked" with an ordinary edge lease, which
+    # read as if the vehicle's gateway had been opened. Say what is true instead.
+    inc("gateway_sgw_not_available")
     # Do not echo the VIN (or even the last four) back to the client.
     return {
-        "status": "unlocked",
+        "status": "not_available",
         "oem": req.oem,
-        "sgw_session_lease": lease,
+        "detail": (
+            "Secure-gateway unlock isn't available yet: no OEM gateway service is "
+            "connected. Use the OEM's own tool for this vehicle."
+        ),
     }

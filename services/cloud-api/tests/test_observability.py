@@ -86,3 +86,33 @@ def test_summary_and_labels_render_in_prometheus_format():
     assert "obd2_sync_lag_seconds_sum 3.000000" in text
     assert "obd2_sync_lag_seconds_count 2" in text
     assert 'obd2_diagnose_total{engine="rules",fallback_reason="llm_error"} 1' in text
+
+
+def test_db_outage_is_logged_and_answered_neutrally(monkeypatch, caplog):
+    """Review M7: the cause reaches the logs with the request ID; callers get no internals."""
+    from fastapi.testclient import TestClient
+    from sqlalchemy.exc import OperationalError
+
+    from app.config import get_settings
+    from app.main import app
+
+    path = "/__test_db_down"
+    if not any(getattr(r, "path", None) == path for r in app.router.routes):
+
+        @app.get(path)
+        def _down() -> None:
+            raise OperationalError("SELECT 1", {}, Exception("connection refused at 10.0.0.5"))
+
+    for dev, hint in (("false", False), ("true", True)):
+        monkeypatch.setenv("AUTH_ALLOW_DEV_LOGIN", dev)
+        get_settings.cache_clear()
+        caplog.clear()
+        with caplog.at_level("ERROR", logger="obd2.db"):
+            res = TestClient(app).get(path, headers={"X-Request-ID": "rid-db-test-1"})
+        assert res.status_code == 503
+        body = res.json()
+        assert "10.0.0.5" not in body["detail"]
+        assert ("Local dev" in body["detail"]) is hint
+        assert body["request_id"] == "rid-db-test-1"
+        assert "connection refused" in caplog.text
+    get_settings.cache_clear()

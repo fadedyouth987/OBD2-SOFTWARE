@@ -61,3 +61,8 @@ export async function confirmGated(page) {
   await page.waitForTimeout(2000);
   await page.keyboard.up('Space');
 }
+// Review L4: a failed step must fail the run, not just print FAIL and exit 0.
+export function fail(message) {
+  console.log('FAIL', message);
+  process.exitCode = 1;
+}
