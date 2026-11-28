@@ -241,7 +241,8 @@ def _audit_rows(req: SyncBatchRequest, principal: Any) -> list[tuple[dict[str, A
                     "edge_session_id": req.session_id,
                     "seq": seq,
                     "at": _as_datetime(entry.get("at")),
-                    "user_ref": str(entry.get("user_ref") or principal.user_id),
+                    # Review L8: who did it is the signed-in uploader, never the client's word.
+                    "user_ref": str(principal.user_id),
                     "vehicle_ref": str(entry.get("vehicle_ref") or ""),
                     "ecu": str(entry.get("ecu") or "UNKNOWN")[:64] or "UNKNOWN",
                     "service": str(entry.get("service") or entry.get("action") or "UNKNOWN")[:64],
