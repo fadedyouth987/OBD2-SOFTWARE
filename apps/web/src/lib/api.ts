@@ -336,6 +336,8 @@ export interface VehicleModule {
   bus: string;
   tx: string;
   rx: string;
+  /** Which network the module is on (see module-discovery NETWORK_LABEL); absent means inferred from `bus`. */
+  network?: string | null;
 }
 
 export interface VehiclePlatform {
@@ -345,6 +347,8 @@ export interface VehiclePlatform {
   engine: string;
   protocols: string[];
   modules: VehicleModule[];
+  /** Make family in packages/schemas/module_catalog.json. */
+  family?: string | null;
   shared_nodes: string[];
   common_dtcs: Record<string, string>;
   matched?: boolean;

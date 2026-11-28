@@ -20,12 +20,14 @@ pub enum CanAddressing {
 }
 
 impl CanAddressing {
-    /// 11-bit physical addressing, e.g. `normal(0x7E0, 0x7E8)`.
+    /// Physical addressing, e.g. `normal(0x7E0, 0x7E8)`. An id above 0x7FF
+    /// can only be a 29-bit id (ISO 15765-4 normal fixed addressing, e.g.
+    /// `normal(0x18DA28F1, 0x18DAF128)`), so those open extended frames.
     pub fn normal(tx: u32, rx: u32) -> Self {
         Self::Normal {
             tx,
             rx,
-            extended: false,
+            extended: tx > CAN_SFF_MAX || rx > CAN_SFF_MAX,
         }
     }
 
@@ -119,5 +121,19 @@ mod tests {
         );
         let n = CanAddressing::normal(0x7E0, 0x7E8);
         assert_eq!((n.tx_id(), n.rx_id(), n.tx_prefix()), (0x7E0, 0x7E8, None));
+        assert!(!n.is_extended());
+    }
+
+    #[test]
+    fn ids_above_11_bits_use_extended_frames() {
+        // Honda VSA: 29-bit normal fixed addressing.
+        let a = CanAddressing::normal(0x18DA_28F1, 0x18DA_F128);
+        assert!(a.is_extended());
+        assert_eq!((a.tx_id(), a.rx_id()), (0x18DA_28F1, 0x18DA_F128));
+        assert_eq!(a.rx_filter(), CanFilter::exact(0x18DA_F128, true));
+        // The 11-bit boundary stays 11-bit.
+        assert!(!CanAddressing::normal(0x7FF, 0x7F7).is_extended());
+        // Stellantis replies below the request (0x747 -> 0x4C7): still 11-bit.
+        assert!(!CanAddressing::normal(0x747, 0x4C7).is_extended());
     }
 }

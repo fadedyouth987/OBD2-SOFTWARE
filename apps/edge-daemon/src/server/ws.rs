@@ -22,7 +22,7 @@
 //! between streaming and diagnostics through one bus lock.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     sync::{
         atomic::{AtomicI64, AtomicU64, Ordering},
         Arc, Mutex,
@@ -688,6 +688,36 @@ struct Connected {
     bus_lock: Arc<tokio::sync::Mutex<()>>,
     tasks: Vec<JoinHandle<()>>,
     channels: HashMap<(u32, u32), DiagChannel>,
+    /// Channel keys, least recently used first (see [`MAX_DIAG_CHANNELS`]).
+    channel_lru: VecDeque<(u32, u32)>,
+}
+
+/// Diagnostic channels kept open per connection. Each one gets a copy of every
+/// bus frame, so a module-discovery sweep (hundreds of addresses) must not
+/// leave hundreds open: past this many, the least recently used is closed.
+pub const MAX_DIAG_CHANNELS: usize = 32;
+
+impl Connected {
+    /// Marks `key` most recently used, closing the oldest channels past the cap.
+    fn touch_channel(&mut self, key: (u32, u32)) {
+        for old in lru_touch(&mut self.channel_lru, key, MAX_DIAG_CHANNELS) {
+            self.channels.remove(&old);
+        }
+    }
+}
+
+/// Moves `key` to the most-recent end of `order` and returns the keys evicted
+/// to keep at most `cap` (oldest first). `key` itself is never evicted.
+fn lru_touch<K: PartialEq + Copy>(order: &mut VecDeque<K>, key: K, cap: usize) -> Vec<K> {
+    order.retain(|k| *k != key);
+    order.push_back(key);
+    let mut evicted = Vec::new();
+    while order.len() > cap.max(1) {
+        if let Some(old) = order.pop_front() {
+            evicted.push(old);
+        }
+    }
+    evicted
 }
 
 impl Drop for Connected {
@@ -1176,6 +1206,7 @@ impl Session {
                 bus_lock,
                 tasks,
                 channels: HashMap::new(),
+                channel_lru: VecDeque::new(),
             });
             return self.status(rid, adapter_id, AdapterState::Connected, None);
         };
@@ -1268,6 +1299,7 @@ impl Session {
             bus_lock,
             tasks,
             channels: HashMap::new(),
+            channel_lru: VecDeque::new(),
         });
         self.status(rid, adapter_id, AdapterState::Connected, Some(battery))
     }
@@ -1388,13 +1420,9 @@ impl Session {
                 Err(e) => return err(rid, ErrorCode::AdapterError, &e.to_string()),
             }
         }
-        let ch = self
-            .conn
-            .as_mut()
-            .expect("checked above")
-            .channels
-            .get_mut(&key)
-            .expect("inserted above");
+        let conn = self.conn.as_mut().expect("checked above");
+        conn.touch_channel(key);
+        let ch = conn.channels.get_mut(&key).expect("inserted above");
         let token = r.safety_token.as_ref().map(|t| t.as_str());
         let result = ch
             .request(DiagRequest {
@@ -1700,5 +1728,39 @@ async fn stream_pids(
         {
             return;
         }
+    }
+}
+
+#[cfg(test)]
+mod channel_cap_tests {
+    use super::{lru_touch, MAX_DIAG_CHANNELS};
+    use std::collections::VecDeque;
+
+    #[test]
+    fn a_sweep_never_keeps_more_than_the_cap_open() {
+        let mut order = VecDeque::new();
+        let mut open = 0usize;
+        // A full 11-bit sweep: 248 addresses, each touched once.
+        for tx in 0x700u32..=0x7F7 {
+            open += 1;
+            open -= lru_touch(&mut order, (tx, tx + 8), MAX_DIAG_CHANNELS).len();
+            assert!(open <= MAX_DIAG_CHANNELS);
+        }
+        assert_eq!(order.len(), MAX_DIAG_CHANNELS);
+        // The most recent addresses are the ones kept.
+        assert_eq!(order.back(), Some(&(0x7F7, 0x7FF)));
+    }
+
+    #[test]
+    fn reusing_a_channel_refreshes_it_and_evicts_the_oldest() {
+        let mut order = VecDeque::new();
+        for k in [1, 2, 3] {
+            assert!(lru_touch(&mut order, k, 3).is_empty());
+        }
+        // Touch 1 again: it becomes newest, nothing evicted.
+        assert!(lru_touch(&mut order, 1, 3).is_empty());
+        // A fourth key evicts 2, the least recently used, not 1.
+        assert_eq!(lru_touch(&mut order, 4, 3), vec![2]);
+        assert_eq!(order, VecDeque::from([3, 1, 4]));
     }
 }

@@ -1,0 +1,102 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://rootcause.local/schemas/module_catalog.schema.json",
+  "title": "Vehicle module catalogue",
+  "description": "Module names and diagnostic addresses per make family, plus the address ranges the scanner sweeps to find modules that aren't listed. Every named module cites a source in `sources`.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "catalog_version", "probe", "sweeps", "families", "sources"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "catalog_version": { "type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$" },
+    "probe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["service", "payload_hex", "note"],
+      "properties": {
+        "service": { "$ref": "#/definitions/Hex" },
+        "payload_hex": { "type": "string", "pattern": "^([0-9A-F]{2})+$" },
+        "note": { "type": "string" }
+      }
+    },
+    "sweeps": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/Sweep" }
+    },
+    "families": {
+      "type": "object",
+      "required": ["generic"],
+      "additionalProperties": { "$ref": "#/definitions/Family" }
+    },
+    "sources": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "url"],
+        "properties": {
+          "title": { "type": "string", "minLength": 1 },
+          "url": { "type": ["string", "null"] }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "Hex": { "type": "string", "pattern": "^0x[0-9A-F]+$" },
+    "Sweep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "addressing", "from", "to", "rx_offset"],
+      "properties": {
+        "label": { "type": "string" },
+        "addressing": {
+          "description": "normal: tx in from..to, rx = tx + rx_offset. iso29: target t in from..to, tx 0x18DAttF1, rx 0x18DAF1tt. bmw_extended: ECU address e in from..to via tester 0x6F1, rx 0x600 + e.",
+          "type": "string",
+          "enum": ["normal", "iso29", "bmw_extended"]
+        },
+        "from": { "$ref": "#/definitions/Hex" },
+        "to": { "$ref": "#/definitions/Hex" },
+        "rx_offset": { "type": ["integer", "null"] }
+      }
+    },
+    "Module": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["abbr", "name", "tx", "rx", "source", "note"],
+      "properties": {
+        "abbr": { "type": "string", "minLength": 1, "maxLength": 24 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "tx": { "$ref": "#/definitions/Hex" },
+        "rx": { "anyOf": [{ "$ref": "#/definitions/Hex" }, { "type": "null" }] },
+        "source": { "type": "string" },
+        "note": { "type": ["string", "null"] }
+      }
+    },
+    "SubaddressedModule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["abbr", "name", "tx", "rx", "subaddress", "source", "note"],
+      "properties": {
+        "abbr": { "type": "string", "minLength": 1, "maxLength": 24 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "tx": { "$ref": "#/definitions/Hex" },
+        "rx": { "$ref": "#/definitions/Hex" },
+        "subaddress": { "$ref": "#/definitions/Hex" },
+        "source": { "type": "string" },
+        "note": { "type": ["string", "null"] }
+      }
+    },
+    "Family": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "sweeps", "modules", "subaddressed", "networks_note"],
+      "properties": {
+        "label": { "type": "string" },
+        "sweeps": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "modules": { "type": "array", "items": { "$ref": "#/definitions/Module" } },
+        "subaddressed": { "type": "array", "items": { "$ref": "#/definitions/SubaddressedModule" } },
+        "networks_note": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

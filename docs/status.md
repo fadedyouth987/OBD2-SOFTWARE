@@ -16,6 +16,7 @@ Progress through [`PLAN.md`](PLAN.md), in Rule 1 order. A task is done when its 
 | 3.1–3.3 Neo4j topology, schematic ingest & KG-guided RAG | Done | PR #10–#11: `TopologyRepository` isolation gate, hybrid schematic pipeline, Bedrock LLM + free rules fallback with quota refund. |
 | 4.1–4.3 Web app, CAN RE Studio, Copilot & E2E | Done | PR #10–#13: Real daemon/API wiring, safety confirmation, CAN Studio + DBC storage, team/site management, Playwright E2E + WCAG AA. |
 | 5.1–5.2 Native installers, CI, observability & runbooks | Done | PR #11–#12: Linux/Windows installers + service runner, Prometheus metrics, alerts, runbooks, A-ENG-10 HIL checklist. |
+| 6.2 Module discovery and catalogue | Built; real-car confirmation open | Web: 20 new tests, 166 total pass; tsc, eslint, build clean; a11y on job pages passes. Cloud API: 48 new tests (157 pass, Postgres tests skipped here). Daemon: 29-bit and channel-cap unit tests, plus a real-server sweep of the virtual Falcon finding exactly IC/ABS/PCM in 18.6 s; full suite, clippy and rustfmt clean. Open: confirm catalogue entries on real cars (A-ENG-10); reach Ford HS-CAN2 (pins 3/11) and Toyota sub-addressed ECUs (see docs/dev/module-discovery.md). The session-flow "reload keeps the vehicle connected" e2e test is flaky on main too (3 of 8 runs fail). |
 
 ## Task 1.1 detail
 

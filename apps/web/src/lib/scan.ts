@@ -17,6 +17,10 @@ export interface ScanTarget {
   protocol: ScanProtocol | null;
   /** Also run OBD modes 03/07/0A here (the engine ECU). */
   obd: boolean;
+  /** Full module name, when the registry or the module catalogue has one. */
+  name?: string | null;
+  /** Found by an address sweep rather than listed for this vehicle. */
+  discovered?: boolean;
 }
 
 export interface ScanDtc extends ReadDtc {
@@ -24,7 +28,8 @@ export interface ScanDtc extends ReadDtc {
   source: string;
 }
 
-export type ModuleOutcome = "codes" | "clear" | "refused" | "no_response" | "error";
+/** "other_network": listed for this vehicle but on a network this connection can't reach. */
+export type ModuleOutcome = "codes" | "clear" | "refused" | "no_response" | "error" | "other_network";
 
 export interface ModuleResult {
   target: ScanTarget;
@@ -145,6 +150,13 @@ export async function scanModule(diag: DiagFn, t: ScanTarget): Promise<ModuleRes
     }
     answered = true;
     if (!res!.positive) {
+      // A module that answers but doesn't know UDS 19 (serviceNotSupported) is
+      // usually a KWP2000 module (many Nissan, older Toyota): ask it that way.
+      if (protocol === "UDS" && res!.nrc?.code === 0x11 && !steps.some((s) => s[0] === "KWP2000")) {
+        steps.push(["KWP2000", "1802FF00", "KWP 18"]);
+        notes.push(`${source}: not supported, asked with KWP2000 instead.`);
+        continue;
+      }
       refused = true;
       notes.push(`${source}: ${nrcText(res!.nrc?.code ?? 0x10, res!.nrc?.name)}`);
       continue;

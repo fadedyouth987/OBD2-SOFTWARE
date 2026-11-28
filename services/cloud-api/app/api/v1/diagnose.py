@@ -33,6 +33,7 @@ from app.services.vehicle_registry import (
     decode_vin_platform,
     get_vehicle_platform,
     list_vehicle_platforms,
+    resolve_profile,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["diagnose"])
@@ -98,12 +99,14 @@ def decode_vin_get_removed(vin: str) -> dict[str, Any]:
 
 @router.get("/vehicles/{profile}/services")
 def get_vehicle_services(profile: str) -> dict[str, Any]:
-    if profile not in VEHICLE_PLATFORMS:
+    resolved = resolve_profile(profile)
+    if resolved not in VEHICLE_PLATFORMS:
         raise HTTPException(status_code=404, detail=f"Unknown vehicle profile {profile!r}")
-    info = get_vehicle_platform(profile)
+    info = get_vehicle_platform(resolved)
     return {
-        "profile": profile,
+        "profile": resolved,
         "vehicle": f"{info['make']} {info['model']}",
+        "family": info.get("family", "generic"),
         "modules": info["modules"],
         "service_functions": SERVICE_FUNCTIONS_CATALOG,
     }

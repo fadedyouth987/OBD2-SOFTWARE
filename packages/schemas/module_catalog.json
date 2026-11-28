@@ -1,0 +1,1490 @@
+{
+  "$schema": "./module_catalog.schema.json",
+  "catalog_version": "1.0.0",
+  "probe": {
+    "service": "0x3E",
+    "payload_hex": "3E00",
+    "note": "TesterPresent. Read-only and not gated (safety_policy.json); any reply, positive or negative, means a module is there."
+  },
+  "sweeps": {
+    "std11": {
+      "label": "11-bit 0x700-0x7F7, reply +0x08 (ISO 15765-4 convention)",
+      "addressing": "normal",
+      "from": "0x700",
+      "to": "0x7F7",
+      "rx_offset": 8
+    },
+    "gm11": {
+      "label": "GM 11-bit 0x240-0x27F, reply +0x400",
+      "addressing": "normal",
+      "from": "0x240",
+      "to": "0x27F",
+      "rx_offset": 1024
+    },
+    "vag11": {
+      "label": "VW group 11-bit 0x700-0x775, reply +0x6A",
+      "addressing": "normal",
+      "from": "0x700",
+      "to": "0x775",
+      "rx_offset": 106
+    },
+    "nissan11_20": {
+      "label": "Nissan 11-bit 0x700-0x7DF, reply +0x20 (some models)",
+      "addressing": "normal",
+      "from": "0x700",
+      "to": "0x7DF",
+      "rx_offset": 32
+    },
+    "chrysler11": {
+      "label": "Stellantis 11-bit 0x740-0x77F, reply -0x280",
+      "addressing": "normal",
+      "from": "0x740",
+      "to": "0x77F",
+      "rx_offset": -640
+    },
+    "iso29": {
+      "label": "29-bit ISO 15765-4 normal fixed addressing, targets 0x00-0xFF",
+      "addressing": "iso29",
+      "from": "0x00",
+      "to": "0xFF",
+      "rx_offset": null
+    },
+    "bmw_ext": {
+      "label": "BMW D-CAN extended addressing (tester 0x6F1), ECU addresses 0x00-0xFF",
+      "addressing": "bmw_extended",
+      "from": "0x00",
+      "to": "0xFF",
+      "rx_offset": null
+    }
+  },
+  "families": {
+    "ford": {
+      "label": "Ford (Ford-architecture modules)",
+      "sweeps": [
+        "std11"
+      ],
+      "modules": [
+        {
+          "abbr": "PCM",
+          "name": "Powertrain Control Module",
+          "tx": "0x7E0",
+          "rx": "0x7E8",
+          "source": "ford_px3_manual",
+          "note": null
+        },
+        {
+          "abbr": "TCM",
+          "name": "Transmission Control Module",
+          "tx": "0x7E1",
+          "rx": "0x7E9",
+          "source": "registry_unverified",
+          "note": "Separate TCM only on some models; often inside the PCM."
+        },
+        {
+          "abbr": "SOBDMC",
+          "name": "Secondary OBD Control Module C",
+          "tx": "0x7E6",
+          "rx": "0x7EE",
+          "source": "ford_module_config",
+          "note": null
+        },
+        {
+          "abbr": "ABS",
+          "name": "Anti-Lock Brake / Traction Control Module",
+          "tx": "0x760",
+          "rx": "0x768",
+          "source": "ford_px3_manual",
+          "note": null
+        },
+        {
+          "abbr": "CCM",
+          "name": "Cruise-Control Module (adaptive cruise radar)",
+          "tx": "0x764",
+          "rx": "0x76C",
+          "source": "ford_px3_manual",
+          "note": null
+        },
+        {
+          "abbr": "OCSM",
+          "name": "Occupant Classification System Module",
+          "tx": "0x765",
+          "rx": "0x76D",
+          "source": "ford_px3_manual",
+          "note": null
+        },
+        {
+          "abbr": "IPMA",
+          "name": "Image Processing Module A (front camera)",
+          "tx": "0x706",
+          "rx": "0x70E",
+          "source": "ford_px3_manual",
+          "note": null
+        },
+        {
+          "abbr": "AWD",
+          "name": "All Wheel Drive Module",
+          "tx": "0x703",
+          "rx": "0x70B",
+          "source": "ford_module_config",
+          "note": null
+        },
+        {
+          "abbr": "CHCM",
+          "name": "Chassis Control Module",
+          "tx": "0x710",
+          "rx": "0x718",
+          "source": "ford_module_sheet",
+          "note": null
+        },
+        {
+          "abbr": "GWM",
+          "name": "Gateway Module A",
+          "tx": "0x716",
+          "rx": "0x71E",
+          "source": "ford_px3_manual",
+          "note": null
+        },
+        {
+          "abbr": "IPC",
+          "name": "Instrument Panel Control Module",
+          "tx": "0x720",
+          "rx": "0x728",
+          "source": "ford_px3_manual",
+          "note": null
+        },
+        {
+          "abbr": "BECMB",
+          "name": "Battery Energy Control Module B",
+          "tx": "0x723",
+          "rx": "0x72B",
+          "source": "ford_px3_manual",
+          "note": null
+        },
+        {
+          "abbr": "SCCM",
+          "name": "Steering Column Control Module",
+          "tx": "0x724",
+          "rx": "0x72C",
+          "source": "ford_px3_manual",
+          "note": null
+        },
+        {
+          "abbr": "BCM",
+          "name": "Body Control Module",
+          "tx": "0x726",
+          "rx": "0x72E",
+          "source": "ford_px3_manual",
+          "note": null
+        },
+        {
+          "abbr": "ACM",
+          "name": "Audio Control Module",
+          "tx": "0x727",
+          "rx": "0x72F",
+          "source": "ford_px3_manual",
+          "note": null
+        },
+        {
+          "abbr": "PSCM",
+          "name": "Power Steering Control Module",
+          "tx": "0x730",
+          "rx": "0x738",
+          "source": "ford_px3_manual",
+          "note": null
+        },
+        {
+          "abbr": "RFA",
+          "name": "Remote Function Actuator",
+          "tx": "0x731",
+          "rx": "0x739",
+          "source": "ford_module_sheet",
+          "note": null
+        },
+        {
+          "abbr": "GSM",
+          "name": "Gear Shift Module",
+          "tx": "0x732",
+          "rx": "0x73A",
+          "source": "ford_module_sheet",
+          "note": null
+        },
+        {
+          "abbr": "HVAC",
+          "name": "Heating Ventilation Air Conditioning",
+          "tx": "0x733",
+          "rx": "0x73B",
+          "source": "ford_module_config",
+          "note": null
+        },
+        {
+          "abbr": "HCM",
+          "name": "Headlamp Control Module",
+          "tx": "0x734",
+          "rx": "0x73C",
+          "source": "ford_module_config",
+          "note": null
+        },
+        {
+          "abbr": "PAM",
+          "name": "Parking Aid Module",
+          "tx": "0x736",
+          "rx": "0x73E",
+          "source": "ford_px3_manual",
+          "note": null
+        },
+        {
+          "abbr": "RCM",
+          "name": "Restraint Control Module",
+          "tx": "0x737",
+          "rx": "0x73F",
+          "source": "ford_px3_manual",
+          "note": null
+        },
+        {
+          "abbr": "DDM",
+          "name": "Driver Door Module",
+          "tx": "0x740",
+          "rx": "0x748",
+          "source": "ford_module_sheet",
+          "note": null
+        },
+        {
+          "abbr": "PDM",
+          "name": "Passenger Door Module",
+          "tx": "0x741",
+          "rx": "0x749",
+          "source": "ford_module_config",
+          "note": null
+        },
+        {
+          "abbr": "DSM",
+          "name": "Driver's Seat Module",
+          "tx": "0x744",
+          "rx": "0x74C",
+          "source": "ford_asbuilt",
+          "note": null
+        },
+        {
+          "abbr": "DCDC",
+          "name": "DC to DC Converter Control Module",
+          "tx": "0x746",
+          "rx": "0x74E",
+          "source": "ford_px3_manual",
+          "note": null
+        },
+        {
+          "abbr": "PACM",
+          "name": "Pedestrian Alert Control Module",
+          "tx": "0x750",
+          "rx": "0x758",
+          "source": "ford_module_config",
+          "note": null
+        },
+        {
+          "abbr": "RTM",
+          "name": "Tire Pressure Monitor (RTM)",
+          "tx": "0x751",
+          "rx": "0x759",
+          "source": "ford_px3_manual",
+          "note": null
+        },
+        {
+          "abbr": "TCU",
+          "name": "Telematic Control Unit Module",
+          "tx": "0x754",
+          "rx": "0x75C",
+          "source": "ford_px3_manual",
+          "note": null
+        },
+        {
+          "abbr": "RGTM",
+          "name": "Rear Gate/Trunk Module",
+          "tx": "0x775",
+          "rx": "0x77D",
+          "source": "ford_module_config",
+          "note": null
+        },
+        {
+          "abbr": "DSP",
+          "name": "(Audio) Digital Signal Processing Module",
+          "tx": "0x783",
+          "rx": "0x78B",
+          "source": "ford_px3_manual",
+          "note": null
+        },
+        {
+          "abbr": "TRM",
+          "name": "Trailer Module",
+          "tx": "0x791",
+          "rx": "0x799",
+          "source": "ford_px3_manual",
+          "note": null
+        },
+        {
+          "abbr": "ATCM",
+          "name": "All Terrain Control Module",
+          "tx": "0x792",
+          "rx": "0x79A",
+          "source": "ford_px3_manual",
+          "note": null
+        },
+        {
+          "abbr": "SASM",
+          "name": "Steering Angle Sensor Module",
+          "tx": "0x797",
+          "rx": "0x79F",
+          "source": "ford_module_config",
+          "note": null
+        },
+        {
+          "abbr": "FCIM",
+          "name": "Front Controls Interface Module",
+          "tx": "0x7A7",
+          "rx": "0x7AF",
+          "source": "ford_px3_manual",
+          "note": null
+        },
+        {
+          "abbr": "HUD",
+          "name": "Head Up Display",
+          "tx": "0x7B2",
+          "rx": "0x7BA",
+          "source": "ford_px3_manual",
+          "note": null
+        },
+        {
+          "abbr": "SODL",
+          "name": "Side Obstacle Detection Control Module - Left",
+          "tx": "0x7C4",
+          "rx": "0x7CC",
+          "source": "ford_px3_manual",
+          "note": null
+        },
+        {
+          "abbr": "SODR",
+          "name": "Side Obstacle Detection Control Module - Right",
+          "tx": "0x7C6",
+          "rx": "0x7CE",
+          "source": "ford_px3_manual",
+          "note": null
+        },
+        {
+          "abbr": "ACCM",
+          "name": "Air Conditioning Control Module",
+          "tx": "0x7C7",
+          "rx": "0x7CF",
+          "source": "ford_module_config",
+          "note": null
+        },
+        {
+          "abbr": "APIM",
+          "name": "Accessory Protocol Interface Module (SYNC)",
+          "tx": "0x7D0",
+          "rx": "0x7D8",
+          "source": "ford_px3_manual",
+          "note": null
+        }
+      ],
+      "networks_note": "Ford spreads modules over HS-CAN (OBD pins 6/14), a second HS-CAN or MS-CAN on pins 3/11, and networks behind the gateway.",
+      "subaddressed": []
+    },
+    "mazda": {
+      "label": "Mazda",
+      "sweeps": [
+        "std11"
+      ],
+      "modules": [
+        {
+          "abbr": "PCM",
+          "name": "Powertrain Control Module",
+          "tx": "0x7E0",
+          "rx": "0x7E8",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "TCM",
+          "name": "Transmission Control Module",
+          "tx": "0x7E1",
+          "rx": "0x7E9",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "FSC",
+          "name": "Forward Sensing Camera",
+          "tx": "0x706",
+          "rx": "0x70E",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "EPS",
+          "name": "Electronic-Controlled Power Steering",
+          "tx": "0x730",
+          "rx": "0x738",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "ABS",
+          "name": "Anti-Lock Brake / Dynamic Stability Control",
+          "tx": "0x760",
+          "rx": "0x768",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "SBS/MRCC",
+          "name": "Smart Brake Support / Mazda Radar Cruise Control",
+          "tx": "0x764",
+          "rx": "0x76C",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "BCM",
+          "name": "Body Control Module",
+          "tx": "0x726",
+          "rx": "0x72E",
+          "source": "registry_unverified",
+          "note": null
+        }
+      ],
+      "networks_note": null,
+      "subaddressed": []
+    },
+    "gm": {
+      "label": "GM / Holden",
+      "sweeps": [
+        "std11",
+        "gm11"
+      ],
+      "modules": [
+        {
+          "abbr": "ECM",
+          "name": "Engine Control Module",
+          "tx": "0x7E0",
+          "rx": "0x7E8",
+          "source": "gm_pcmhacking",
+          "note": null
+        },
+        {
+          "abbr": "TCM",
+          "name": "Transmission Control Module",
+          "tx": "0x7E2",
+          "rx": "0x7EA",
+          "source": "gm_openobd",
+          "note": null
+        },
+        {
+          "abbr": "FPCM",
+          "name": "Fuel Pump Control Module",
+          "tx": "0x7E3",
+          "rx": "0x7EB",
+          "source": "gm_pcmhacking",
+          "note": null
+        },
+        {
+          "abbr": "BCM",
+          "name": "Body Control Module",
+          "tx": "0x241",
+          "rx": "0x641",
+          "source": "gm_globala_wiki",
+          "note": null
+        },
+        {
+          "abbr": "EPS",
+          "name": "Electric Power Steering",
+          "tx": "0x242",
+          "rx": "0x642",
+          "source": "gm_pcmhacking",
+          "note": null
+        },
+        {
+          "abbr": "EBCM",
+          "name": "Electronic Brake Control Module",
+          "tx": "0x243",
+          "rx": "0x643",
+          "source": "gm_openobd",
+          "note": null
+        },
+        {
+          "abbr": "FCM",
+          "name": "Front Camera Module",
+          "tx": "0x24B",
+          "rx": "0x64B",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "PAM",
+          "name": "Parking Assist Module",
+          "tx": "0x259",
+          "rx": "0x659",
+          "source": "gm_globala_wiki",
+          "note": "Listed as unverified-adjacent on the source page."
+        },
+        {
+          "abbr": "SCM",
+          "name": "Seat Control Module",
+          "tx": "0x25D",
+          "rx": "0x65D",
+          "source": "gm_globala_wiki",
+          "note": null
+        }
+      ],
+      "networks_note": "Older GM bodies also use single-wire CAN (pin 1, 33.3k), which RootCause can't reach yet.",
+      "subaddressed": []
+    },
+    "toyota": {
+      "label": "Toyota / Lexus",
+      "sweeps": [
+        "std11"
+      ],
+      "modules": [
+        {
+          "abbr": "ECM",
+          "name": "Engine Control Module",
+          "tx": "0x7E0",
+          "rx": "0x7E8",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "ECM2",
+          "name": "Engine Control Module (alternate address)",
+          "tx": "0x700",
+          "rx": "0x708",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "TCM",
+          "name": "Transmission Control Module",
+          "tx": "0x7E1",
+          "rx": "0x7E9",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "TCM2",
+          "name": "Transmission Control Module (alternate address)",
+          "tx": "0x701",
+          "rx": "0x709",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "HV",
+          "name": "Hybrid Control",
+          "tx": "0x7E2",
+          "rx": "0x7EA",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "HV2",
+          "name": "Hybrid Control (alternate address)",
+          "tx": "0x7D2",
+          "rx": "0x7DA",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "ABS",
+          "name": "ABS / VSC",
+          "tx": "0x7B0",
+          "rx": "0x7B8",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "ABS2",
+          "name": "ABS / VSC (alternate address)",
+          "tx": "0x7D1",
+          "rx": "0x7D9",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "EPS",
+          "name": "Electric Power Steering",
+          "tx": "0x7A1",
+          "rx": "0x7A9",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "SRS",
+          "name": "Airbag (SRS)",
+          "tx": "0x780",
+          "rx": "0x788",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "HVAC",
+          "name": "Air Conditioning",
+          "tx": "0x7C4",
+          "rx": "0x7CC",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "DSU",
+          "name": "Driving Support Unit",
+          "tx": "0x791",
+          "rx": "0x799",
+          "source": "opendbc",
+          "note": null
+        }
+      ],
+      "subaddressed": [
+        {
+          "abbr": "FCAM",
+          "name": "Forward Recognition Camera",
+          "tx": "0x750",
+          "rx": "0x758",
+          "subaddress": "0x6D",
+          "source": "opendbc",
+          "note": "Toyota extended (sub-)addressing: not reachable until the daemon supports it."
+        },
+        {
+          "abbr": "RADAR",
+          "name": "Millimetre-Wave Radar",
+          "tx": "0x750",
+          "rx": "0x758",
+          "subaddress": "0x0F",
+          "source": "opendbc",
+          "note": "Toyota extended (sub-)addressing: not reachable until the daemon supports it."
+        }
+      ],
+      "networks_note": "Many Toyota body ECUs sit behind 0x750 with a sub-address byte; RootCause can't reach those yet."
+    },
+    "honda": {
+      "label": "Honda",
+      "sweeps": [
+        "iso29",
+        "std11"
+      ],
+      "modules": [
+        {
+          "abbr": "PGM-FI",
+          "name": "Programmed Fuel Injection (engine)",
+          "tx": "0x18DA10F1",
+          "rx": "0x18DAF110",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "SBW",
+          "name": "Shift-by-Wire",
+          "tx": "0x18DA0BF1",
+          "rx": "0x18DAF10B",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "AT/CVT",
+          "name": "Transmission",
+          "tx": "0x18DA1EF1",
+          "rx": "0x18DAF11E",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "VSA",
+          "name": "Vehicle Stability Assist (ABS)",
+          "tx": "0x18DA28F1",
+          "rx": "0x18DAF128",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "EBB",
+          "name": "Electric Brake Booster",
+          "tx": "0x18DA2BF1",
+          "rx": "0x18DAF12B",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "EPS",
+          "name": "Electric Power Steering",
+          "tx": "0x18DA30F1",
+          "rx": "0x18DAF130",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "SRS",
+          "name": "Airbag (SRS)",
+          "tx": "0x18DA53F1",
+          "rx": "0x18DAF153",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "GAUGE",
+          "name": "Combination Meter",
+          "tx": "0x18DA60F1",
+          "rx": "0x18DAF160",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "HUD",
+          "name": "Head-Up Display",
+          "tx": "0x18DA61F1",
+          "rx": "0x18DAF161",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "RADAR",
+          "name": "Front Radar",
+          "tx": "0x18DAB0F1",
+          "rx": "0x18DAF1B0",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "CAMERA",
+          "name": "Front Camera",
+          "tx": "0x18DAB5F1",
+          "rx": "0x18DAF1B5",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "GW",
+          "name": "Gateway",
+          "tx": "0x18DAEFF1",
+          "rx": "0x18DAF1EF",
+          "source": "opendbc",
+          "note": null
+        }
+      ],
+      "networks_note": "Enhanced diagnostics use 29-bit CAN.",
+      "subaddressed": []
+    },
+    "hyundai_kia": {
+      "label": "Hyundai / Kia",
+      "sweeps": [
+        "std11"
+      ],
+      "modules": [
+        {
+          "abbr": "ECM",
+          "name": "Engine Control Module",
+          "tx": "0x7E0",
+          "rx": "0x7E8",
+          "source": "registry_unverified",
+          "note": null
+        },
+        {
+          "abbr": "TCU",
+          "name": "Transmission Control Unit",
+          "tx": "0x7E1",
+          "rx": "0x7E9",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "ADAS",
+          "name": "ADAS Driving Unit",
+          "tx": "0x730",
+          "rx": "0x738",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "PADAS",
+          "name": "Parking ADAS",
+          "tx": "0x7B1",
+          "rx": "0x7B9",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "HVAC",
+          "name": "Air Conditioning",
+          "tx": "0x7B3",
+          "rx": "0x7BB",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "CRADAR",
+          "name": "Corner Radar",
+          "tx": "0x7B7",
+          "rx": "0x7BF",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "FCAM",
+          "name": "Front View Camera",
+          "tx": "0x7C4",
+          "rx": "0x7CC",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "CLU",
+          "name": "Instrument Cluster",
+          "tx": "0x7C6",
+          "rx": "0x7CE",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "RADAR",
+          "name": "Front Radar",
+          "tx": "0x7D0",
+          "rx": "0x7D8",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "ABS/ESP",
+          "name": "ABS / ESC",
+          "tx": "0x7D1",
+          "rx": "0x7D9",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "EPS",
+          "name": "Electric Power Steering",
+          "tx": "0x7D4",
+          "rx": "0x7DC",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "BCM",
+          "name": "Body Control Module",
+          "tx": "0x7A0",
+          "rx": "0x7A8",
+          "source": "registry_unverified",
+          "note": null
+        }
+      ],
+      "networks_note": null,
+      "subaddressed": []
+    },
+    "nissan": {
+      "label": "Nissan",
+      "sweeps": [
+        "std11",
+        "nissan11_20",
+        "iso29"
+      ],
+      "modules": [
+        {
+          "abbr": "ECM",
+          "name": "Engine Control Module",
+          "tx": "0x7E0",
+          "rx": "0x7E8",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "TCM",
+          "name": "Transmission Control Module",
+          "tx": "0x7E1",
+          "rx": "0x7E9",
+          "source": "registry_unverified",
+          "note": null
+        },
+        {
+          "abbr": "CAM",
+          "name": "Front Camera",
+          "tx": "0x707",
+          "rx": "0x70F",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "ABS",
+          "name": "ABS / VDC",
+          "tx": "0x740",
+          "rx": "0x748",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "EPS",
+          "name": "Electric Power Steering",
+          "tx": "0x742",
+          "rx": "0x74A",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "METER",
+          "name": "Combination Meter",
+          "tx": "0x743",
+          "rx": "0x74B",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "IPDM",
+          "name": "Intelligent Power Distribution Module",
+          "tx": "0x745",
+          "rx": "0x74D",
+          "source": "registry_unverified",
+          "note": null
+        },
+        {
+          "abbr": "ABS",
+          "name": "ABS / VDC (+0x20 reply)",
+          "tx": "0x740",
+          "rx": "0x760",
+          "source": "opendbc",
+          "note": "Some models reply 0x20 above the request."
+        },
+        {
+          "abbr": "EPS",
+          "name": "Electric Power Steering (+0x20 reply)",
+          "tx": "0x742",
+          "rx": "0x762",
+          "source": "opendbc",
+          "note": "Some models reply 0x20 above the request."
+        },
+        {
+          "abbr": "METER",
+          "name": "Combination Meter (+0x20 reply)",
+          "tx": "0x743",
+          "rx": "0x763",
+          "source": "opendbc",
+          "note": "Some models reply 0x20 above the request."
+        },
+        {
+          "abbr": "GW",
+          "name": "Gateway",
+          "tx": "0x18DAD0F1",
+          "rx": "0x18DAF1D0",
+          "source": "opendbc",
+          "note": null
+        }
+      ],
+      "networks_note": null,
+      "subaddressed": []
+    },
+    "subaru": {
+      "label": "Subaru",
+      "sweeps": [
+        "std11"
+      ],
+      "modules": [
+        {
+          "abbr": "ECM",
+          "name": "Engine Control Module",
+          "tx": "0x7E0",
+          "rx": "0x7E8",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "TCM",
+          "name": "Transmission Control Module",
+          "tx": "0x7E1",
+          "rx": "0x7E9",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "ECM2",
+          "name": "Engine Control Module (alternate address)",
+          "tx": "0x7A2",
+          "rx": "0x7AA",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "TCM2",
+          "name": "Transmission Control Module (alternate address)",
+          "tx": "0x7A3",
+          "rx": "0x7AB",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "EPS",
+          "name": "Electric Power Steering",
+          "tx": "0x746",
+          "rx": "0x74E",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "EYESIGHT",
+          "name": "EyeSight Camera",
+          "tx": "0x787",
+          "rx": "0x78F",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "VDC/ABS",
+          "name": "Vehicle Dynamics Control / ABS",
+          "tx": "0x7B0",
+          "rx": "0x7B8",
+          "source": "opendbc",
+          "note": null
+        }
+      ],
+      "networks_note": null,
+      "subaddressed": []
+    },
+    "vag": {
+      "label": "Volkswagen group",
+      "sweeps": [
+        "vag11",
+        "std11"
+      ],
+      "modules": [
+        {
+          "abbr": "01-ENG",
+          "name": "01 Engine",
+          "tx": "0x7E0",
+          "rx": "0x7E8",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "02-TRANS",
+          "name": "02 Transmission",
+          "tx": "0x7E1",
+          "rx": "0x7E9",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "03-ABS",
+          "name": "03 ABS Brakes",
+          "tx": "0x713",
+          "rx": "0x77D",
+          "source": "registry_unverified",
+          "note": null
+        },
+        {
+          "abbr": "15-SRS",
+          "name": "15 Airbags",
+          "tx": "0x715",
+          "rx": "0x77F",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "17-INST",
+          "name": "17 Instruments",
+          "tx": "0x714",
+          "rx": "0x77E",
+          "source": "vw_mqb_sniffer",
+          "note": null
+        },
+        {
+          "abbr": "19-GW",
+          "name": "19 CAN Gateway",
+          "tx": "0x710",
+          "rx": "0x77A",
+          "source": "registry_unverified",
+          "note": null
+        },
+        {
+          "abbr": "44-EPS",
+          "name": "44 Steering Assist",
+          "tx": "0x712",
+          "rx": "0x77C",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "13-ACC",
+          "name": "13 Distance Regulation (radar)",
+          "tx": "0x757",
+          "rx": "0x7C1",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "A5-CAM",
+          "name": "A5 Front Camera",
+          "tx": "0x74F",
+          "rx": "0x7B9",
+          "source": "opendbc",
+          "note": null
+        }
+      ],
+      "networks_note": "Newest VW group models also use 29-bit IDs outside the ISO range; not swept yet.",
+      "subaddressed": []
+    },
+    "bmw": {
+      "label": "BMW",
+      "sweeps": [
+        "bmw_ext"
+      ],
+      "modules": [
+        {
+          "abbr": "FEM_GW",
+          "name": "Front Electronics Module Gateway (F-series)",
+          "tx": "0x6F1",
+          "rx": "0x610",
+          "source": "bmw_f_modules",
+          "note": null
+        },
+        {
+          "abbr": "DME",
+          "name": "Digital Motor Electronics (engine)",
+          "tx": "0x6F1",
+          "rx": "0x612",
+          "source": "rootcause_sim",
+          "note": null
+        },
+        {
+          "abbr": "EKPM",
+          "name": "Electronic Fuel Pump Control",
+          "tx": "0x6F1",
+          "rx": "0x617",
+          "source": "bmw_f_modules",
+          "note": null
+        },
+        {
+          "abbr": "EGS",
+          "name": "Electronic Transmission Control",
+          "tx": "0x6F1",
+          "rx": "0x618",
+          "source": "registry_unverified",
+          "note": null
+        },
+        {
+          "abbr": "DSC",
+          "name": "Dynamic Stability Control",
+          "tx": "0x6F1",
+          "rx": "0x629",
+          "source": "bmw_f_modules",
+          "note": null
+        },
+        {
+          "abbr": "EPS",
+          "name": "Electronic Power Steering",
+          "tx": "0x6F1",
+          "rx": "0x630",
+          "source": "bmw_f_modules",
+          "note": null
+        },
+        {
+          "abbr": "CAS/FEM",
+          "name": "Car Access System (E-series) / Front Electronics Module body (F-series)",
+          "tx": "0x6F1",
+          "rx": "0x640",
+          "source": "bmw_f_modules",
+          "note": null
+        },
+        {
+          "abbr": "FZD",
+          "name": "Roof Function Centre",
+          "tx": "0x6F1",
+          "rx": "0x656",
+          "source": "bmw_f_modules",
+          "note": null
+        },
+        {
+          "abbr": "KOMBI",
+          "name": "Instrument Cluster",
+          "tx": "0x6F1",
+          "rx": "0x660",
+          "source": "registry_unverified",
+          "note": null
+        },
+        {
+          "abbr": "DME (OBD)",
+          "name": "Engine, legislated OBD address",
+          "tx": "0x7E0",
+          "rx": "0x7E8",
+          "source": "rootcause_sim",
+          "note": null
+        }
+      ],
+      "networks_note": null,
+      "subaddressed": []
+    },
+    "stellantis": {
+      "label": "Stellantis (Jeep / RAM / Chrysler)",
+      "sweeps": [
+        "std11",
+        "chrysler11",
+        "iso29"
+      ],
+      "modules": [
+        {
+          "abbr": "PCM",
+          "name": "Powertrain Control Module",
+          "tx": "0x7E0",
+          "rx": "0x7E8",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "TCM",
+          "name": "Transmission Control Module",
+          "tx": "0x7E1",
+          "rx": "0x7E9",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "HCP",
+          "name": "Hybrid Control",
+          "tx": "0x7E2",
+          "rx": "0x7EA",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "ABS2",
+          "name": "ABS (alternate address on some hybrids)",
+          "tx": "0x7E4",
+          "rx": "0x7EC",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "IPC",
+          "name": "Instrument Panel Cluster",
+          "tx": "0x742",
+          "rx": "0x4C2",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "ORC",
+          "name": "Occupant Restraint Controller (airbag)",
+          "tx": "0x744",
+          "rx": "0x4C4",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "ABS",
+          "name": "Anti-Lock Brakes",
+          "tx": "0x747",
+          "rx": "0x4C7",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "RADAR",
+          "name": "Front Radar",
+          "tx": "0x753",
+          "rx": "0x4D3",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "EPS",
+          "name": "Electric Power Steering",
+          "tx": "0x75A",
+          "rx": "0x4DA",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "EPS2",
+          "name": "Electric Power Steering (alternate address)",
+          "tx": "0x761",
+          "rx": "0x4E1",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "PCM",
+          "name": "Powertrain Control Module (29-bit, newer models)",
+          "tx": "0x18DA10F1",
+          "rx": "0x18DAF110",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "TCM",
+          "name": "Transmission Control Module (29-bit)",
+          "tx": "0x18DA18F1",
+          "rx": "0x18DAF118",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "ABS",
+          "name": "Anti-Lock Brakes (29-bit)",
+          "tx": "0x18DA28F1",
+          "rx": "0x18DAF128",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "EPS",
+          "name": "Electric Power Steering (29-bit)",
+          "tx": "0x18DA30F1",
+          "rx": "0x18DAF130",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "IPC",
+          "name": "Instrument Panel Cluster (29-bit)",
+          "tx": "0x18DA60F1",
+          "rx": "0x18DAF160",
+          "source": "opendbc",
+          "note": null
+        },
+        {
+          "abbr": "ORC",
+          "name": "Occupant Restraint Controller (29-bit)",
+          "tx": "0x18DAC0F1",
+          "rx": "0x18DAF1C0",
+          "source": "opendbc",
+          "note": null
+        }
+      ],
+      "networks_note": "2018+ models have a secure gateway: reading works, clearing needs AutoAuth.",
+      "subaddressed": []
+    },
+    "saic": {
+      "label": "SAIC (MG / LDV)",
+      "sweeps": [
+        "std11",
+        "iso29"
+      ],
+      "modules": [
+        {
+          "abbr": "ECM/VCU",
+          "name": "Engine / Vehicle Control Unit",
+          "tx": "0x7E0",
+          "rx": "0x7E8",
+          "source": "registry_unverified",
+          "note": null
+        },
+        {
+          "abbr": "TCM",
+          "name": "Transmission Control Module",
+          "tx": "0x7E1",
+          "rx": "0x7E9",
+          "source": "registry_unverified",
+          "note": null
+        },
+        {
+          "abbr": "EPS",
+          "name": "Electric Power Steering",
+          "tx": "0x721",
+          "rx": "0x729",
+          "source": "opendbc",
+          "note": "May sit on a camera bus that the OBD port doesn't reach."
+        },
+        {
+          "abbr": "FCAM",
+          "name": "Front Camera",
+          "tx": "0x733",
+          "rx": "0x73B",
+          "source": "opendbc",
+          "note": "May sit on a camera bus that the OBD port doesn't reach."
+        },
+        {
+          "abbr": "RADAR",
+          "name": "Front Radar",
+          "tx": "0x734",
+          "rx": "0x73C",
+          "source": "opendbc",
+          "note": "May sit on a camera bus that the OBD port doesn't reach."
+        }
+      ],
+      "networks_note": null,
+      "subaddressed": []
+    },
+    "generic": {
+      "label": "Other makes (generic discovery)",
+      "sweeps": [
+        "std11",
+        "iso29"
+      ],
+      "modules": [
+        {
+          "abbr": "ECU1",
+          "name": "OBD responder 1 (engine)",
+          "tx": "0x7E0",
+          "rx": "0x7E8",
+          "source": "rootcause_sim",
+          "note": null
+        },
+        {
+          "abbr": "ECU2",
+          "name": "OBD responder 2 (usually transmission)",
+          "tx": "0x7E1",
+          "rx": "0x7E9",
+          "source": "rootcause_sim",
+          "note": null
+        }
+      ],
+      "networks_note": "Modules are found by address and named by what they report; there's no make-specific name list yet.",
+      "subaddressed": []
+    }
+  },
+  "sources": {
+    "ford_px3_manual": {
+      "title": "Ford Ranger PX3 (2019) workshop manual: 418-01 Module Configuration and 418-00 Communications Network",
+      "url": "https://servicemanuals-backend.fly.storage.tigris.dev/manuals/Ford/Ranger/2019/PX3/418-01%20Module%20Configuration%20-%20Description%20and%20Operation%20-%20System%20Operation.pdf"
+    },
+    "ford_module_config": {
+      "title": "Ford module configuration table (Maverick, 418-01)",
+      "url": "https://www.mavericktruckclub.com/forum/attachments/module-configuration-pdf.81948/"
+    },
+    "ford_module_sheet": {
+      "title": "Ford module address list (community spreadsheet)",
+      "url": "https://docs.google.com/spreadsheets/d/1wNMtpPqMAejNeOZGsPCcgau8HODROzceFcUSfk2lVz8"
+    },
+    "ford_asbuilt": {
+      "title": "Ford as-built module address examples (DSM 744)",
+      "url": "https://www.scribd.com/document/825830614/Module-Build-Data-As-Built-FordServiceInfo-Com"
+    },
+    "forscan_names": {
+      "title": "FORScan module names (supplied by Brooke, 2026-11-29)",
+      "url": null
+    },
+    "opendbc": {
+      "title": "comma.ai opendbc fingerprints and FW query config (MIT licence)",
+      "url": "https://github.com/commaai/opendbc"
+    },
+    "gm_globala_wiki": {
+      "title": "Vehicle reverse engineering wiki: GM GlobalA (BCM 0x241 / 0x641, replies +0x400)",
+      "url": "https://vehicle-reverse-engineering.fandom.com/wiki/GM_GlobalA"
+    },
+    "gm_openobd": {
+      "title": "OpenOBD module map fix from an HS-CAN capture (TCM 7E2/7EA, EBCM 243/643, BCM 241/641)",
+      "url": "https://github.com/Ohio15/OpenOBD/pull/3"
+    },
+    "gm_pcmhacking": {
+      "title": "pcmhacking.net E92 thread: GM module request/response IDs (ECM 7E0, TCM 7E2, FPCM 7E3, EPS 242/642)",
+      "url": "https://pcmhacking.net/forums/viewtopic.php?t=7951&p=118008"
+    },
+    "vw_mqb_sniffer": {
+      "title": "MQB sniffer (Golf Mk7): instrument cluster 0x714 -> 0x77E",
+      "url": "https://github.com/mrfixpl/MQB-sniffer"
+    },
+    "bmw_f_modules": {
+      "title": "BMW F-series module address list (MY2016, community)",
+      "url": "https://github.com/brodee227/bmw-f"
+    },
+    "rootcause_sim": {
+      "title": "RootCause simulator and registry (BMW E9x DME 0x12, CAS 0x40, DSC 0x29)",
+      "url": null
+    },
+    "registry_unverified": {
+      "title": "Earlier RootCause registry entry, not yet confirmed against a source or a real car",
+      "url": null
+    }
+  }
+}
