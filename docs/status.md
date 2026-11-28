@@ -16,6 +16,7 @@ Progress through [`PLAN.md`](PLAN.md), in Rule 1 order. A task is done when its 
 | 3.1–3.3 Neo4j topology, schematic ingest & KG-guided RAG | Done | PR #10–#11: `TopologyRepository` isolation gate, hybrid schematic pipeline, Bedrock LLM + free rules fallback with quota refund. |
 | 4.1–4.3 Web app, CAN RE Studio, Copilot & E2E | Done | PR #10–#13: Real daemon/API wiring, safety confirmation, CAN Studio + DBC storage, team/site management, Playwright E2E + WCAG AA. |
 | 5.1–5.2 Native installers, CI, observability & runbooks | Done | PR #11–#12: Linux/Windows installers + service runner, Prometheus metrics, alerts, runbooks, A-ENG-10 HIL checklist. |
+| 6.1 Licences page, Stripe Tax, Android plan licence | Built, Android not yet compiled | Web: 7 new vitest tests, `tsc` and `eslint` clean. Cloud API: Stripe Tax tests pass (Postgres-backed checkout test skipped here: Docker Hub blocked). Android: written but not compiled or run, because this sandbox has no Android SDK and can't reach Google's or Maven Central's repositories. Run `./gradlew test assembleDebug` in `apps/android` to close the gate. See `docs/runbooks/licensing-setup.md`. |
 
 ## Task 1.1 detail
 

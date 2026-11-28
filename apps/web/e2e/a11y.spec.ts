@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { expect, test, useStandIns } from "./fixtures";
 
 const AXE = readFileSync(require.resolve("axe-core/axe.min.js"), "utf8");
-const PAGES = ["/signin", "/home", "/jobs", "/jobs/j1", "/jobs/j1/copilot", "/jobs/j1/closeout", "/devices", "/workshop/billing"];
+const PAGES = ["/signin", "/home", "/jobs", "/jobs/j1", "/jobs/j1/copilot", "/jobs/j1/closeout", "/devices", "/workshop/billing", "/workshop/licences"];
 
 for (const theme of ["night", "daylight"] as const) {
   for (const path of PAGES) {

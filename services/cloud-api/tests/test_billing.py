@@ -584,3 +584,54 @@ def test_checkout_redirects_only_to_paths_on_this_app():
         None,
     ):
         assert _app_url(hostile, "/workshop/billing") == f"{base}/workshop/billing"
+
+
+def test_tax_params_collect_gst_address_and_abn():
+    from app.api.v1.billing import _tax_params
+
+    new = _tax_params(has_customer=False)
+    assert new["automatic_tax"] == {"enabled": True}
+    assert new["tax_id_collection"] == {"enabled": True}
+    assert new["billing_address_collection"] == "required"
+    # A brand-new customer has nothing to update.
+    assert "customer_update" not in new
+
+    existing = _tax_params(has_customer=True)
+    # Stripe refuses automatic tax for an existing customer unless the address can update.
+    assert existing["customer_update"] == {"address": "auto", "name": "auto"}
+
+
+def test_automatic_tax_is_off_by_default():
+    get_settings.cache_clear()
+    assert get_settings().stripe_automatic_tax is False
+
+
+@pytest.mark.skipif(not _postgres_up(), reason="needs Postgres")
+def test_checkout_adds_tax_only_when_enabled(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    owner = _dev_session(client)
+    captured: list[dict] = []
+
+    def _create(**kwargs):
+        captured.append(kwargs)
+        return SimpleNamespace(id="cs_test_tax", url="https://checkout.stripe.test/cs_test_tax")
+
+    monkeypatch.setattr("stripe.checkout.Session.create", _create)
+    body = {"tier": "PRO", "interval": "month"}
+    res = client.post(
+        "/api/v1/billing/checkout-session", json=body, headers=_auth(owner["access_token"])
+    )
+    assert res.status_code == 200, res.text
+    assert "automatic_tax" not in captured[-1]
+
+    monkeypatch.setenv("STRIPE_AUTOMATIC_TAX", "true")
+    get_settings.cache_clear()
+    try:
+        res = client.post(
+            "/api/v1/billing/checkout-session", json=body, headers=_auth(owner["access_token"])
+        )
+        assert res.status_code == 200, res.text
+        assert captured[-1]["automatic_tax"] == {"enabled": True}
+        assert captured[-1]["tax_id_collection"] == {"enabled": True}
+    finally:
+        monkeypatch.delenv("STRIPE_AUTOMATIC_TAX", raising=False)
+        get_settings.cache_clear()

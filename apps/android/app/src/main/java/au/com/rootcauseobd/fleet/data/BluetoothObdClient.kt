@@ -149,7 +149,23 @@ class BluetoothObdClient(context: Context) {
      * Safety-gated Mode 0x04 Clear DTCs over direct Bluetooth OBD-II.
      * Enforces Rule 5 fail-closed preconditions before transmitting on the bus.
      */
-    suspend fun clearDtcs(live: LivePreconditions): Result<String> = withContext(Dispatchers.IO) {
+    /**
+     * Mode 04 is a paid action (UDS_ACTIVE, Pro and up), the same rule the edge daemon
+     * applies with LEASE_REQUIRED. [licence] must be a verified, unexpired plan licence.
+     */
+    suspend fun clearDtcs(
+        live: LivePreconditions,
+        licence: Licence?,
+        nowEpochS: Long = System.currentTimeMillis() / 1000
+    ): Result<String> = withContext(Dispatchers.IO) {
+        if (licence == null || !licence.isCurrent(nowEpochS) || !licence.has(Licence.UDS_ACTIVE)) {
+            return@withContext Result.failure(
+                IllegalStateException(
+                    "LEASE_REQUIRED: Clearing codes needs a Pro plan or higher. " +
+                        "Sign in on the Account tab; your workshop owner manages the plan on the RootCause website."
+                )
+            )
+        }
         val check = SafetyPolicyEvaluator.evaluate(SafetyTier.A, live)
         if (!check.allowed) {
             return@withContext Result.failure(

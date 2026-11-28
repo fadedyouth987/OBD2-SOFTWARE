@@ -2,7 +2,7 @@
 
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
-import { Badge, Banner, Button, Card, Meter, PageHeader, Skeleton } from "@/components/ui";
+import { Badge, Banner, Button, ButtonLink, Card, Meter, PageHeader, Skeleton } from "@/components/ui";
 import { useAuth } from "@/context/auth";
 import { api, ApiError, type BillingState, type PlanTier, type TierInfo } from "@/lib/api";
 import { FEATURE_INFO, TIER_LABEL } from "@/lib/entitlements";
@@ -270,7 +270,11 @@ function BillingInner() {
 export default function BillingPage() {
   return (
     <div className="space-y-4">
-      <PageHeader title="Plan & billing" />
+      <PageHeader
+        title="Plan & billing"
+        subtitle="Your plan is the RootCause licence. AASRA and carmaker access are bought separately."
+        actions={<ButtonLink href="/workshop/licences">Licences & access</ButtonLink>}
+      />
       <Suspense>
         <BillingInner />
       </Suspense>

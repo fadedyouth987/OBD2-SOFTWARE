@@ -135,6 +135,21 @@ data class LeaseStatusRequest(
     @SerialName("request_id") val requestId: String
 )
 
+@Serializable
+enum class LeaseKind {
+    DIAGNOSTIC,
+    IMMO
+}
+
+/** Installs a cloud-signed lease on the daemon, which verifies it against its own pinned keys. -> LeaseStatus */
+@Serializable
+data class LeaseInstallRequest(
+    val type: String = "LeaseInstallRequest",
+    @SerialName("request_id") val requestId: String,
+    val kind: LeaseKind = LeaseKind.DIAGNOSTIC,
+    @SerialName("lease_token") val leaseToken: String
+)
+
 // --- Incoming responses & server pushes ---
 
 sealed class EdgeIncomingMessage {

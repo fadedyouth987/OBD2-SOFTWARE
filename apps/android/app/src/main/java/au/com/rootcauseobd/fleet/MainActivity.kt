@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import au.com.rootcauseobd.fleet.data.*
+import au.com.rootcauseobd.fleet.ui.screens.AccountScreen
 import au.com.rootcauseobd.fleet.ui.screens.SafetyConfirmDialog
 import au.com.rootcauseobd.fleet.ui.theme.RootCauseAutelTheme
 import kotlinx.coroutines.delay
@@ -94,6 +95,18 @@ private fun RootCauseFleetApp() {
         }
     }
 
+    // RootCause account and plan licence (bought on the website, never in the app)
+    val account = remember {
+        CloudAccount(
+            context = context,
+            defaultServerUrl = BuildConfig.DEFAULT_CLOUD_API_URL,
+            trustServerKeys = BuildConfig.DEBUG
+        )
+    }
+    var accountState by remember { mutableStateOf(account.state()) }
+    var accountBusy by remember { mutableStateOf(false) }
+    var accountError by remember { mutableStateOf<String?>(null) }
+
     // Live telemetry, DTCs, alerts & safety workflow state
     val livePids = remember { mutableStateMapOf<Int, PidSample>() }
     var lastSpeedReceivedMs by remember { mutableStateOf<Long?>(null) }
@@ -111,6 +124,17 @@ private fun RootCauseFleetApp() {
         while (true) {
             delay(250)
             nowMs = System.currentTimeMillis()
+        }
+    }
+
+    // Renew the plan licence when the app opens, if it's close to expiring.
+    LaunchedEffect(Unit) {
+        if (accountState.signedIn && accountState.sessionValid && account.licenceNeedsRefresh()) {
+            accountBusy = true
+            val refreshed = account.refreshLicence()
+            accountState = refreshed
+            accountError = refreshed.licenceError
+            accountBusy = false
         }
     }
 
@@ -133,6 +157,11 @@ private fun RootCauseFleetApp() {
         )
     }
 
+    // Re-checked on every clock tick so an expired licence stops unlocking features.
+    val licence = accountState.licence?.takeIf { it.isCurrent(nowMs / 1000) }
+    val canClearOverBluetooth = licence?.has(Licence.UDS_ACTIVE) == true
+    val planLabel = licence?.let { Licence.TIER_LABEL[it.tier] ?: it.tier } ?: "Community"
+
     val topBarBattery = batteryV?.let { "%.1fV".format(it) } ?: "--.-V"
     val topBarConn = when (transportMode) {
         TransportMode.EDGE_DAEMON -> activeAdapterId ?: wsState.name
@@ -145,7 +174,7 @@ private fun RootCauseFleetApp() {
                 TopAppBar(
                     title = {
                         Text(
-                            "RootCause · $topBarConn · $topBarBattery · $safetyMode",
+                            "RootCause · $planLabel · $topBarConn · $topBarBattery · $safetyMode",
                             style = MaterialTheme.typography.titleMedium
                         )
                     }
@@ -153,7 +182,7 @@ private fun RootCauseFleetApp() {
             },
             bottomBar = {
                 NavigationBar {
-                    listOf("Connect", "Live PIDs", "DTCs & Alerts", "Service").forEachIndexed { idx, label ->
+                    listOf("Connect", "Live PIDs", "DTCs & Alerts", "Service", "Account").forEachIndexed { idx, label ->
                         NavigationBarItem(
                             selected = selectedTab == idx,
                             onClick = { selectedTab = idx },
@@ -246,6 +275,11 @@ private fun RootCauseFleetApp() {
                                                             sessionInfo = msg
                                                             statusBanner = "Paired · Daemon ${msg.daemonVersion} · Tier ${msg.leaseTier}"
                                                             wsClient.listAdapters()
+                                                            // Hand the workshop's plan to the daemon; it verifies it
+                                                            // against its own pinned keys and answers LeaseStatus.
+                                                            if (licence != null) {
+                                                                wsClient.installLease(licence.token)
+                                                            }
                                                         }
                                                         is EdgeIncomingMessage.AdapterListResponse -> {
                                                             adapters = msg.adapters
@@ -295,6 +329,10 @@ private fun RootCauseFleetApp() {
                                                                 val spaced = msg.responseHex.chunked(2).joinToString(" ")
                                                                 dtcCodes = ElmProtocol.parseMode03Dtcs(spaced)
                                                             }
+                                                        }
+                                                        is EdgeIncomingMessage.LeaseStatus -> {
+                                                            statusBanner = "Daemon plan: ${Licence.TIER_LABEL[msg.leaseTier] ?: msg.leaseTier}" +
+                                                                if (!msg.cloudKeysPinned) " (daemon has no pinned RootCause key yet)" else ""
                                                         }
                                                         is EdgeIncomingMessage.ErrorResponse -> {
                                                             lastError = "${msg.code}: ${msg.message}" +
@@ -549,7 +587,7 @@ private fun RootCauseFleetApp() {
                         }
                     }
 
-                    else -> {
+                    3 -> {
                         Text("Service & Safety Controls", style = MaterialTheme.typography.titleMedium)
                         val tierACheck = SafetyPolicyEvaluator.evaluate(SafetyTier.A, livePreconditions)
                         Card(Modifier.fillMaxWidth()) {
@@ -565,8 +603,25 @@ private fun RootCauseFleetApp() {
                                 )
                             }
                         }
+                        val planBlocksClear = transportMode == TransportMode.BLUETOOTH_OBD && !canClearOverBluetooth
+                        if (planBlocksClear) {
+                            Card(Modifier.fillMaxWidth()) {
+                                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text("Plan: $planLabel", style = MaterialTheme.typography.titleSmall)
+                                    Text(
+                                        if (accountState.signedIn) {
+                                            "Clearing codes needs a Pro plan or higher. Your workshop owner manages the plan on the RootCause website."
+                                        } else {
+                                            "Clearing codes needs a Pro plan or higher. Sign in on the Account tab to use your workshop's plan."
+                                        },
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                            }
+                        }
                         Button(
                             onClick = { showConfirm = true },
+                            enabled = !planBlocksClear,
                             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
                         ) {
                             Text("Mode 0x04 Clear DTCs (1.5s Hold)")
@@ -577,6 +632,45 @@ private fun RootCauseFleetApp() {
                         ) {
                             Text(if (darkTheme) "Switch to Daylight Glare Mode" else "Switch to Night Cab Mode")
                         }
+                    }
+
+                    else -> {
+                        AccountScreen(
+                            state = accountState,
+                            licence = licence,
+                            busy = accountBusy,
+                            error = accountError,
+                            onSignIn = { server, email, password ->
+                                accountBusy = true
+                                accountError = null
+                                scope.launch {
+                                    try {
+                                        val signedIn = account.signIn(server, email, password)
+                                        accountState = signedIn
+                                        accountError = signedIn.licenceError
+                                    } catch (e: AccountException) {
+                                        accountError = e.message
+                                    } finally {
+                                        accountBusy = false
+                                    }
+                                }
+                            },
+                            onRefresh = {
+                                accountBusy = true
+                                accountError = null
+                                scope.launch {
+                                    val refreshed = account.refreshLicence()
+                                    accountState = refreshed
+                                    accountError = refreshed.licenceError
+                                    accountBusy = false
+                                }
+                            },
+                            onSignOut = {
+                                account.signOut()
+                                accountState = account.state()
+                                accountError = null
+                            }
+                        )
                     }
                 }
             }
@@ -596,7 +690,7 @@ private fun RootCauseFleetApp() {
                             wsClient.requestSafetyConfirm(CLEAR_DTCS_ROUTINE)
                         } else {
                             scope.launch {
-                                btClient.clearDtcs(livePreconditions)
+                                btClient.clearDtcs(livePreconditions, licence)
                                     .onSuccess { resp ->
                                         dtcCodes = emptyList()
                                         statusBanner = "Bluetooth Mode 0x04 Clear DTCs succeeded: $resp"
