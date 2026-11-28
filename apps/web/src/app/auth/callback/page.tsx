@@ -6,7 +6,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { AuthCard } from "@/components/AuthCard";
 import { Banner, ButtonLink, Spinner } from "@/components/ui";
 import { useAuth } from "@/context/auth";
-import { providerError, safeReturnTo } from "@/lib/sso";
+import { pendingLinkFrom, providerError, safeReturnTo, savePendingLink } from "@/lib/sso";
 
 /** Where the sign-in provider (AWS Cognito) sends the browser back to: OIDC_REDIRECT_URI. */
 function Callback() {
@@ -34,7 +34,17 @@ function Callback() {
     window.history.replaceState(null, "", "/auth/callback");
     completeSso(code, state)
       .then((grant) => router.replace(safeReturnTo(grant.return_to)))
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Sign-in didn't complete."));
+      .catch((e: unknown) => {
+        const link = pendingLinkFrom(e);
+        if (link) {
+          // An account with this email already exists. It is never linked on the
+          // provider's word: the holder confirms with their password or the emailed link.
+          savePendingLink(link);
+          router.replace("/signin?link=1");
+          return;
+        }
+        setError(e instanceof Error ? e.message : "Sign-in didn't complete.");
+      });
   }, [params, completeSso, router]);
 
   if (error) {
