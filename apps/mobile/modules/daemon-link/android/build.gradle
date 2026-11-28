@@ -1,0 +1,20 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'au.com.rootcauseobd'
+version = '0.1.0'
+
+android {
+  namespace "au.com.rootcauseobd.daemonlink"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+}
+
+dependencies {
+  // Same OkHttp React Native already ships (react-native/gradle/libs.versions.toml).
+  implementation 'com.squareup.okhttp3:okhttp:4.9.2'
+}

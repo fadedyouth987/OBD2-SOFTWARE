@@ -1,0 +1,7 @@
+{
+  "name": "daemon-link",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pinned-TLS WebSocket to the workshop PC's edge daemon over the LAN. Android only.",
+  "main": "index.ts"
+}
