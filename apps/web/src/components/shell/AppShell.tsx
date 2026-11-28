@@ -146,7 +146,17 @@ function DeviceChip() {
     }
   } else if (snapshot.phase === "failed") {
     tone = "bg-danger";
-    text = snapshot.failure?.needsCode ? "Pairing needed" : "Daemon problem";
+    text =
+      snapshot.failure?.kind === "phone"
+        ? "PC not connected"
+        : snapshot.failure?.needsCode
+          ? "Pairing needed"
+          : "Daemon problem";
+    if (snapshot.failure?.kind === "phone") sub = "can't change the car";
+  } else if (snapshot.phase === "waiting" && snapshot.failure?.kind === "phone") {
+    tone = "bg-danger";
+    text = "PC offline";
+    sub = "retrying";
   } else if (snapshot.phase === "waiting") {
     tone = "bg-danger";
     text = "Daemon offline";

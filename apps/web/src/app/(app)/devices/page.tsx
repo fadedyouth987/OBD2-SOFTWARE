@@ -4,7 +4,9 @@ import { AdapterPicker } from "@/components/edge/AdapterPicker";
 import { DaemonPanel } from "@/components/edge/DaemonPanel";
 import { DeviceGuides } from "@/components/edge/DeviceGuides";
 import { LeaseCard } from "@/components/edge/LeaseCard";
+import { PhoneAccessCard } from "@/components/edge/PhoneAccessCard";
 import { PhoneDongleCard } from "@/components/edge/PhoneDongleCard";
+import { PhonePairingCard } from "@/components/edge/PhonePairingCard";
 import { Card, PageHeader } from "@/components/ui";
 
 export default function DevicesPage() {
@@ -16,6 +18,7 @@ export default function DevicesPage() {
       />
       <div className="grid gap-4 xl:grid-cols-[1.2fr_1fr]">
         <div className="space-y-4">
+          <PhonePairingCard />
           <PhoneDongleCard />
           <DaemonPanel />
           <Card title="Adapters" subtitle="Everything the daemon found on this computer.">
@@ -24,6 +27,7 @@ export default function DevicesPage() {
         </div>
         <div className="space-y-4">
           <LeaseCard />
+          <PhoneAccessCard />
           <DeviceGuides />
         </div>
       </div>

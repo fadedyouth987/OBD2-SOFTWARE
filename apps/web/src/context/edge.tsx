@@ -15,6 +15,8 @@ import {
   browserBlocksLocalAccess,
 } from "@/lib/edge-client";
 import { useAuth } from "@/context/auth";
+import { NATIVE_DAEMON_EVENT, nativeApp, nativeDaemonKey } from "@/lib/native";
+import { nativeDaemonTransport, unpairedPhoneTransport } from "@/lib/native-daemon";
 import type {
   AdapterInfo,
   BusProtocol,
@@ -136,6 +138,28 @@ interface EdgeValue {
 
 const EdgeContext = createContext<EdgeValue | null>(null);
 
+/**
+ * Which way this page reaches the daemon:
+ * - "browser": the PC's own browser, loopback WebSocket;
+ * - "app-legacy": an app version without phone access (loopback via adb reverse);
+ * - "app-dev": a dev build with no PC paired (loopback via adb reverse);
+ * - "phone:...": the app's pinned TLS link to the paired PC (or "phone:unpaired").
+ */
+export function transportKey(): string {
+  const app = nativeApp();
+  if (!app) return "browser";
+  if (!app.daemon) return "app-legacy";
+  if (!app.daemon.paired && app.devLoopback) return "app-dev";
+  return nativeDaemonKey(app.daemon);
+}
+
+function transportFor(mode: EdgeMode, key: string) {
+  if (mode === "browser-sim") return browserSimTransport();
+  if (key === "phone:unpaired") return unpairedPhoneTransport();
+  if (key.startsWith("phone:")) return nativeDaemonTransport();
+  return webSocketTransport(EDGE_WS_URL);
+}
+
 function readMode(): EdgeMode {
   try {
     return window.localStorage.getItem(MODE_KEY) === "browser-sim" ? "browser-sim" : "daemon";
@@ -175,9 +199,18 @@ export function EdgeProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => setModeState(readMode()), []);
 
+  // The app pairing with (or forgetting) a PC switches the connection.
+  const [linkKey, setLinkKey] = useState<string | null>(null);
+  useEffect(() => {
+    const read = () => setLinkKey(transportKey());
+    read();
+    window.addEventListener(NATIVE_DAEMON_EVENT, read);
+    return () => window.removeEventListener(NATIVE_DAEMON_EVENT, read);
+  }, []);
+
   // One client per mode; it lives as long as the app shell.
   useEffect(() => {
-    if (mode === null || status === "loading") return;
+    if (mode === null || linkKey === null || status === "loading") return;
     const credential = async (): Promise<Credential | null> => {
       if (mode === "browser-sim") return { token: "browser-demo", method: "sim" };
       const t = tokenRef.current;
@@ -194,11 +227,12 @@ export function EdgeProvider({ children }: { children: React.ReactNode }) {
     };
     const c = new EdgeClient({
       mode,
-      transport: mode === "browser-sim" ? browserSimTransport() : webSocketTransport(EDGE_WS_URL),
+      transport: transportFor(mode, linkKey),
       clientVersion: APP_VERSION,
       credential,
       onSnapshot: setSnapshot,
       localAccessBlocked: browserBlocksLocalAccess,
+      phone: mode === "daemon" && linkKey.startsWith("phone:"),
     });
     setClient(c);
     c.start();
@@ -207,7 +241,7 @@ export function EdgeProvider({ children }: { children: React.ReactNode }) {
       setClient(null);
     };
     // Re-pair when the user signs in or out (status), not on every token refresh.
-  }, [mode, status]);
+  }, [mode, status, linkKey]);
 
   const ready = snapshot.phase === "ready";
 
