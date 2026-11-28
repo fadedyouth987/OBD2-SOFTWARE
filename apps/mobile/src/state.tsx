@@ -1,22 +1,20 @@
 // App-wide state: the API client, the signed-in workspace, and the dongle link.
+// Sign-in happens in the web app (the same page, password or single sign-on); the
+// dongle screens use that session, read from the web view when they open.
 
-import Constants from "expo-constants";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Api, ApiError, type Me } from "./api/client";
 import { clearToken, loadToken, saveToken } from "./api/session";
+import { API_URL } from "./config";
 import { Elm327, type ElmInfo } from "./obd/elm327";
 import type { Transport } from "./obd/transport";
-
-const API_URL =
-  process.env.EXPO_PUBLIC_API_URL ??
-  (Constants.expoConfig?.extra as { apiUrl?: string } | undefined)?.apiUrl ??
-  "http://10.0.2.2:8000"; // the host machine, from the Android emulator
 
 interface AppState {
   api: Api;
   ready: boolean;
   me: Me | null;
-  signIn(email: string, password: string): Promise<void>;
+  /** Uses the web app's session (null when the web app is signed out). */
+  adoptToken(token: string | null): Promise<void>;
   signOut(): Promise<void>;
   refreshMe(): Promise<void>;
   elm: Elm327 | null;
@@ -61,14 +59,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     })();
   }, [api, refreshMe]);
 
-  const signIn = useCallback(
-    async (email: string, password: string) => {
-      const s = await api.login(email.trim(), password);
-      api.setToken(s.access_token);
-      await saveToken(s.access_token);
-      setMe(await api.me());
+  const adoptToken = useCallback(
+    async (token: string | null) => {
+      api.setToken(token);
+      if (token) {
+        await saveToken(token);
+        await refreshMe();
+      } else {
+        await clearToken();
+        setMe(null);
+      }
     },
-    [api],
+    [api, refreshMe],
   );
 
   const detach = useCallback(async () => {
@@ -109,7 +111,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [detach],
   );
 
-  const value: AppState = { api, ready, me, signIn, signOut, refreshMe, elm, link, linkLost, attach, detach };
+  const value: AppState = { api, ready, me, adoptToken, signOut, refreshMe, elm, link, linkLost, attach, detach };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

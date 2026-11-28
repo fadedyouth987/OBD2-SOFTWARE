@@ -1,6 +1,6 @@
-import { APP_FEATURES, access, TIER_NAME, type FeatureKey } from "../src/plan/access";
-import { useApp } from "../src/state";
-import { Badge, Body, Card, Screen } from "../src/ui/kit";
+import { APP_FEATURES, access, TIER_NAME, type FeatureKey } from "../../src/plan/access";
+import { useApp } from "../../src/state";
+import { Badge, Body, Card, Screen } from "../../src/ui/kit";
 
 export default function Plan() {
   const { me } = useApp();

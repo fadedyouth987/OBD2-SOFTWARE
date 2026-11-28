@@ -3,18 +3,12 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View, type 
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { Access } from "../plan/access";
 
-export const color = {
-  bg: "#0d1117",
-  raised: "#161b22",
-  line: "#30363d",
-  text: "#e6edf3",
-  muted: "#9da7b3",
-  accent: "#f97316",
-  ok: "#3fb950",
-  warn: "#d29922",
-  danger: "#f85149",
-  info: "#58a6ff",
-};
+import { color, MIN_TARGET, radius } from "./tokens";
+
+export { color };
+
+/** Web Badge/Banner tones: info is the blue ink, as in the web's tone map. */
+const TONE = { ok: color.ok, warn: color.warn, danger: color.danger, info: color.blueInk, muted: color.muted } as const;
 
 export function Screen({ children, scroll = true }: { children: ReactNode; scroll?: boolean }) {
   const body = <View style={s.body}>{children}</View>;
@@ -65,7 +59,7 @@ export function Button({
 }
 
 export function Badge({ label, tone }: { label: string; tone: "ok" | "warn" | "danger" | "info" | "muted" }) {
-  const c = tone === "muted" ? color.muted : color[tone];
+  const c = TONE[tone];
   return (
     <View style={[s.badge, { borderColor: c }]}>
       <Text style={[s.badgeText, { color: c }]}>{label}</Text>
@@ -75,7 +69,7 @@ export function Badge({ label, tone }: { label: string; tone: "ok" | "warn" | "d
 
 export function Banner({ tone, title, children }: { tone: "ok" | "warn" | "danger" | "info"; title: string; children?: ReactNode }) {
   return (
-    <View style={[s.banner, { borderLeftColor: color[tone] }]}>
+    <View style={[s.banner, { borderLeftColor: TONE[tone] }]}>
       <Text style={s.bannerTitle}>{title}</Text>
       {children ? <Text style={[s.text, { color: color.muted }]}>{children}</Text> : null}
     </View>
@@ -85,7 +79,7 @@ export function Banner({ tone, title, children }: { tone: "ok" | "warn" | "dange
 /** How a feature that isn't available on this plan is shown. No purchase links (Play policy). */
 export function AccessNote({ access }: { access: Access }) {
   if (access.state === "available") return null;
-  if (access.state === "locked") return <Banner tone="info" title={`Included in ${access.unlockWith} and higher plans`}>Your workshop owner can change the plan at app.rootcauseobd.com.au.</Banner>;
+  if (access.state === "locked") return <Banner tone="info" title={`Included from the ${access.unlockWith} plan`}>Your workshop owner can change the plan at app.rootcauseobd.com.au.</Banner>;
   if (access.state === "quota_used") return <Banner tone="warn" title="This month's AI diagnoses are used">{`${access.quota.used} of ${access.quota.limit} used. They reset on the 1st.`}</Banner>;
   return <Banner tone="info" title="Desktop only">{access.why}</Banner>;
 }
@@ -100,17 +94,19 @@ export function Row({ label, value, tone }: { label: string; value: string; tone
 }
 
 const s = StyleSheet.create({
+  // Same shapes as apps/web/src/components/ui.tsx: panel cards with a line border,
+  // rounded-lg controls, 44 px targets, the brand red for primary actions.
   screen: { flex: 1, backgroundColor: color.bg },
-  body: { padding: 16, gap: 12 },
-  card: { backgroundColor: color.raised, borderColor: color.line, borderWidth: 1, borderRadius: 12, padding: 16, gap: 8 },
+  body: { padding: 16, gap: 16 },
+  card: { backgroundColor: color.panel, borderColor: color.line, borderWidth: 1, borderRadius: radius.card, padding: 16, gap: 8 },
   cardTitle: { color: color.text, fontSize: 16, fontWeight: "700" },
-  text: { color: color.text, fontSize: 15, lineHeight: 21 },
-  button: { backgroundColor: color.accent, borderRadius: 10, minHeight: 48, alignItems: "center", justifyContent: "center", paddingHorizontal: 16 },
-  ghost: { backgroundColor: "transparent", borderWidth: 1, borderColor: color.line },
-  buttonText: { color: "#fff", fontSize: 16, fontWeight: "700" },
-  badge: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2, alignSelf: "flex-start" },
-  badgeText: { fontSize: 12, fontWeight: "700" },
-  banner: { backgroundColor: color.raised, borderLeftWidth: 4, borderRadius: 8, padding: 12, gap: 4 },
-  bannerTitle: { color: color.text, fontSize: 15, fontWeight: "700" },
+  text: { color: color.text, fontSize: 14, lineHeight: 20 },
+  button: { backgroundColor: color.accent, borderRadius: radius.control, minHeight: MIN_TARGET, alignItems: "center", justifyContent: "center", paddingHorizontal: 16 },
+  ghost: { backgroundColor: color.raised, borderWidth: 1, borderColor: color.line },
+  buttonText: { color: color.accentText, fontSize: 14, fontWeight: "600" },
+  badge: { borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2, alignSelf: "flex-start" },
+  badgeText: { fontSize: 12, fontWeight: "600" },
+  banner: { backgroundColor: color.raised, borderLeftWidth: 4, borderRadius: radius.control, padding: 12, gap: 4 },
+  bannerTitle: { color: color.text, fontSize: 14, fontWeight: "700" },
   row: { flexDirection: "row", alignItems: "center", paddingVertical: 6, borderBottomColor: color.line, borderBottomWidth: StyleSheet.hairlineWidth },
 });

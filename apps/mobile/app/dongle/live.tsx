@@ -3,10 +3,10 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { useEffect, useRef, useState } from "react";
-import { access } from "../src/plan/access";
-import { readLive, readSupportedPids } from "../src/obd/scan";
-import { useApp } from "../src/state";
-import { AccessNote, Badge, Banner, Body, Button, Card, Row, Screen } from "../src/ui/kit";
+import { access } from "../../src/plan/access";
+import { readLive, readSupportedPids } from "../../src/obd/scan";
+import { useApp } from "../../src/state";
+import { AccessNote, Badge, Banner, Body, Button, Card, Row, Screen } from "../../src/ui/kit";
 
 const MAX_RECORDING_MS = 4 * 60 * 60 * 1000; // 4 hours per recording (D7)
 

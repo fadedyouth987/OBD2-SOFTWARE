@@ -1,14 +1,14 @@
 import { router } from "expo-router";
 import { useState } from "react";
 import { Platform } from "react-native";
-import { ElmError } from "../src/obd/elm327";
-import { Elm327Emulator } from "../src/obd/emulator";
-import type { Transport } from "../src/obd/transport";
-import { useApp } from "../src/state";
-import { connectBle, scanBle, type BleDongle } from "../src/transports/ble";
-import { connectClassic, listPaired, type PairedDongle } from "../src/transports/classic";
-import { ensureBluetoothPermission } from "../src/transports/permissions";
-import { Banner, Body, Button, Card, Screen } from "../src/ui/kit";
+import { ElmError } from "../../src/obd/elm327";
+import { Elm327Emulator } from "../../src/obd/emulator";
+import type { Transport } from "../../src/obd/transport";
+import { useApp } from "../../src/state";
+import { connectBle, scanBle, type BleDongle } from "../../src/transports/ble";
+import { connectClassic, listPaired, type PairedDongle } from "../../src/transports/classic";
+import { ensureBluetoothPermission } from "../../src/transports/permissions";
+import { Banner, Body, Button, Card, Screen } from "../../src/ui/kit";
 
 type Dongle = BleDongle | PairedDongle;
 

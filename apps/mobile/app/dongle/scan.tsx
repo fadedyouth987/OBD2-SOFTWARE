@@ -4,12 +4,12 @@ import type { Readiness } from "@obd2/core/obd-pids";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import { useEffect, useState } from "react";
-import { ApiError, type Diagnosis } from "../src/api/client";
-import { reportHtml } from "../src/report";
-import { access } from "../src/plan/access";
-import { readFreezeFrame, readReadiness, readVin, scanCodes, type CodeScan, type FreezeFrame, type ModuleCodes, type ReadOutcome } from "../src/obd/scan";
-import { useApp } from "../src/state";
-import { AccessNote, Badge, Banner, Body, Button, Card, Row, Screen } from "../src/ui/kit";
+import { ApiError, type Diagnosis } from "../../src/api/client";
+import { reportHtml } from "../../src/report";
+import { access } from "../../src/plan/access";
+import { readFreezeFrame, readReadiness, readVin, scanCodes, type CodeScan, type FreezeFrame, type ModuleCodes, type ReadOutcome } from "../../src/obd/scan";
+import { useApp } from "../../src/state";
+import { AccessNote, Badge, Banner, Body, Button, Card, Row, Screen } from "../../src/ui/kit";
 
 function codeList(o: ReadOutcome<ModuleCodes[]>, empty: string) {
   if (o.status === "not supported") return <Body muted>Not supported by this car.</Body>;
