@@ -28,7 +28,9 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import logging
+import re
 import secrets
 import threading
 import time
@@ -213,10 +215,21 @@ def safe_return_to(value: str | None) -> str:
     return value[:500]
 
 
-def start(*, return_to: str | None, invite_token: str | None) -> dict:
+APP_STATE_PREFIX = "m."
+_CHALLENGE = re.compile(r"^[A-Za-z0-9_-]{43}$")
+
+
+def start(
+    *, return_to: str | None, invite_token: str | None, client_challenge: str | None = None
+) -> dict:
+    """``client_challenge`` (base64url SHA-256 of a verifier the Android app keeps)
+    marks a sign-in started from the app: its state starts with ``m.`` so the web
+    callback page hands it back to the app, and only that verifier can redeem it."""
     cfg = _require()
+    if client_challenge is not None and not _CHALLENGE.match(client_challenge):
+        raise HTTPException(status_code=422, detail="client_challenge must be S256, base64url")
     disc = discovery(cfg)
-    state = secrets.token_urlsafe(32)
+    state = (APP_STATE_PREFIX if client_challenge else "") + secrets.token_urlsafe(32)
     nonce = secrets.token_urlsafe(24)
     verifier = secrets.token_urlsafe(48)
     now = datetime.now(UTC)
@@ -225,8 +238,8 @@ def start(*, return_to: str | None, invite_token: str | None) -> dict:
         conn.execute(
             text(
                 "INSERT INTO oidc_login_states "
-                "(state_hash, nonce, code_verifier, return_to, invite_token, expires_at) "
-                "VALUES (:h, :n, :v, :r, :i, :e)"
+                "(state_hash, nonce, code_verifier, return_to, invite_token, expires_at, "
+                "client_challenge) VALUES (:h, :n, :v, :r, :i, :e, :c)"
             ),
             {
                 "h": _hash(state),
@@ -235,6 +248,7 @@ def start(*, return_to: str | None, invite_token: str | None) -> dict:
                 "r": safe_return_to(return_to),
                 "i": invite_token,
                 "e": now + STATE_TTL,
+                "c": client_challenge,
             },
         )
     params = {
@@ -259,7 +273,7 @@ def _consume_state(state: str) -> dict:
                 text(
                     "UPDATE oidc_login_states SET used_at = :t "
                     "WHERE state_hash = :h AND used_at IS NULL AND expires_at > :t "
-                    "RETURNING nonce, code_verifier, return_to, invite_token"
+                    "RETURNING nonce, code_verifier, return_to, invite_token, client_challenge"
                 ),
                 {"t": now, "h": _hash(state)},
             )
@@ -358,11 +372,25 @@ class SignedIn:
     created: bool
 
 
-def finish(*, code: str, state: str) -> SignedIn:
+def _check_app_verifier(challenge: str | None, verifier: str | None) -> None:
+    if not challenge:
+        return
+    if not verifier or not hmac.compare_digest(
+        _b64(hashlib.sha256(verifier.encode()).digest()), challenge
+    ):
+        inc("auth_oidc_app_verifier_refused")
+        raise HTTPException(
+            status_code=401,
+            detail="This sign-in was started in the RootCause app. Finish it there.",
+        )
+
+
+def finish(*, code: str, state: str, client_verifier: str | None = None) -> SignedIn:
     from app.services.identity import IdentityError, normalize_email
 
     cfg = _require()
     st = _consume_state(state)
+    _check_app_verifier(st.get("client_challenge"), client_verifier)
     tokens = _exchange(cfg, code, st["code_verifier"])
     claims = verify_id_token(cfg, tokens["id_token"], nonce=st["nonce"])
     sub = str(claims["sub"])

@@ -392,3 +392,42 @@ def test_not_configured(client, monkeypatch):
     get_settings.cache_clear()
     assert client.get("/api/v1/auth/oidc/start").status_code == 404
     assert client.get("/api/v1/auth/config").json()["oidc"]["enabled"] is False
+
+
+def _app_start(client, idp, verifier: str, **claims):
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=")
+    start = client.get("/api/v1/auth/oidc/start", params={"client_challenge": challenge.decode()})
+    assert start.status_code == 200, start.text
+    return idp.issue_code(start.json()["authorize_url"], **claims)
+
+
+def test_app_started_sign_in_needs_the_apps_verifier(client, idp):
+    """Android hand-off: a code and state copied off the rootcause:// link are useless."""
+    verifier = "v" * 64
+    code, state = _app_start(client, idp, verifier, email=_email())
+    assert state.startswith("m.")
+    stolen = client.post("/api/v1/auth/oidc/callback", json={"code": code, "state": state})
+    assert stolen.status_code == 401 and "app" in stolen.json()["detail"]
+
+    code, state = _app_start(client, idp, verifier, email=_email())
+    wrong = client.post(
+        "/api/v1/auth/oidc/callback",
+        json={"code": code, "state": state, "client_verifier": "w" * 64},
+    )
+    assert wrong.status_code == 401
+
+    email = _email()
+    code, state = _app_start(client, idp, verifier, email=email)
+    ok = client.post(
+        "/api/v1/auth/oidc/callback",
+        json={"code": code, "state": state, "client_verifier": verifier},
+    )
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["access_token"]
+
+
+def test_web_sign_in_is_unchanged_and_challenge_is_checked(client, idp):
+    res, state = _sign_in(client, idp, email=_email())
+    assert res.status_code == 200 and not state.startswith("m.")
+    bad = client.get("/api/v1/auth/oidc/start", params={"client_challenge": "x" * 42 + "!"})
+    assert bad.status_code == 422
